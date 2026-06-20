@@ -6,6 +6,7 @@ import { archiveFeature, listTasks } from "./archive.js";
 import { loadConfig, setFeatureEnabled } from "./config.js";
 import { runChecks } from "./checks.js";
 import { initializeProject } from "./init.js";
+import { canUseInteractiveKeys, promptMultiSelect, promptSelect } from "./terminal-ui.js";
 import { createManualTestDocument, createPlanWorkbench } from "./workflows.js";
 import type { FeatureKey, OperationResult } from "./types.js";
 
@@ -57,23 +58,25 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
  */
 async function runInteractiveMenu(projectRoot: string): Promise<number> {
   const rl = createInterface({ input, output });
+  const menuOptions = [
+    { value: "1", label: "初始化项目" },
+    { value: "2", label: "项目记忆规则优化" },
+    { value: "3", label: "项目计划优化" },
+    { value: "4", label: "生成人工页面测试文档" },
+    { value: "5", label: "功能开关管理" },
+    { value: "6", label: "项目规则检查" },
+    { value: "7", label: "文档归档" },
+    { value: "8", label: "查看任务状态" },
+    { value: "0", label: "退出" }
+  ];
 
   try {
     let shouldExit = false;
 
     while (!shouldExit) {
-      console.log("\ncode-helper 操作菜单");
-      console.log("1. 初始化项目");
-      console.log("2. 项目记忆规则优化");
-      console.log("3. 项目计划优化");
-      console.log("4. 生成人工页面测试文档");
-      console.log("5. 功能开关管理");
-      console.log("6. 项目规则检查");
-      console.log("7. 文档归档");
-      console.log("8. 查看任务状态");
-      console.log("0. 退出");
-
-      const answer = await rl.question("请选择操作：");
+      const answer = canUseInteractiveKeys(input, output)
+        ? await promptSelect(input, output, "code-helper 操作菜单", menuOptions)
+        : await askTextMenu(rl);
 
       switch (answer.trim()) {
         case "1":
@@ -193,6 +196,29 @@ async function runFeatureMenu(
   rl: ReturnType<typeof createInterface>
 ): Promise<void> {
   const config = await loadConfig(projectRoot);
+
+  if (canUseInteractiveKeys(input, output)) {
+    const selectedFeatures = await promptMultiSelect(
+      input,
+      output,
+      "功能开关管理",
+      FEATURE_KEYS.map((feature) => ({
+        value: feature,
+        label: `${feature} - ${FEATURE_LABELS[feature]}`,
+        checked: config.features[feature].enabled
+      }))
+    );
+
+    for (const feature of selectedFeatures) {
+      if (config.features[feature.value].enabled !== feature.checked) {
+        await setFeatureEnabled(projectRoot, feature.value, feature.checked);
+      }
+    }
+
+    printFeatureList(await loadConfig(projectRoot));
+    return;
+  }
+
   printFeatureList(config);
   const feature = await rl.question("请输入要切换的功能 key：");
   const selectedFeature = feature.trim();
@@ -205,6 +231,25 @@ async function runFeatureMenu(
   const current = config.features[selectedFeature].enabled;
   await setFeatureEnabled(projectRoot, selectedFeature, !current);
   console.log(`已${current ? "关闭" : "启用"}：${FEATURE_LABELS[selectedFeature]}`);
+}
+
+/**
+ * 非 TTY 环境下的文本菜单兜底。
+ * 当终端不支持 raw mode 时，仍允许用户输入数字选择。
+ */
+async function askTextMenu(rl: ReturnType<typeof createInterface>): Promise<string> {
+  console.log("\ncode-helper 操作菜单");
+  console.log("1. 初始化项目");
+  console.log("2. 项目记忆规则优化");
+  console.log("3. 项目计划优化");
+  console.log("4. 生成人工页面测试文档");
+  console.log("5. 功能开关管理");
+  console.log("6. 项目规则检查");
+  console.log("7. 文档归档");
+  console.log("8. 查看任务状态");
+  console.log("0. 退出");
+
+  return rl.question("请选择操作：");
 }
 
 /**
