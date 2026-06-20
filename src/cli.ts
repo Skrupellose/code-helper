@@ -6,7 +6,8 @@ import { archiveFeature, listTasks } from "./archive.js";
 import { loadConfig, setFeatureEnabled } from "./config.js";
 import { runChecks } from "./checks.js";
 import { initializeProject } from "./init.js";
-import { canUseInteractiveKeys, promptMultiSelect, promptSelect } from "./terminal-ui.js";
+import { normalizeDroppedPath } from "./input-utils.js";
+import { canUseInteractiveKeys, promptContinue, promptMultiSelect, promptSelect } from "./terminal-ui.js";
 import { createManualTestDocument, createPlanWorkbench } from "./workflows.js";
 import type { FeatureKey, OperationResult } from "./types.js";
 
@@ -74,45 +75,91 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
     let shouldExit = false;
 
     while (!shouldExit) {
-      const answer = canUseInteractiveKeys(input, output)
+      const useKeyMenu = canUseInteractiveKeys(input, output);
+      const answer = useKeyMenu
         ? await promptSelect(input, output, "code-helper 操作菜单", menuOptions)
         : await askTextMenu(rl);
 
       switch (answer.trim()) {
         case "1":
-          await runInit(projectRoot);
+          await runMenuAction("初始化项目", () => runInit(projectRoot));
+          await pauseAfterMenuAction(useKeyMenu);
           break;
         case "2":
-          await runInit(projectRoot);
-          console.log("已刷新项目记忆规则模板。请根据当前变更定向修改 .agent/user-rules/ 中的专题规则。");
+          await runMenuAction("项目记忆规则优化", async () => {
+            await runInit(projectRoot);
+            console.log("已刷新项目记忆规则模板。请根据当前变更定向修改 code-helper-docs/user-rules/ 中的专题规则。");
+            return 0;
+          });
+          await pauseAfterMenuAction(useKeyMenu);
           break;
         case "3": {
-          const requirementPath = await rl.question("请输入需求文档相对路径：");
-          const featureName = await rl.question("请输入功能名称（可留空，默认取需求文件名）：");
-          await runPlan(projectRoot, [requirementPath.trim(), featureName.trim()].filter(Boolean));
+          printInputHint("项目计划优化需要需求文档路径，支持直接把文件拖到终端。输入 0 或直接回车返回。");
+          const requirementPath = await askRequiredMenuInput(rl, "请输入或拖拽需求文档路径：");
+          if (requirementPath === undefined) {
+            console.log("已取消项目计划优化，返回主菜单。");
+            break;
+          }
+
+          const featureName = await askOptionalMenuInput(rl, "请输入中文功能名称（可留空，默认取需求标题或中文文件名；输入 0 返回）：");
+          if (featureName === undefined) {
+            console.log("已取消项目计划优化，返回主菜单。");
+            break;
+          }
+
+          await runMenuAction("项目计划优化", () =>
+            runPlan(projectRoot, [normalizeDroppedPath(requirementPath, projectRoot), featureName].filter(Boolean))
+          );
+          await pauseAfterMenuAction(useKeyMenu);
           break;
         }
         case "4": {
-          const featureName = await rl.question("请输入功能名称：");
-          const title = await rl.question("请输入测试文档标题（可留空）：");
-          await runManualTest(projectRoot, [featureName.trim(), title.trim()].filter(Boolean));
+          printInputHint("生成人工页面测试文档需要功能名称。输入 0 或直接回车返回。");
+          const featureName = await askRequiredMenuInput(rl, "请输入功能名称：");
+          if (featureName === undefined) {
+            console.log("已取消生成人工页面测试文档，返回主菜单。");
+            break;
+          }
+
+          const title = await askOptionalMenuInput(rl, "请输入测试文档标题（可留空；输入 0 返回）：");
+          if (title === undefined) {
+            console.log("已取消生成人工页面测试文档，返回主菜单。");
+            break;
+          }
+
+          await runMenuAction("生成人工页面测试文档", () =>
+            runManualTest(projectRoot, [featureName, title].filter(Boolean))
+          );
+          await pauseAfterMenuAction(useKeyMenu);
           break;
         }
         case "5":
-          await runFeatureMenu(projectRoot, rl);
+          if (await runFeatureMenu(projectRoot, rl)) {
+            await pauseAfterMenuAction(useKeyMenu);
+          }
           break;
         case "6":
-          await runCheck(projectRoot);
+          await runMenuAction("项目规则检查", () => runCheck(projectRoot));
+          await pauseAfterMenuAction(useKeyMenu);
           break;
         case "7": {
-          const featureName = await rl.question("请输入要归档的功能名称：");
-          await runArchive(projectRoot, [featureName.trim()].filter(Boolean));
+          printInputHint("文档归档需要中文功能名称，例如 订单管理升级。输入 0 或直接回车返回。");
+          const featureName = await askRequiredMenuInput(rl, "请输入要归档的功能名称：");
+          if (featureName === undefined) {
+            console.log("已取消文档归档，返回主菜单。");
+            break;
+          }
+
+          await runMenuAction("文档归档", () => runArchive(projectRoot, [featureName]));
+          await pauseAfterMenuAction(useKeyMenu);
           break;
         }
         case "8":
-          await runTasks(projectRoot, []);
+          await runMenuAction("查看任务状态", () => runTasks(projectRoot, []));
+          await pauseAfterMenuAction(useKeyMenu);
           break;
         case "0":
+          console.log("已退出 code-helper。");
           shouldExit = true;
           break;
         default:
@@ -124,6 +171,45 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
   } finally {
     rl.close();
   }
+}
+
+/**
+ * TTY 菜单动作结束后暂停，避免下一轮菜单清屏导致结果一闪而过。
+ * 非 TTY 兜底模式不暂停，保证管道和脚本执行不会被阻塞。
+ */
+async function pauseAfterMenuAction(enabled: boolean): Promise<void> {
+  if (enabled && canUseInteractiveKeys(input, output)) {
+    await promptContinue(input, output);
+  }
+}
+
+/**
+ * 包装菜单动作的执行回显。
+ * 用户按回车确认后，会立即看到动作开始和完成状态，避免误以为没有响应。
+ */
+async function runMenuAction(label: string, action: () => Promise<number>): Promise<void> {
+  console.log(`\n▶ 开始：${label}`);
+
+  try {
+    const exitCode = await action();
+
+    if (exitCode === 0) {
+      console.log(`✓ 完成：${label}`);
+    } else {
+      console.log(`✗ 失败：${label}（退出码 ${exitCode}）`);
+    }
+  } catch (error) {
+    console.log(`✗ 失败：${label}`);
+    throw error;
+  }
+}
+
+/**
+ * 打印需要用户输入的动作提示。
+ * 这让用户能区分“正在等待输入”和“程序没有响应”。
+ */
+function printInputHint(message: string): void {
+  console.log(`\n请输入信息：${message}`);
 }
 
 /**
@@ -194,7 +280,7 @@ async function runFeatures(projectRoot: string, args: string[]): Promise<number>
 async function runFeatureMenu(
   projectRoot: string,
   rl: ReturnType<typeof createInterface>
-): Promise<void> {
+): Promise<boolean> {
   const config = await loadConfig(projectRoot);
 
   if (canUseInteractiveKeys(input, output)) {
@@ -209,17 +295,63 @@ async function runFeatureMenu(
       }))
     );
 
-    for (const feature of selectedFeatures) {
+    if (selectedFeatures.cancelled) {
+      console.log("已取消功能开关修改，返回主菜单。");
+      return false;
+    }
+
+    console.log(`\n▶ 开始：功能开关管理`);
+    let changedCount = 0;
+
+    for (const feature of selectedFeatures.options) {
       if (config.features[feature.value].enabled !== feature.checked) {
         await setFeatureEnabled(projectRoot, feature.value, feature.checked);
+        changedCount += 1;
       }
     }
 
+    console.log(`已保存功能开关，变更 ${changedCount} 项。`);
     printFeatureList(await loadConfig(projectRoot));
-    return;
+    console.log(`✓ 完成：功能开关管理`);
+    return true;
   }
 
   await runTextFeatureMenu(projectRoot, rl);
+  return false;
+}
+
+/**
+ * 读取必填菜单输入。
+ * 空回车或输入 0 都表示返回上一级，避免用户误入流程后无法退出。
+ */
+async function askRequiredMenuInput(
+  rl: ReturnType<typeof createInterface>,
+  question: string
+): Promise<string | undefined> {
+  const answer = (await askQuestionOrDefault(rl, question, "0")).trim();
+
+  if (answer === "" || answer === "0") {
+    return undefined;
+  }
+
+  return answer;
+}
+
+/**
+ * 读取可选菜单输入。
+ * 空回车表示接受默认值，输入 0 表示返回上一级。
+ */
+async function askOptionalMenuInput(
+  rl: ReturnType<typeof createInterface>,
+  question: string
+): Promise<string | undefined> {
+  const answer = (await askQuestionOrDefault(rl, question, "")).trim();
+
+  if (answer === "0") {
+    return undefined;
+  }
+
+  return answer;
 }
 
 /**
@@ -291,15 +423,46 @@ async function askQuestionOrDefault(
   question: string,
   defaultAnswer: string
 ): Promise<string> {
-  try {
-    return await rl.question(question);
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ERR_USE_AFTER_CLOSE") {
-      return defaultAnswer;
-    }
+  return new Promise<string>((resolve, reject) => {
+    let settled = false;
 
-    throw error;
-  }
+    /**
+     * stdin 提前结束时，readline 在部分 Node 版本不会让 question promise settle。
+     * 这里主动监听 close，并用默认值返回，避免交互流程悬挂。
+     */
+    const onClose = (): void => {
+      if (!settled) {
+        settled = true;
+        resolve(defaultAnswer);
+      }
+    };
+
+    rl.once("close", onClose);
+
+    rl.question(question)
+      .then((answer) => {
+        if (!settled) {
+          settled = true;
+          rl.off("close", onClose);
+          resolve(answer);
+        }
+      })
+      .catch((error: unknown) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        rl.off("close", onClose);
+
+        if (error instanceof Error && "code" in error && error.code === "ERR_USE_AFTER_CLOSE") {
+          resolve(defaultAnswer);
+          return;
+        }
+
+        reject(error);
+      });
+  });
 }
 
 /**
@@ -314,7 +477,8 @@ async function runPlan(projectRoot: string, args: string[]): Promise<number> {
     return 1;
   }
 
-  const operations = await createPlanWorkbench({ projectRoot, requirementPath, featureName });
+  const normalizedRequirementPath = normalizeDroppedPath(requirementPath, projectRoot);
+  const operations = await createPlanWorkbench({ projectRoot, requirementPath: normalizedRequirementPath, featureName });
   printOperations(operations);
   return 0;
 }
@@ -327,7 +491,7 @@ async function runManualTest(projectRoot: string, args: string[]): Promise<numbe
   const [featureName, title] = args;
 
   if (!featureName) {
-    console.error("缺少功能名称。用法：code-helper manual-test <功能名称> [标题]");
+    console.error("缺少功能名称。用法：code-helper manual-test <中文功能名> [标题]");
     return 1;
   }
 
@@ -343,7 +507,7 @@ async function runArchive(projectRoot: string, args: string[]): Promise<number> 
   const [featureName] = args;
 
   if (!featureName) {
-    console.error("缺少功能名称。用法：code-helper archive <功能名称>");
+    console.error("缺少功能名称。用法：code-helper archive <中文功能名>");
     return 1;
   }
 
@@ -436,9 +600,9 @@ function printHelp(): void {
   code-helper features list           查看功能开关
   code-helper features enable <key>   启用功能
   code-helper features disable <key>  关闭功能
-  code-helper plan <需求文档> [名称]   生成项目计划工作台
-  code-helper manual-test <名称> [标题] 生成页面手工测试文档
-  code-helper archive <名称>           将功能文档移动到 archive 并识别为已结束
+  code-helper plan <需求文档> [中文功能名] 生成项目计划工作台
+  code-helper manual-test <中文功能名> [标题] 生成页面手工测试文档
+  code-helper archive <中文功能名>       将功能文档移动到 archive 并识别为已结束
   code-helper tasks [--json]           查看 active / archived / mixed 任务
 `);
 }

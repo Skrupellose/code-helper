@@ -1,6 +1,6 @@
 /**
  * code-helper 支持的功能开关名称。
- * 这些 key 会直接写入 `.agent/code-helper/config.json`，因此需要保持稳定。
+ * 这些 key 会直接写入 `.code-helper/config.json`，因此需要保持稳定。
  */
 export type FeatureKey =
   | "memoryTuning"

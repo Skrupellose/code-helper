@@ -1,7 +1,7 @@
 node_modules/
 dist/
 example/
-.agent/code-helper/checks/*.json
-.agent/code-helper/state.json
+.code-helper/checks/*.json
+.code-helper/state.json
 .DS_Store
 *.log

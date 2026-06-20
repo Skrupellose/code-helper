@@ -19,6 +19,15 @@ export interface MultiSelectOption<T extends string> extends SelectOption<T> {
 }
 
 /**
+ * 多选菜单结果。
+ * cancelled 表示用户按 Esc 返回，不保存任何更改。
+ */
+export interface MultiSelectResult<T extends string> {
+  options: Array<MultiSelectOption<T>>;
+  cancelled: boolean;
+}
+
+/**
  * 判断当前进程是否支持原始按键交互。
  * 非 TTY 环境例如 CI、管道输入或日志采集场景，应回退到普通文本输入。
  */
@@ -111,12 +120,12 @@ export async function promptMultiSelect<T extends string>(
   output: WriteStream,
   title: string,
   options: Array<MultiSelectOption<T>>
-): Promise<Array<MultiSelectOption<T>>> {
+): Promise<MultiSelectResult<T>> {
   let selectedIndex = 0;
   const nextOptions = options.map((option) => ({ ...option }));
 
   return withRawMode(input, output, () => {
-    return new Promise<Array<MultiSelectOption<T>>>((resolve) => {
+    return new Promise<MultiSelectResult<T>>((resolve) => {
       /**
        * 重新绘制多选菜单。
        * checked 用 [x] / [ ] 展示，用户可以直接看到切换结果。
@@ -125,7 +134,7 @@ export async function promptMultiSelect<T extends string>(
         cursorTo(output, 0, 0);
         clearScreenDown(output);
         output.write(`${title}\n`);
-        output.write("使用 ↑/↓ 移动，空格切换，回车保存，Ctrl+C 退出。\n\n");
+        output.write("使用 ↑/↓ 移动，空格切换，回车保存，Esc 返回，Ctrl+C 退出。\n\n");
 
         for (const [index, option] of nextOptions.entries()) {
           const pointer = index === selectedIndex ? ">" : " ";
@@ -164,7 +173,13 @@ export async function promptMultiSelect<T extends string>(
 
         if (key.name === "return") {
           cleanup();
-          resolve(nextOptions);
+          resolve({ options: nextOptions, cancelled: false });
+          return;
+        }
+
+        if (key.name === "escape") {
+          cleanup();
+          resolve({ options, cancelled: true });
         }
       };
 
@@ -178,6 +193,44 @@ export async function promptMultiSelect<T extends string>(
 
       input.on("keypress", onKeypress);
       render();
+    });
+  });
+}
+
+/**
+ * 等待用户确认后继续。
+ * 用于菜单动作结束后暂停，避免下一次菜单重绘把执行结果立即清掉。
+ */
+export async function promptContinue(input: ReadStream, output: WriteStream, message = "按回车返回菜单..."): Promise<void> {
+  return withRawMode(input, output, () => {
+    return new Promise<void>((resolve) => {
+      output.write(`\n${message}`);
+
+      /**
+       * 处理继续按键。
+       * 回车、空格或 Esc 都视为确认返回菜单。
+       */
+      const onKeypress = (_text: string, key: { name?: string; ctrl?: boolean }): void => {
+        if (key.ctrl && key.name === "c") {
+          cleanup();
+          process.exit(130);
+        }
+
+        if (key.name === "return" || key.name === "space" || key.name === "escape") {
+          cleanup();
+          resolve();
+        }
+      };
+
+      /**
+       * 清理按键监听并换行，避免下一次菜单贴在提示后面。
+       */
+      const cleanup = (): void => {
+        input.off("keypress", onKeypress);
+        output.write("\n");
+      };
+
+      input.on("keypress", onKeypress);
     });
   });
 }

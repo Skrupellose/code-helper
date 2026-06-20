@@ -3,6 +3,12 @@ import { ensureTrailingNewline, projectPath, readTextIfExists, writeText } from 
 import type { CodeHelperConfig, FeatureKey } from "./types.js";
 
 /**
+ * 旧版工具工作区配置路径。
+ * 新版把内部状态保留在 `.code-helper`，把可读协作文档迁移到 `code-helper-docs`。
+ */
+const LEGACY_WORKSPACE_DIRECTORY = ".agent/code-helper";
+
+/**
  * 返回 code-helper 配置文件相对路径。
  * 该路径固定在工作区下，方便用户清楚区分工具状态和业务文档。
  */
@@ -16,7 +22,8 @@ export function getConfigRelativePath(): string {
  */
 export async function loadConfig(projectRoot: string): Promise<CodeHelperConfig> {
   const configPath = projectPath(projectRoot, getConfigRelativePath());
-  const raw = await readTextIfExists(configPath);
+  const raw = await readTextIfExists(configPath)
+    ?? await readTextIfExists(projectPath(projectRoot, `${LEGACY_WORKSPACE_DIRECTORY}/config.json`));
 
   if (raw === undefined) {
     return cloneDefaultConfig();
@@ -65,6 +72,14 @@ export function mergeConfig(input: Partial<CodeHelperConfig>): CodeHelperConfig 
   merged.directories = {
     ...merged.directories,
     ...input.directories
+  };
+  /**
+   * code-helper 目录采用新布局。
+   * 旧配置中的 `.agent/*` 或早期 `.code-helper/*` 文档路径只作为迁移输入，不继续作为写入目标。
+   */
+  merged.directories = {
+    ...merged.directories,
+    ...DEFAULT_CONFIG.directories
   };
 
   for (const feature of FEATURE_KEYS) {

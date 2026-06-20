@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { loadConfig } from "./config.js";
 import { ensureDirectory, projectPath, writeText } from "./fs-utils.js";
 import type { CodeHelperConfig, OperationResult } from "./types.js";
-import { normalizeFeatureName } from "./workflows.js";
+import { normalizeDocumentName, normalizeFeatureName } from "./workflows.js";
 
 /**
  * 任务文档的状态。
@@ -34,21 +34,44 @@ export async function archiveFeature(projectRoot: string, rawFeatureName: string
     throw new Error("文档归档功能已关闭，请先执行 `code-helper features enable documentArchive`。");
   }
 
-  const featureName = normalizeFeatureName(rawFeatureName);
+  const featureNames = getArchiveFeatureNameCandidates(rawFeatureName);
+  const recordFeatureName = featureNames[0];
   const operations: OperationResult[] = [];
-  const moves = getArchiveMoves(config, featureName);
+  const moves = featureNames.flatMap((featureName) => getArchiveMoves(config, featureName));
 
   for (const move of moves) {
     operations.push(await movePathIfExists(projectRoot, move.from, move.to));
   }
 
   if (!operations.some((operation) => isKnownArchivedOperation(operation))) {
-    throw new Error(`未找到功能文档：${featureName}。请确认 plan-doc、result-doc 或 status-doc 中存在对应任务。`);
+    throw new Error(`未找到功能文档：${rawFeatureName}。请确认 plan-doc、result-doc 或 status-doc 中存在对应任务。`);
   }
 
-  operations.push(await writeArchiveRecord(projectRoot, config, featureName, operations));
+  operations.push(await writeArchiveRecord(projectRoot, config, recordFeatureName, operations));
 
   return operations;
+}
+
+/**
+ * 生成归档任务名候选。
+ * 新文档强制中文命名；旧项目可能仍有英文 feature 文档，因此归档时保留旧英文兼容。
+ */
+function getArchiveFeatureNameCandidates(rawFeatureName: string): string[] {
+  const legacyName = normalizeFeatureName(rawFeatureName);
+  const chineseName = normalizeDocumentName(rawFeatureName, "功能文档");
+  const orderedNames = containsChinese(rawFeatureName)
+    ? [chineseName, legacyName]
+    : [legacyName, chineseName];
+
+  return [...new Set(orderedNames)];
+}
+
+/**
+ * 判断输入是否包含中文。
+ * 归档命令用它决定中文新规则和英文旧规则的匹配优先级。
+ */
+function containsChinese(value: string): boolean {
+  return /\p{Script=Han}/u.test(value);
 }
 
 /**
@@ -87,6 +110,10 @@ function getArchiveMoves(config: CodeHelperConfig, featureName: string): Array<{
     {
       from: join(config.directories.resultDoc, featureName),
       to: join(config.directories.resultDoc, "archive", featureName)
+    },
+    {
+      from: join(config.directories.statusDoc, `${featureName}-状态.md`),
+      to: join(config.directories.statusDoc, "archive", `${featureName}-状态.md`)
     },
     {
       from: join(config.directories.statusDoc, `${featureName}-status.md`),
@@ -252,13 +279,30 @@ async function collectStatusDocuments(
   const files = await safeReadDirectory(projectPath(projectRoot, directory));
 
   for (const file of files) {
-    if (!file.endsWith("-status.md")) {
+    const featureName = extractStatusFeatureName(file);
+
+    if (featureName === undefined) {
       continue;
     }
 
-    const featureName = file.slice(0, -"-status.md".length);
     addArtifact(tasks, featureName, join(directory, file), archived);
   }
+}
+
+/**
+ * 从状态文档文件名中提取任务名。
+ * 新文档使用中文 `-状态.md`，旧文档的 `-status.md` 仍兼容识别。
+ */
+function extractStatusFeatureName(file: string): string | undefined {
+  if (file.endsWith("-状态.md")) {
+    return file.slice(0, -"-状态.md".length);
+  }
+
+  if (file.endsWith("-status.md")) {
+    return file.slice(0, -"-status.md".length);
+  }
+
+  return undefined;
 }
 
 /**

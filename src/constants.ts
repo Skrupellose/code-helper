@@ -45,11 +45,11 @@ export const DEFAULT_CONFIG: CodeHelperConfig = {
     claude: false
   },
   directories: {
-    workspace: ".agent/code-helper",
-    userRules: ".agent/user-rules",
-    planDoc: ".agent/plan-doc",
-    resultDoc: ".agent/result-doc",
-    statusDoc: ".agent/status-doc"
+    workspace: ".code-helper",
+    userRules: "code-helper-docs/user-rules",
+    planDoc: "code-helper-docs/plan-doc",
+    resultDoc: "code-helper-docs/result-doc",
+    statusDoc: "code-helper-docs/status-doc"
   },
   features: {
     memoryTuning: { enabled: true },

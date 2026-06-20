@@ -1,8 +1,15 @@
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 
 import { loadConfig } from "./config.js";
 import { projectPath, readTextIfExists, writeTextIfMissing } from "./fs-utils.js";
 import type { OperationResult } from "./types.js";
+
+/**
+ * 新版生成文档固定使用中文文件名。
+ * 目录名仍沿用配置路径，避免破坏既有 .agent 目录约定。
+ */
+export const RESULT_RECORD_FILE_NAME = "实施记录.md";
+export const MANUAL_TEST_FILE_NAME = "手工测试.md";
 
 /**
  * 计划工作台生成参数。
@@ -17,6 +24,7 @@ export interface PlanWorkbenchOptions {
 /**
  * 手工测试文档生成参数。
  * featureName 用于决定输出目录，title 用于文档标题。
+ * 新生成的文档路径会强制使用中文名称，避免 docs 区域继续出现英文任务文档。
  */
 export interface ManualTestOptions {
   projectRoot: string;
@@ -30,18 +38,20 @@ export interface ManualTestOptions {
  */
 export async function createPlanWorkbench(options: PlanWorkbenchOptions): Promise<OperationResult[]> {
   const config = await loadConfig(options.projectRoot);
-  const requirementAbsolutePath = projectPath(options.projectRoot, options.requirementPath);
+  const requirementAbsolutePath = isAbsolute(options.requirementPath)
+    ? options.requirementPath
+    : projectPath(options.projectRoot, options.requirementPath);
   const requirement = await readTextIfExists(requirementAbsolutePath);
 
   if (requirement === undefined) {
     throw new Error(`需求文档不存在：${options.requirementPath}`);
   }
 
-  const featureName = normalizeFeatureName(options.featureName ?? basename(options.requirementPath, ".md"));
+  const featureName = inferChineseFeatureName(options.featureName, options.requirementPath, requirement);
   const planPath = projectPath(options.projectRoot, join(config.directories.planDoc, `${featureName}.md`));
-  const resultPath = projectPath(options.projectRoot, join(config.directories.resultDoc, featureName, "implementation.md"));
-  const statusPath = projectPath(options.projectRoot, join(config.directories.statusDoc, `${featureName}-status.md`));
-  const manualTestPath = projectPath(options.projectRoot, join(config.directories.resultDoc, featureName, "manual-test.md"));
+  const resultPath = projectPath(options.projectRoot, join(config.directories.resultDoc, featureName, RESULT_RECORD_FILE_NAME));
+  const statusPath = projectPath(options.projectRoot, join(config.directories.statusDoc, `${featureName}-状态.md`));
+  const manualTestPath = projectPath(options.projectRoot, join(config.directories.resultDoc, featureName, MANUAL_TEST_FILE_NAME));
 
   return [
     await writeTextIfMissing(planPath, renderPlanDocument(featureName, options.requirementPath, requirement)),
@@ -57,8 +67,8 @@ export async function createPlanWorkbench(options: PlanWorkbenchOptions): Promis
  */
 export async function createManualTestDocument(options: ManualTestOptions): Promise<OperationResult> {
   const config = await loadConfig(options.projectRoot);
-  const featureName = normalizeFeatureName(options.featureName);
-  const targetPath = projectPath(options.projectRoot, join(config.directories.resultDoc, featureName, "manual-test.md"));
+  const featureName = normalizeDocumentName(options.featureName, "页面功能");
+  const targetPath = projectPath(options.projectRoot, join(config.directories.resultDoc, featureName, MANUAL_TEST_FILE_NAME));
 
   return writeTextIfMissing(
     targetPath,
@@ -79,6 +89,69 @@ export function normalizeFeatureName(value: string): string {
     .replace(/^-|-$/gu, "");
 
   return normalized.length > 0 ? normalized : "feature";
+}
+
+/**
+ * 把功能名转换成中文文档名。
+ * 如果输入没有中文字符，则使用中文兜底名，避免新生成的 docs 文档继续使用英文命名。
+ */
+export function normalizeDocumentName(value: string, fallbackName: string): string {
+  const normalized = value
+    .trim()
+    .replace(/\s+/gu, "-")
+    .replace(/[^\p{Script=Han}\p{N}_-]/gu, "")
+    .replace(/-+/gu, "-")
+    .replace(/^-|-$/gu, "");
+
+  if (normalized !== "" && containsChinese(normalized)) {
+    return normalized;
+  }
+
+  return fallbackName;
+}
+
+/**
+ * 推断中文功能名。
+ * 优先使用用户输入的中文功能名，其次使用需求文档中的中文一级标题，最后用中文兜底名。
+ */
+function inferChineseFeatureName(featureName: string | undefined, requirementPath: string, requirement: string): string {
+  const titleFallback = extractChineseMarkdownTitle(requirement) ?? normalizeDocumentName(basename(requirementPath, ".md"), "功能计划");
+
+  if (featureName !== undefined && featureName.trim() !== "") {
+    return normalizeDocumentName(featureName, titleFallback);
+  }
+
+  return titleFallback;
+}
+
+/**
+ * 从 Markdown 文档中提取第一个中文标题。
+ * 这让用户拖拽英文文件名的需求文档时，也能生成中文功能文档名。
+ */
+function extractChineseMarkdownTitle(content: string): string | undefined {
+  const lines = content.split("\n");
+
+  for (const line of lines) {
+    const match = line.match(/^#\s+(.+)$/u);
+
+    if (!match) {
+      continue;
+    }
+
+    const title = normalizeDocumentName(match[1], "");
+    if (title !== "") {
+      return title;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * 判断字符串中是否包含中文字符。
+ */
+function containsChinese(value: string): boolean {
+  return /\p{Script=Han}/u.test(value);
 }
 
 /**
@@ -123,7 +196,7 @@ ${excerpt}
 |---|---|---|---|
 | 基础能力 |  | 待根据需求细化 | 状态：未开始 |
 | 数据与接口 |  | 待根据需求细化 | 状态：未开始 |
-| 组件与页面 |  | 待根据需求细化，页面验收需写 manual-test.md | 状态：未开始 |
+| 组件与页面 |  | 待根据需求细化，页面验收需写 ${MANUAL_TEST_FILE_NAME} | 状态：未开始 |
 | 逻辑测试 |  | 待根据纯逻辑模块补单元或集成测试 | 状态：未开始 |
 | 手工回归 |  | 待用户按手工测试文档执行 | 状态：未开始 |
 
@@ -136,9 +209,9 @@ ${excerpt}
 
 ## 状态跟踪
 
-- 当前状态文件：\`.agent/status-doc/${featureName}-status.md\`
-- 执行记录目录：\`.agent/result-doc/${featureName}/\`
-- 手工测试文档：\`.agent/result-doc/${featureName}/manual-test.md\`
+- 当前状态文件：\`code-helper-docs/status-doc/${featureName}-状态.md\`
+- 执行记录目录：\`code-helper-docs/result-doc/${featureName}/\`
+- 手工测试文档：\`code-helper-docs/result-doc/${featureName}/${MANUAL_TEST_FILE_NAME}\`
 `;
 }
 
@@ -153,6 +226,10 @@ function renderResultDocument(featureName: string): string {
 
 - 待补充任务背景、用户反馈或需求来源。
 
+## 实施总结
+
+- 待用中文总结本节点完成了什么、未完成什么、下一步是什么。
+
 ## 实现
 
 - 待记录本节点实际改动。
@@ -160,7 +237,7 @@ function renderResultDocument(featureName: string): string {
 ## 验证
 
 - 纯逻辑测试：待记录命令和结论。
-- 页面测试：不由工具执行自动化测试，见 \`manual-test.md\`。
+- 页面测试：不由工具执行自动化测试，见 \`${MANUAL_TEST_FILE_NAME}\`。
 
 ## 风险与后续
 
@@ -196,9 +273,9 @@ function renderStatusDocument(featureName: string): string {
 
 ## 关键索引
 
-- 执行计划：\`.agent/plan-doc/${featureName}.md\`
-- 实施记录：\`.agent/result-doc/${featureName}/implementation.md\`
-- 手工测试：\`.agent/result-doc/${featureName}/manual-test.md\`
+- 执行计划：\`code-helper-docs/plan-doc/${featureName}.md\`
+- 实施记录：\`code-helper-docs/result-doc/${featureName}/${RESULT_RECORD_FILE_NAME}\`
+- 手工测试：\`code-helper-docs/result-doc/${featureName}/${MANUAL_TEST_FILE_NAME}\`
 
 ## 仍会影响后续判断的风险点
 
