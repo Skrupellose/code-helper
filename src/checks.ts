@@ -211,7 +211,7 @@ async function checkArchiveState(projectRoot: string, config: CodeHelperConfig):
         code: "missing-archive-directory",
         message: `归档目录不存在：${directory}`,
         path: directory,
-        suggestion: "运行 `npx code-helper init` 创建文档归档目录。"
+        suggestion: "运行 `npx @skrupellose/code-helper init` 创建文档归档目录。"
       });
     }
   }
@@ -222,7 +222,7 @@ async function checkArchiveState(projectRoot: string, config: CodeHelperConfig):
         level: "warning",
         code: "mixed-task-archive-state",
         message: `任务同时存在活动文档和归档文档：${task.featureName}`,
-        suggestion: "确认该任务是否已经结束；如果已结束，运行 `npx code-helper archive <中文功能名>` 或手动补齐归档。"
+        suggestion: "确认该任务是否已经结束；如果已结束，运行 `npx @skrupellose/code-helper archive <中文功能名>` 或手动补齐归档。"
       });
     }
   }
@@ -244,7 +244,7 @@ async function checkConfig(config: CodeHelperConfig): Promise<CheckIssue[]> {
         code: "missing-feature-toggle",
         message: `配置缺少功能开关：${feature}`,
         path: ".code-helper/config.json",
-        suggestion: "重新运行 `npx code-helper init`，让工具补齐默认配置。"
+        suggestion: "重新运行 `npx @skrupellose/code-helper init`，让工具补齐默认配置。"
       });
     }
   }
@@ -272,7 +272,7 @@ async function checkEntryDocuments(projectRoot: string, config: CodeHelperConfig
         code: "missing-entry-document",
         message: `入口文档不存在：${entryFile}`,
         path: entryFile,
-        suggestion: "运行 `npx code-helper init` 创建入口文档。"
+        suggestion: "运行 `npx @skrupellose/code-helper init` 创建入口文档。"
       });
       continue;
     }
@@ -283,7 +283,7 @@ async function checkEntryDocuments(projectRoot: string, config: CodeHelperConfig
         code: "missing-managed-block",
         message: `入口文档缺少 code-helper 受控区块：${entryFile}`,
         path: entryFile,
-        suggestion: "运行 `npx code-helper init` 追加受控索引区块。"
+        suggestion: "运行 `npx @skrupellose/code-helper init` 追加受控索引区块。"
       });
     }
   }
@@ -309,7 +309,7 @@ async function checkRuleDocuments(projectRoot: string, config: CodeHelperConfig)
       code: "missing-user-rules-directory",
       message: "专题规则目录不存在",
       path: config.directories.userRules,
-      suggestion: "运行 `npx code-helper init` 创建专题规则目录和默认规则。"
+      suggestion: "运行 `npx @skrupellose/code-helper init` 创建专题规则目录和默认规则。"
     });
     return issues;
   }
@@ -322,7 +322,7 @@ async function checkRuleDocuments(projectRoot: string, config: CodeHelperConfig)
       code: "empty-user-rules-directory",
       message: "专题规则目录中没有 Markdown 规则文件",
       path: config.directories.userRules,
-      suggestion: "运行 `npx code-helper init` 安装默认专题规则。"
+      suggestion: "运行 `npx @skrupellose/code-helper init` 安装默认专题规则。"
     });
   }
 
@@ -367,7 +367,7 @@ async function checkPlanDirectories(projectRoot: string, config: CodeHelperConfi
         code: "missing-workbench-directory",
         message: `计划文档目录不存在：${directory}`,
         path: directory,
-        suggestion: "运行 `npx code-helper init` 创建计划、结果和状态目录。"
+        suggestion: "运行 `npx @skrupellose/code-helper init` 创建计划、结果和状态目录。"
       });
     }
   }
@@ -394,7 +394,7 @@ async function checkTestingPolicy(projectRoot: string, config: CodeHelperConfig)
         code: "missing-testing-policy",
         message: "缺少测试策略规范",
         path: policyPath,
-        suggestion: "运行 `npx code-helper init` 安装默认测试策略规范。"
+        suggestion: "运行 `npx @skrupellose/code-helper init` 安装默认测试策略规范。"
       }
     ];
   }

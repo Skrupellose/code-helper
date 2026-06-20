@@ -1,4 +1,4 @@
 #!/bin/sh
 # code-helper 可选 pre-commit 模板。
 # 启用方式：复制到 .git/hooks/pre-commit 并添加可执行权限。
-npx code-helper check
+npx @skrupellose/code-helper check

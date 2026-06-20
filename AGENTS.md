@@ -16,8 +16,8 @@
 - 执行结果总结：完成小节点后，读取 `code-helper-docs/user-rules/执行结果总结规范.md` 并写入 result-doc。
 - 测试策略约束：涉及页面的测试只生成手工测试文档；工具只执行纯逻辑测试，读取 `code-helper-docs/user-rules/测试策略规范.md`。
 - 文档归档：功能完成或手动移动到 archive 后，任务视为已结束，读取 `code-helper-docs/user-rules/文档归档规范.md`。
-- 规则检查：提交或阶段结束前运行 `npx code-helper check`，确认协作文档结构仍完整。
-- Skills 管理：需要让 Codex 或 Claude Code 在当前项目自动发现 code-helper skills 时，执行 `npx code-helper skills register`。
+- 规则检查：提交或阶段结束前运行 `npx @skrupellose/code-helper check`，确认协作文档结构仍完整。
+- Skills 管理：需要让 Codex 或 Claude Code 在当前项目自动发现 code-helper skills 时，执行 `npx @skrupellose/code-helper skills register`。
 
 ### 文档维护规则
 
