@@ -6,6 +6,8 @@ import {
   ensureDirectory,
   projectPath,
   upsertManagedMarkdownBlock,
+  upsertMarkdownSection,
+  readTextIfExists,
   writeText,
   writeTextIfMissing
 } from "./fs-utils.js";
@@ -36,6 +38,8 @@ export interface InitializeResult {
 export async function initializeProject(options: InitializeOptions): Promise<InitializeResult> {
   const config = await loadConfig(options.projectRoot);
   const operations: OperationResult[] = [];
+
+  await detectEntryFiles(options.projectRoot, config);
 
   await createDirectories(options.projectRoot, config, operations);
   await saveConfig(options.projectRoot, config);
@@ -118,10 +122,51 @@ async function installRuleTemplates(projectRoot: string, config: CodeHelperConfi
 
   for (const template of getRuleTemplates(config)) {
     const targetPath = projectPath(projectRoot, join(config.directories.userRules, template.fileName));
-    operations.push(await writeTextIfMissing(targetPath, template.content));
+    operations.push(
+      await upsertMarkdownSection(
+        targetPath,
+        "## 调用入口文件",
+        renderEntryFileList(config),
+        template.content
+      )
+    );
   }
 
   return operations;
+}
+
+/**
+ * 检测用户已经手动创建的入口文件。
+ * 如果用户创建了 CLAUDE.md，初始化应自动纳入维护范围，而不是要求用户手动改 config。
+ */
+async function detectEntryFiles(projectRoot: string, config: CodeHelperConfig): Promise<void> {
+  const agentsExists = (await readTextIfExists(projectPath(projectRoot, "AGENTS.md"))) !== undefined;
+  const claudeExists = (await readTextIfExists(projectPath(projectRoot, "CLAUDE.md"))) !== undefined;
+
+  if (agentsExists) {
+    config.entryFiles.agents = true;
+  }
+
+  if (claudeExists) {
+    config.entryFiles.claude = true;
+  }
+
+  if (!agentsExists && !claudeExists && !config.entryFiles.agents && !config.entryFiles.claude) {
+    config.entryFiles.agents = true;
+  }
+}
+
+/**
+ * 渲染专题规则中的调用入口文件列表。
+ * 该段会在 init 时同步到已有规则文件，确保手动新增 CLAUDE.md 后规则入口也一致。
+ */
+function renderEntryFileList(config: CodeHelperConfig): string {
+  const entries = [
+    config.entryFiles.agents ? "- `AGENTS.md`" : undefined,
+    config.entryFiles.claude ? "- `CLAUDE.md`" : undefined
+  ].filter((entry): entry is string => entry !== undefined);
+
+  return entries.join("\n");
 }
 
 /**

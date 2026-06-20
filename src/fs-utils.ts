@@ -78,6 +78,60 @@ export async function writeTextIfMissing(path: string, content: string): Promise
 }
 
 /**
+ * 更新已有 Markdown 文件中的指定二级小节。
+ * 如果文件不存在则创建；如果小节不存在则追加；如果内容相同则跳过。
+ */
+export async function upsertMarkdownSection(
+  path: string,
+  sectionTitle: string,
+  sectionContent: string,
+  fallbackContent: string
+): Promise<OperationResult> {
+  const existing = await readTextIfExists(path);
+
+  if (existing === undefined) {
+    await writeText(path, fallbackContent);
+
+    return {
+      path,
+      action: "created",
+      message: "已创建缺失文件"
+    };
+  }
+
+  const normalizedSection = `${sectionTitle}\n\n${sectionContent.trim()}`;
+  const pattern = new RegExp(`(^${escapeRegExp(sectionTitle)}\\n\\n)([\\s\\S]*?)(?=\\n## |\\s*$)`, "m");
+
+  if (pattern.test(existing)) {
+    const nextContent = existing.replace(pattern, normalizedSection);
+
+    if (nextContent === existing) {
+      return {
+        path,
+        action: "skipped",
+        message: "文件已存在，保持原内容"
+      };
+    }
+
+    await writeText(path, ensureTrailingNewline(nextContent));
+
+    return {
+      path,
+      action: "updated",
+      message: `已更新 ${sectionTitle} 小节`
+    };
+  }
+
+  await writeText(path, `${ensureTrailingNewline(existing)}\n${normalizedSection}\n`);
+
+  return {
+    path,
+    action: "updated",
+    message: `已追加 ${sectionTitle} 小节`
+  };
+}
+
+/**
  * 在 Markdown 入口文件中追加或更新 code-helper 管理区块。
  * 这个函数只触碰受控区块，保护用户在区块外维护的项目规则。
  */

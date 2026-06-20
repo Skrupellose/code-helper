@@ -39,3 +39,28 @@ test("runChecks 在初始化后通过", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("initializeProject 会自动维护用户手动创建的 CLAUDE.md 并同步规则入口", async () => {
+  // 该测试覆盖用户手动新增 CLAUDE.md 后再次 init 的双入口同步行为。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-claude-"));
+
+  try {
+    await writeFile(join(root, "AGENTS.md"), "# Existing Agents\n\n用户已有 AGENTS 规则。\n", "utf8");
+    await initializeProject({ projectRoot: root });
+    await writeFile(join(root, "CLAUDE.md"), "# Existing Claude\n\n用户手动创建的 Claude 规则。\n", "utf8");
+
+    await initializeProject({ projectRoot: root });
+
+    const claude = await readFile(join(root, "CLAUDE.md"), "utf8");
+    const config = await readFile(join(root, ".agent/code-helper/config.json"), "utf8");
+    const memoryRule = await readFile(join(root, ".agent/user-rules/项目记忆规则优化.md"), "utf8");
+
+    assert.match(claude, /用户手动创建的 Claude 规则/);
+    assert.match(claude, /code-helper:start/);
+    assert.match(config, /"claude": true/);
+    assert.match(memoryRule, /- `AGENTS.md`/);
+    assert.match(memoryRule, /- `CLAUDE.md`/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
