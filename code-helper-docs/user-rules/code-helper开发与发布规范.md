@@ -31,4 +31,10 @@
 12. 页面相关测试全部只生成严格手工测试文档，由用户执行；工具自己只执行纯逻辑测试，例如函数单元测试、数据转换测试或非浏览器集成测试。
 13. 功能完成后应支持将计划、结果和状态文档移动到 `archive/`；用户手动移动到 `archive/` 的任务也必须识别为已结束。
 14. 功能开关必须支持选择性关闭；关闭后菜单、检查或初始化行为应尊重配置。
-15. 本地验证优先运行 `npm test`、`npm run check`、`npm pack --dry-run`，必要时再用同级 demo 项目验证真实 CLI 流程。
+15. `.code-helper/skills/` 只是内置 skills 模板源，不默认被 Codex 或 Claude Code 识别。
+16. Skills 注册必须同时支持 Codex 和 Claude Code：Codex 写入 `.agents/skills/code-helper-*`，Claude Code 写入 `.claude/skills/code-helper-*`。
+17. `npx code-helper init` 必须根据初始化前的入口文档决定注册目标：只有 `AGENTS.md` 时只注册 Codex，只有 `CLAUDE.md` 时只注册 Claude Code，两者都存在时注册两套；两个入口文档都不存在的新项目默认注册两套。
+18. 用户执行 `npx code-helper skills register` 或在菜单中选择“按当前项目注册 Skills”时，必须根据当前项目已有 `AGENTS.md` / `CLAUDE.md` 自动选择目标。
+19. 用户可以用 `npx code-helper skills register all` 强制注册两套，也可以用 `npx code-helper skills register codex` 或 `npx code-helper skills register claudecode` 只注册单个 agent 工具。
+20. 取消注册只删除 `.agents/skills/code-helper-*` 和 `.claude/skills/code-helper-*` 受控目录，不触碰用户自己的 `.agents/skills` 或 `.claude/skills` 内容。
+21. 本地验证优先运行 `npm test`、`npm run check`、`npm pack --dry-run`，必要时再用同级 demo 项目验证真实 CLI 流程。

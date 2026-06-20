@@ -12,6 +12,12 @@ import {
   writeText,
   writeTextIfMissing
 } from "./fs-utils.js";
+import {
+  listProjectSkillRegistrations,
+  registerProjectSkills,
+  resolveSkillRegistrationTargets,
+  type SkillRegistrationTarget
+} from "./skills.js";
 import { getHookTemplates, getRuleTemplates, getSkillTemplates, renderEntryBlock } from "./templates.js";
 import type { CodeHelperConfig, OperationResult } from "./types.js";
 
@@ -41,6 +47,7 @@ export async function initializeProject(options: InitializeOptions): Promise<Ini
   const operations: OperationResult[] = [];
 
   await detectEntryFiles(options.projectRoot, config);
+  const skillRegistrationTargets = await resolveSkillRegistrationTargets(options.projectRoot);
 
   operations.push(...(await migrateLegacyAgentWorkspace(options.projectRoot, config)));
   await createDirectories(options.projectRoot, config, operations);
@@ -54,10 +61,39 @@ export async function initializeProject(options: InitializeOptions): Promise<Ini
   operations.push(...(await installEntryDocuments(options.projectRoot, config)));
   operations.push(...(await installRuleTemplates(options.projectRoot, config)));
   operations.push(...(await installSkillTemplates(options.projectRoot, config)));
+  operations.push(...(await installProjectSkillRegistrations(options.projectRoot, config, skillRegistrationTargets)));
   operations.push(...(await installHookTemplates(options.projectRoot, config)));
   operations.push(await writeStateFile(options.projectRoot, config));
 
   return { config, operations };
+}
+
+/**
+ * 注册项目级 skills。
+ * 初始化按当前项目入口文件注册对应 agent；关闭功能开关时只展示跳过结果，便于用户理解 init 行为。
+ */
+async function installProjectSkillRegistrations(
+  projectRoot: string,
+  config: CodeHelperConfig,
+  targets: SkillRegistrationTarget[]
+): Promise<OperationResult[]> {
+  const operations: OperationResult[] = [];
+
+  if (!config.features.skillRegistration.enabled) {
+    const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
+
+    return statuses.map((status) => ({
+      path: status.path,
+      action: "skipped",
+      message: "Skills 管理功能已关闭，跳过项目级注册"
+    }));
+  }
+
+  for (const target of targets) {
+    operations.push(...(await registerProjectSkills(projectRoot, target)));
+  }
+
+  return operations;
 }
 
 /**
@@ -240,21 +276,19 @@ async function installRuleTemplates(projectRoot: string, config: CodeHelperConfi
 
 /**
  * 检测用户已经手动创建的入口文件。
- * 如果用户创建了 CLAUDE.md，初始化应自动纳入维护范围，而不是要求用户手动改 config。
+ * 已有入口文件优先代表当前项目实际使用的 agent；完全没有入口文件的新项目才默认维护 AGENTS.md。
  */
 async function detectEntryFiles(projectRoot: string, config: CodeHelperConfig): Promise<void> {
   const agentsExists = (await readTextIfExists(projectPath(projectRoot, "AGENTS.md"))) !== undefined;
   const claudeExists = (await readTextIfExists(projectPath(projectRoot, "CLAUDE.md"))) !== undefined;
 
-  if (agentsExists) {
-    config.entryFiles.agents = true;
+  if (agentsExists || claudeExists) {
+    config.entryFiles.agents = agentsExists;
+    config.entryFiles.claude = claudeExists;
+    return;
   }
 
-  if (claudeExists) {
-    config.entryFiles.claude = true;
-  }
-
-  if (!agentsExists && !claudeExists && !config.entryFiles.agents && !config.entryFiles.claude) {
+  if (!config.entryFiles.agents && !config.entryFiles.claude) {
     config.entryFiles.agents = true;
   }
 }

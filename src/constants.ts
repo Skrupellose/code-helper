@@ -17,7 +17,8 @@ export const FEATURE_KEYS: FeatureKey[] = [
   "testingPolicy",
   "documentArchive",
   "checks",
-  "gitHooks"
+  "gitHooks",
+  "skillRegistration"
 ];
 
 /**
@@ -31,7 +32,8 @@ export const FEATURE_LABELS: Record<FeatureKey, string> = {
   testingPolicy: "测试策略约束",
   documentArchive: "文档归档",
   checks: "项目规则检查",
-  gitHooks: "Git hooks 模板"
+  gitHooks: "Git hooks 模板",
+  skillRegistration: "Skills 管理"
 };
 
 /**
@@ -58,7 +60,8 @@ export const DEFAULT_CONFIG: CodeHelperConfig = {
     testingPolicy: { enabled: true },
     documentArchive: { enabled: true },
     checks: { enabled: true },
-    gitHooks: { enabled: false }
+    gitHooks: { enabled: false },
+    skillRegistration: { enabled: true }
   }
 };
 

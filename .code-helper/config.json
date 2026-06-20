@@ -32,6 +32,9 @@
     },
     "gitHooks": {
       "enabled": false
+    },
+    "skillRegistration": {
+      "enabled": true
     }
   }
 }

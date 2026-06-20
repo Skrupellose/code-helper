@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -8,7 +8,7 @@ import { initializeProject } from "../dist/init.js";
 import { runChecks } from "../dist/checks.js";
 
 test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", async () => {
-  // 该测试覆盖老项目兼容：入口文档已有内容时，只追加受控区块。
+  // 该测试覆盖老项目兼容：只有 AGENTS.md 时只注册 Codex，不误注册 Claude Code。
   const root = await mkdtemp(join(tmpdir(), "code-helper-init-"));
 
   try {
@@ -17,11 +17,65 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
     const result = await initializeProject({ projectRoot: root });
     const agents = await readFile(join(root, "AGENTS.md"), "utf8");
     const config = await readFile(join(root, ".code-helper/config.json"), "utf8");
+    const codexSkill = await readFile(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
 
     assert.ok(result.operations.some((operation) => operation.path.endsWith("项目记忆规则优化.md")));
     assert.match(agents, /用户已有规则/);
     assert.match(agents, /code-helper:start/);
     assert.match(config, /"gitHooks":/);
+    assert.match(codexSkill, /name: code-helper-memory-tuning/);
+    await assert.rejects(
+      () => stat(join(root, ".claude/skills/code-helper-memory-tuning/SKILL.md")),
+      /ENOENT/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("initializeProject 在没有入口文档的新项目中注册全部 agent skills", async () => {
+  // 该测试覆盖新项目初始化：无法判断实际使用工具时，默认同时准备 Codex 和 Claude Code 项目级 skills。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-init-new-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+
+    const codexSkill = await readFile(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
+    const claudeCodeSkill = await readFile(join(root, ".claude/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
+
+    assert.match(codexSkill, /name: code-helper-memory-tuning/);
+    assert.match(claudeCodeSkill, /name: code-helper-memory-tuning/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("initializeProject 在只有 CLAUDE.md 的项目中只注册 Claude Code skills", async () => {
+  // 该测试覆盖 Claude Code 单工具项目：不能因为默认配置创建 AGENTS.md 或注册 Codex skills。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-init-claude-only-"));
+
+  try {
+    await writeFile(join(root, "CLAUDE.md"), "# Existing Claude\n\n用户已有 Claude 规则。\n", "utf8");
+
+    await initializeProject({ projectRoot: root });
+
+    const claude = await readFile(join(root, "CLAUDE.md"), "utf8");
+    const config = await readFile(join(root, ".code-helper/config.json"), "utf8");
+    const claudeCodeSkill = await readFile(join(root, ".claude/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
+
+    assert.match(claude, /用户已有 Claude 规则/);
+    assert.match(claude, /code-helper:start/);
+    assert.match(config, /"agents": false/);
+    assert.match(config, /"claude": true/);
+    assert.match(claudeCodeSkill, /name: code-helper-memory-tuning/);
+    await assert.rejects(
+      () => stat(join(root, "AGENTS.md")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md")),
+      /ENOENT/
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -56,6 +110,8 @@ test("initializeProject 会自动维护用户手动创建的 CLAUDE.md 并同步
     const claude = await readFile(join(root, "CLAUDE.md"), "utf8");
     const config = await readFile(join(root, ".code-helper/config.json"), "utf8");
     const memoryRule = await readFile(join(root, "code-helper-docs/user-rules/项目记忆规则优化.md"), "utf8");
+    const codexSkill = await readFile(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
+    const claudeCodeSkill = await readFile(join(root, ".claude/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
 
     assert.match(claude, /用户手动创建的 Claude 规则/);
     assert.match(claude, /code-helper:start/);
@@ -63,6 +119,8 @@ test("initializeProject 会自动维护用户手动创建的 CLAUDE.md 并同步
     assert.match(memoryRule, /- `AGENTS.md`/);
     assert.match(memoryRule, /- `CLAUDE.md`/);
     assert.equal([...memoryRule.matchAll(/- `CLAUDE\.md`/g)].length, 1);
+    assert.match(codexSkill, /name: code-helper-memory-tuning/);
+    assert.match(claudeCodeSkill, /name: code-helper-memory-tuning/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

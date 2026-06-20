@@ -7,6 +7,13 @@ import { loadConfig, setFeatureEnabled } from "./config.js";
 import { runChecks } from "./checks.js";
 import { initializeProject } from "./init.js";
 import { normalizeDroppedPath } from "./input-utils.js";
+import {
+  listProjectSkillRegistrations,
+  parseSkillRegistrationTargets,
+  registerProjectSkills,
+  resolveSkillRegistrationTargets,
+  unregisterProjectSkills
+} from "./skills.js";
 import { canUseInteractiveKeys, promptContinue, promptMultiSelect, promptSelect } from "./terminal-ui.js";
 import { createManualTestDocument, createPlanWorkbench } from "./workflows.js";
 import type { FeatureKey, OperationResult } from "./types.js";
@@ -37,6 +44,8 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
         return runArchive(projectRoot, args);
       case "tasks":
         return runTasks(projectRoot, args);
+      case "skills":
+        return runSkills(projectRoot, args);
       case "help":
       case "--help":
       case "-h":
@@ -68,6 +77,7 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
     { value: "6", label: "项目规则检查" },
     { value: "7", label: "文档归档" },
     { value: "8", label: "查看任务状态" },
+    { value: "9", label: "Skills 管理" },
     { value: "0", label: "退出" }
   ];
 
@@ -158,6 +168,11 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
           await runMenuAction("查看任务状态", () => runTasks(projectRoot, []));
           await pauseAfterMenuAction(useKeyMenu);
           break;
+        case "9":
+          if (await runSkillMenu(projectRoot, rl)) {
+            await pauseAfterMenuAction(useKeyMenu);
+          }
+          break;
         case "0":
           console.log("已退出 code-helper。");
           shouldExit = true;
@@ -170,6 +185,60 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
     return 0;
   } finally {
     rl.close();
+  }
+}
+
+/**
+ * 交互式 Skills 管理菜单。
+ * 这里只管理 code-helper 自己的项目级 skill，不触碰用户自定义 skills。
+ */
+async function runSkillMenu(
+  projectRoot: string,
+  rl: ReturnType<typeof createInterface>
+): Promise<boolean> {
+  const useKeyMenu = canUseInteractiveKeys(input, output);
+  const options = [
+    { value: "1", label: "查看注册状态" },
+    { value: "2", label: "按当前项目注册 Skills" },
+    { value: "3", label: "按当前项目取消注册 Skills" },
+    { value: "4", label: "仅注册 Codex" },
+    { value: "5", label: "仅注册 Claude Code" },
+    { value: "6", label: "注册全部" },
+    { value: "7", label: "取消注册全部" },
+    { value: "0", label: "返回" }
+  ];
+  const answer = useKeyMenu
+    ? await promptSelect(input, output, "Skills 管理", options)
+    : await askTextSkillMenu(rl);
+
+  switch (answer.trim()) {
+    case "1":
+      await runMenuAction("查看 Skills 注册状态", () => runSkills(projectRoot, ["list"]));
+      return true;
+    case "2":
+      await runMenuAction("按当前项目注册 Skills", () => runSkills(projectRoot, ["register"]));
+      return true;
+    case "3":
+      await runMenuAction("按当前项目取消注册 Skills", () => runSkills(projectRoot, ["unregister"]));
+      return true;
+    case "4":
+      await runMenuAction("注册 Codex 项目级 skills", () => runSkills(projectRoot, ["register", "codex"]));
+      return true;
+    case "5":
+      await runMenuAction("注册 Claude Code 项目级 skills", () => runSkills(projectRoot, ["register", "claudecode"]));
+      return true;
+    case "6":
+      await runMenuAction("注册全部项目级 skills", () => runSkills(projectRoot, ["register", "all"]));
+      return true;
+    case "7":
+      await runMenuAction("取消注册全部项目级 skills", () => runSkills(projectRoot, ["unregister", "all"]));
+      return true;
+    case "0":
+      console.log("已返回主菜单。");
+      return false;
+    default:
+      console.log("无效选择，返回主菜单。");
+      return false;
   }
 }
 
@@ -409,7 +478,26 @@ async function askTextMenu(rl: ReturnType<typeof createInterface>): Promise<stri
   console.log("6. 项目规则检查");
   console.log("7. 文档归档");
   console.log("8. 查看任务状态");
+  console.log("9. Skills 管理");
   console.log("0. 退出");
+
+  return askQuestionOrDefault(rl, "请选择操作：", "0");
+}
+
+/**
+ * 非 TTY 环境下的 Skills 管理菜单。
+ * 输入 0 立即返回，避免用户误入子菜单后无法退出。
+ */
+async function askTextSkillMenu(rl: ReturnType<typeof createInterface>): Promise<string> {
+  console.log("\nSkills 管理");
+  console.log("1. 查看注册状态");
+  console.log("2. 按当前项目注册 Skills");
+  console.log("3. 按当前项目取消注册 Skills");
+  console.log("4. 仅注册 Codex");
+  console.log("5. 仅注册 Claude Code");
+  console.log("6. 注册全部");
+  console.log("7. 取消注册全部");
+  console.log("0. 返回");
 
   return askQuestionOrDefault(rl, "请选择操作：", "0");
 }
@@ -547,6 +635,41 @@ async function runTasks(projectRoot: string, args: string[]): Promise<number> {
 }
 
 /**
+ * 项目级 skills 注册命令。
+ * 支持：skills list、skills register [all|codex|claudecode]、skills unregister [all|codex|claudecode]。
+ * register/unregister 不带 target 时按当前项目入口文件推断目标，只有显式 all 才处理两套 agent。
+ */
+async function runSkills(projectRoot: string, args: string[]): Promise<number> {
+  const [action = "list", rawTarget] = args;
+  const targets = await resolveTargetsForSkillAction(projectRoot, action, rawTarget);
+
+  if (action === "list") {
+    const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
+    printSkillRegistrationStatus(statuses);
+    return 0;
+  }
+
+  if (action === "register") {
+    const operations = (await Promise.all(targets.map((target) => registerProjectSkills(projectRoot, target)))).flat();
+    const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
+    printOperations(operations);
+    printSkillRegistrationStatus(statuses);
+    return 0;
+  }
+
+  if (action === "unregister") {
+    const operations = (await Promise.all(targets.map((target) => unregisterProjectSkills(projectRoot, target)))).flat();
+    const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
+    printOperations(operations);
+    printSkillRegistrationStatus(statuses);
+    return 0;
+  }
+
+  printSkillsHelp();
+  return 1;
+}
+
+/**
  * 打印操作结果。
  * 路径可能是绝对路径，保留原样方便用户定位。
  */
@@ -564,6 +687,19 @@ function printFeatureList(config: Awaited<ReturnType<typeof loadConfig>>): void 
   for (const feature of FEATURE_KEYS) {
     const status = config.features[feature].enabled ? "启用" : "关闭";
     console.log(`${feature}: ${status} - ${FEATURE_LABELS[feature]}`);
+  }
+}
+
+/**
+ * 打印项目级 skills 注册状态。
+ * 路径使用绝对路径，方便用户排查对应 agent 是否能扫描到文件。
+ */
+function printSkillRegistrationStatus(
+  statuses: Awaited<ReturnType<typeof listProjectSkillRegistrations>>
+): void {
+  for (const status of statuses) {
+    console.log(`${status.target}/${status.name}: ${status.registered ? "已注册" : "未注册"}`);
+    console.log(`  path: ${status.path}`);
   }
 }
 
@@ -587,6 +723,17 @@ function printFeatureHelp(): void {
 }
 
 /**
+ * 打印项目级 skills 命令帮助。
+ */
+function printSkillsHelp(): void {
+  console.log("用法：");
+  console.log("  code-helper skills list");
+  console.log("  code-helper skills register [all|codex|claudecode]");
+  console.log("  code-helper skills unregister [all|codex|claudecode]");
+  console.log("说明：register/unregister 不带 target 时按当前项目已有 AGENTS.md / CLAUDE.md 自动选择目标。");
+}
+
+/**
  * 打印 CLI 帮助。
  * 所有子命令都提供非交互入口，便于测试和集成到脚本。
  */
@@ -604,5 +751,28 @@ function printHelp(): void {
   code-helper manual-test <中文功能名> [标题] 生成页面手工测试文档
   code-helper archive <中文功能名>       将功能文档移动到 archive 并识别为已结束
   code-helper tasks [--json]           查看 active / archived / mixed 任务
+  code-helper skills list              查看项目级 skills 注册状态
+  code-helper skills register [target] 按项目入口或指定 target 注册项目级 skills
+  code-helper skills unregister [target] 按项目入口或指定 target 取消注册项目级 skills
 `);
+}
+
+/**
+ * 解析 skills 子命令的目标范围。
+ * list 默认展示全部状态；register 和 unregister 默认按当前项目实际入口文件处理。
+ */
+async function resolveTargetsForSkillAction(
+  projectRoot: string,
+  action: string,
+  rawTarget: string | undefined
+): Promise<ReturnType<typeof parseSkillRegistrationTargets>> {
+  if (rawTarget !== undefined) {
+    return parseSkillRegistrationTargets(rawTarget);
+  }
+
+  if (action === "register" || action === "unregister") {
+    return resolveSkillRegistrationTargets(projectRoot);
+  }
+
+  return parseSkillRegistrationTargets("all");
 }

@@ -23,6 +23,9 @@ export function renderEntryBlock(config: CodeHelperConfig): string {
       : undefined,
     config.features.checks.enabled
       ? "- 规则检查：提交或阶段收口前运行 `npx code-helper check`，确认协作文档结构仍完整。"
+      : undefined,
+    config.features.skillRegistration.enabled
+      ? "- Skills 管理：需要让 Codex 或 Claude Code 在当前项目自动发现 code-helper skills 时，执行 `npx code-helper skills register`。"
       : undefined
   ].filter((line): line is string => line !== undefined);
 

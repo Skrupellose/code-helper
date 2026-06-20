@@ -1,0 +1,147 @@
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+
+import { setFeatureEnabled } from "../dist/config.js";
+import {
+  listProjectSkillRegistrations,
+  parseSkillRegistrationTargets,
+  registerProjectSkills,
+  resolveSkillRegistrationTargets,
+  unregisterProjectSkills
+} from "../dist/skills.js";
+
+test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", async () => {
+  // 该测试确认 code-helper skills 只注册到当前项目的 .agents/skills。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-register-"));
+
+  try {
+    const firstOperations = await registerProjectSkills(root);
+    const secondOperations = await registerProjectSkills(root);
+    const statuses = await listProjectSkillRegistrations(root);
+    const memorySkill = await readFile(
+      join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"),
+      "utf8"
+    );
+
+    assert.equal(firstOperations.length, 3);
+    assert.ok(firstOperations.every((operation) => operation.action === "created"));
+    assert.ok(secondOperations.every((operation) => operation.action === "skipped"));
+    assert.ok(statuses.every((status) => status.registered));
+    assert.match(memorySkill, /name: code-helper-memory-tuning/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("registerProjectSkills 支持 Claude Code 项目级 skills", async () => {
+  // 该测试确认 Claude Code 注册目标写入当前项目的 .claude/skills。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-claude-"));
+
+  try {
+    const operations = await registerProjectSkills(root, "claudecode");
+    const statuses = await listProjectSkillRegistrations(root, "claudecode");
+    const memorySkill = await readFile(
+      join(root, ".claude/skills/code-helper-memory-tuning/SKILL.md"),
+      "utf8"
+    );
+
+    assert.equal(operations.length, 3);
+    assert.ok(operations.every((operation) => operation.action === "created"));
+    assert.ok(statuses.every((status) => status.target === "claudecode" && status.registered));
+    assert.match(memorySkill, /name: code-helper-memory-tuning/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("registerProjectSkills 会尊重 skillRegistration 功能开关", async () => {
+  // 该测试确保用户关闭项目级 skills 注册后，不会继续写入 .agents/skills。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-disabled-"));
+
+  try {
+    await setFeatureEnabled(root, "skillRegistration", false);
+
+    await assert.rejects(
+      () => registerProjectSkills(root),
+      /Skills 管理功能已关闭/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("unregisterProjectSkills 只删除 code-helper 管理的项目级 skills", async () => {
+  // 该测试避免取消注册时误删用户自己的 Codex 项目级 skills。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-unregister-"));
+
+  try {
+    await registerProjectSkills(root);
+    await mkdir(join(root, ".agents/skills/user-skill"), { recursive: true });
+    await writeFile(join(root, ".agents/skills/user-skill/SKILL.md"), "---\nname: user-skill\n---\n", "utf8");
+
+    const operations = await unregisterProjectSkills(root);
+    const statuses = await listProjectSkillRegistrations(root);
+    const userSkill = await readFile(join(root, ".agents/skills/user-skill/SKILL.md"), "utf8");
+
+    assert.equal(operations.length, 3);
+    assert.ok(operations.every((operation) => operation.action === "updated"));
+    assert.ok(statuses.every((status) => !status.registered));
+    assert.match(userSkill, /name: user-skill/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("unregisterProjectSkills 不会删除用户自己的 Claude Code skills", async () => {
+  // 该测试避免取消注册时误删用户自己的 Claude Code 项目级 skills。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-claude-unregister-"));
+
+  try {
+    await registerProjectSkills(root, "claudecode");
+    await mkdir(join(root, ".claude/skills/user-skill"), { recursive: true });
+    await writeFile(join(root, ".claude/skills/user-skill/SKILL.md"), "---\nname: user-skill\n---\n", "utf8");
+
+    const operations = await unregisterProjectSkills(root, "claudecode");
+    const statuses = await listProjectSkillRegistrations(root, "claudecode");
+    const userSkill = await readFile(join(root, ".claude/skills/user-skill/SKILL.md"), "utf8");
+
+    assert.equal(operations.length, 3);
+    assert.ok(operations.every((operation) => operation.action === "updated"));
+    assert.ok(statuses.every((status) => !status.registered));
+    assert.match(userSkill, /name: user-skill/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("parseSkillRegistrationTargets 只解析显式 CLI 目标", () => {
+  // 该测试锁定显式参数解析：全量注册必须传 all，不带 target 不在这里推断项目状态。
+  assert.deepEqual(parseSkillRegistrationTargets(undefined), ["codex"]);
+  assert.deepEqual(parseSkillRegistrationTargets("all"), ["codex", "claudecode"]);
+  assert.deepEqual(parseSkillRegistrationTargets("codex"), ["codex"]);
+  assert.deepEqual(parseSkillRegistrationTargets("claudecode"), ["claudecode"]);
+  assert.deepEqual(parseSkillRegistrationTargets("claude-code"), ["claudecode"]);
+});
+
+test("resolveSkillRegistrationTargets 会根据入口文件推断 agent 工具", async () => {
+  // 该测试覆盖当前项目注册策略：已有入口文件按实际工具注册，没有入口文件的新项目注册全部。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-resolve-"));
+
+  try {
+    assert.deepEqual(await resolveSkillRegistrationTargets(root), ["codex", "claudecode"]);
+
+    await writeFile(join(root, "AGENTS.md"), "# Agents\n", "utf8");
+    assert.deepEqual(await resolveSkillRegistrationTargets(root), ["codex"]);
+
+    await writeFile(join(root, "CLAUDE.md"), "# Claude\n", "utf8");
+    assert.deepEqual(await resolveSkillRegistrationTargets(root), ["codex", "claudecode"]);
+
+    await rm(join(root, "AGENTS.md"), { force: true });
+    assert.deepEqual(await resolveSkillRegistrationTargets(root), ["claudecode"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

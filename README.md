@@ -20,6 +20,7 @@ npx code-helper plan docs/订单管理需求.md 订单管理升级
 npx code-helper manual-test 订单管理升级
 npx code-helper archive 订单管理升级
 npx code-helper tasks
+npx code-helper skills register
 ```
 
 在交互式“项目计划优化”里，可以直接把需求文档拖到终端；工具会识别引号、`file://`、反斜杠转义空格和项目内绝对路径。
@@ -29,6 +30,8 @@ npx code-helper tasks
 初始化后会创建：
 
 - `.code-helper/`：工具配置、内置 skills 模板、hook sample 和检查结果
+- `.agents/skills/`：Codex 项目级 skills 注册目录，当前项目需要 Codex 时注册 code-helper skills
+- `.claude/skills/`：Claude Code 项目级 skills 注册目录，当前项目需要 Claude Code 时注册 code-helper skills
 - `code-helper-docs/user-rules/`：长期专题规则
 - `code-helper-docs/plan-doc/`：项目计划
 - `code-helper-docs/result-doc/`：执行结果和手工测试文档
@@ -39,6 +42,9 @@ npx code-helper tasks
 
 - 默认维护 `AGENTS.md`，检测到或配置启用后可同步 `CLAUDE.md`。
 - 初始化不会覆盖已有专题规则。
+- `.code-helper/skills/` 只是内置 skills 模板源，不会被 Codex 或 Claude Code 默认识别。
+- `npx code-helper init` 会根据初始化前的入口文档注册项目级 skills：只有 `AGENTS.md` 时只注册 Codex，只有 `CLAUDE.md` 时只注册 Claude Code，两者都存在时注册两套；两个入口文档都不存在的新项目默认注册两套。
+- `npx code-helper skills register` 不带 target 时按当前项目已有 `AGENTS.md` / `CLAUDE.md` 自动选择目标；传 `all` 时强制注册两套。
 - 入口文档只更新 `<!-- code-helper:start -->` 和 `<!-- code-helper:end -->` 之间的受控区块。
 - 计划、结果、状态和测试文档必须使用中文命名与中文总结，例如 `code-helper-docs/plan-doc/订单管理升级.md`、`code-helper-docs/result-doc/订单管理升级/实施记录.md`、`code-helper-docs/status-doc/订单管理升级-状态.md`。
 - 页面相关测试只生成严格手工测试文档。

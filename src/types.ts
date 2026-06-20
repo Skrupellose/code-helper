@@ -9,7 +9,8 @@ export type FeatureKey =
   | "testingPolicy"
   | "documentArchive"
   | "checks"
-  | "gitHooks";
+  | "gitHooks"
+  | "skillRegistration";
 
 /**
  * 单个功能开关的配置。
