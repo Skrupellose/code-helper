@@ -219,18 +219,48 @@ async function runFeatureMenu(
     return;
   }
 
-  printFeatureList(config);
-  const feature = await rl.question("请输入要切换的功能 key：");
-  const selectedFeature = feature.trim();
+  await runTextFeatureMenu(projectRoot, rl);
+}
 
-  if (!isFeatureKey(selectedFeature)) {
-    console.log("无效功能 key。");
-    return;
+/**
+ * 非 TTY 环境下的数字功能开关菜单。
+ * 输入 1..N 切换对应功能，输入 0 返回上一级。
+ */
+async function runTextFeatureMenu(
+  projectRoot: string,
+  rl: ReturnType<typeof createInterface>
+): Promise<void> {
+  let shouldReturn = false;
+
+  while (!shouldReturn) {
+    const config = await loadConfig(projectRoot);
+
+    console.log("\n功能开关管理");
+    FEATURE_KEYS.forEach((feature, index) => {
+      const status = config.features[feature].enabled ? "启用" : "关闭";
+      console.log(`${index + 1}. ${FEATURE_LABELS[feature]}（${feature}）：${status}`);
+    });
+    console.log("0. 返回");
+
+    const answer = await askQuestionOrDefault(rl, "请输入数字切换功能，或输入 0 返回：", "0");
+    const selectedIndex = Number.parseInt(answer.trim(), 10);
+
+    if (selectedIndex === 0) {
+      shouldReturn = true;
+      continue;
+    }
+
+    if (!Number.isInteger(selectedIndex) || selectedIndex < 1 || selectedIndex > FEATURE_KEYS.length) {
+      console.log("无效选择，请输入列表中的数字。");
+      continue;
+    }
+
+    const selectedFeature = FEATURE_KEYS[selectedIndex - 1];
+    const current = config.features[selectedFeature].enabled;
+
+    await setFeatureEnabled(projectRoot, selectedFeature, !current);
+    console.log(`已${current ? "关闭" : "启用"}：${FEATURE_LABELS[selectedFeature]}`);
   }
-
-  const current = config.features[selectedFeature].enabled;
-  await setFeatureEnabled(projectRoot, selectedFeature, !current);
-  console.log(`已${current ? "关闭" : "启用"}：${FEATURE_LABELS[selectedFeature]}`);
 }
 
 /**
@@ -249,7 +279,27 @@ async function askTextMenu(rl: ReturnType<typeof createInterface>): Promise<stri
   console.log("8. 查看任务状态");
   console.log("0. 退出");
 
-  return rl.question("请选择操作：");
+  return askQuestionOrDefault(rl, "请选择操作：", "0");
+}
+
+/**
+ * 安全读取用户输入。
+ * 当 stdin 已关闭或管道输入提前结束时，返回默认值，避免兜底交互崩溃。
+ */
+async function askQuestionOrDefault(
+  rl: ReturnType<typeof createInterface>,
+  question: string,
+  defaultAnswer: string
+): Promise<string> {
+  try {
+    return await rl.question(question);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ERR_USE_AFTER_CLOSE") {
+      return defaultAnswer;
+    }
+
+    throw error;
+  }
 }
 
 /**
