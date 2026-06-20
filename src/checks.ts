@@ -189,7 +189,7 @@ function containsChinese(value: string): boolean {
 
 /**
  * 检查文档归档目录和任务状态。
- * archive 中的任务视为已结束；同名任务同时存在 active 与 archive 时提示人工收口。
+ * archive 中的任务视为已结束；同名任务同时存在 active 与 archive 时提示人工确认。
  */
 async function checkArchiveState(projectRoot: string, config: CodeHelperConfig): Promise<CheckIssue[]> {
   const issues: CheckIssue[] = [];
@@ -348,7 +348,7 @@ async function checkRuleDocuments(projectRoot: string, config: CodeHelperConfig)
 
 /**
  * 检查计划、结果和状态目录是否存在。
- * 这些目录是项目计划工作台的固定落点。
+ * 这些目录是项目计划文档的固定落点。
  */
 async function checkPlanDirectories(projectRoot: string, config: CodeHelperConfig): Promise<CheckIssue[]> {
   const issues: CheckIssue[] = [];
@@ -365,7 +365,7 @@ async function checkPlanDirectories(projectRoot: string, config: CodeHelperConfi
       issues.push({
         level: "error",
         code: "missing-workbench-directory",
-        message: `计划工作台目录不存在：${directory}`,
+        message: `计划文档目录不存在：${directory}`,
         path: directory,
         suggestion: "运行 `npx code-helper init` 创建计划、结果和状态目录。"
       });

@@ -35,7 +35,7 @@ npx code-helper skills register
 - `code-helper-docs/user-rules/`：长期专题规则
 - `code-helper-docs/plan-doc/`：项目计划
 - `code-helper-docs/result-doc/`：执行结果和手工测试文档
-- `code-helper-docs/status-doc/`：当前状态驾驶舱
+- `code-helper-docs/status-doc/`：当前状态记录
 - `code-helper-docs/*/archive/`：已完成或已结束任务的归档文档
 
 ## 默认策略

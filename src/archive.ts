@@ -8,7 +8,7 @@ import { normalizeDocumentName, normalizeFeatureName } from "./workflows.js";
 
 /**
  * 任务文档的状态。
- * active 表示仍在顶层工作目录，archived 表示已经进入 archive，mixed 表示两边都存在，需要人工收口。
+ * active 表示仍在顶层工作目录，archived 表示已经进入 archive，mixed 表示两边都存在，需要人工确认。
  */
 export type TaskStatus = "active" | "archived" | "mixed";
 
@@ -25,7 +25,7 @@ export interface TaskRecord {
 
 /**
  * 执行任务文档归档。
- * 归档目标固定为各文档目录下的 archive 子目录，避免已结束任务继续污染当前工作台。
+ * 归档目标固定为各文档目录下的 archive 子目录，避免已结束任务继续影响当前任务判断。
  */
 export async function archiveFeature(projectRoot: string, rawFeatureName: string): Promise<OperationResult[]> {
   const config = await loadConfig(projectRoot);

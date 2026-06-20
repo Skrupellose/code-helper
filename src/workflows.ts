@@ -12,7 +12,7 @@ export const RESULT_RECORD_FILE_NAME = "实施记录.md";
 export const MANUAL_TEST_FILE_NAME = "手工测试.md";
 
 /**
- * 计划工作台生成参数。
+ * 计划文档生成参数。
  * requirementPath 指向用户准备好的完整需求文档。
  */
 export interface PlanWorkbenchOptions {
@@ -33,7 +33,7 @@ export interface ManualTestOptions {
 }
 
 /**
- * 根据需求文档生成计划工作台的三类产物。
+ * 根据需求文档生成计划文档的三类产物。
  * 这里生成的是可编辑模板，真正的任务细拆仍由 agent 根据需求内容继续完善。
  */
 export async function createPlanWorkbench(options: PlanWorkbenchOptions): Promise<OperationResult[]> {
@@ -156,7 +156,7 @@ function containsChinese(value: string): boolean {
 
 /**
  * 渲染计划文档模板。
- * 模板把示例 SOP 的关键结构固化成可推进工作台。
+ * 模板把示例 SOP 的关键结构固化成可持续推进的计划文档。
  */
 function renderPlanDocument(featureName: string, requirementPath: string, requirement: string): string {
   const excerpt = requirement.trim().slice(0, 2000);
@@ -167,11 +167,11 @@ function renderPlanDocument(featureName: string, requirementPath: string, requir
 
 - 原始需求文档：\`${requirementPath}\`
 
-## 当前推进建议
+## 下一步建议
 
 1. 先确认目标、阶段边界和验收标准。
-2. 再按依赖顺序拆分基础能力、组件、页面和回归任务。
-3. 页面相关测试只生成手工测试文档，由用户执行。
+2. 再按依赖顺序拆分基础能力、核心实现、集成验收和复查任务。
+3. 涉及页面、可视化或浏览器链路时，只生成手工测试文档，由用户执行。
 4. 工具执行测试时只运行纯逻辑测试，例如函数单元测试或非浏览器集成测试。
 
 ## 需求摘要
@@ -187,7 +187,7 @@ ${excerpt}
 | 子任务 | 已完成 | 未完成 | 备注 |
 |---|---|---|---|
 | 目标与约束确认 |  | 明确目标、范围、验收标准 | 状态：未开始；先完成需求澄清 |
-| 依赖顺序拆分 |  | 按基础能力、数据、组件、页面、回归排序 | 状态：未开始；不要按页面直觉直接实现 |
+| 依赖顺序拆分 |  | 按基础能力、数据模型、核心模块、集成验收、复查范围排序 | 状态：未开始；不要按文档顺序或界面直觉直接实现 |
 | 执行批次规划 |  | 拆成可交接的小节点 | 状态：未开始；每个节点完成后写 result-doc |
 
 ## 子任务拆分
@@ -196,18 +196,19 @@ ${excerpt}
 |---|---|---|---|
 | 基础能力 |  | 待根据需求细化 | 状态：未开始 |
 | 数据与接口 |  | 待根据需求细化 | 状态：未开始 |
-| 组件与页面 |  | 待根据需求细化，页面验收需写 ${MANUAL_TEST_FILE_NAME} | 状态：未开始 |
-| 逻辑测试 |  | 待根据纯逻辑模块补单元或集成测试 | 状态：未开始 |
-| 手工回归 |  | 待用户按手工测试文档执行 | 状态：未开始 |
+| 核心实现 |  | 待根据需求细化模块、服务、命令、任务、页面或数据流 | 状态：未开始 |
+| 集成验收 |  | 待根据需求细化联调、复查、发布和人工验收环节 | 状态：未开始 |
+| 自动化验证 |  | 待根据纯逻辑模块补单元或集成测试 | 状态：未开始 |
+| 手工验收 |  | 涉及页面、可视化、浏览器链路或人工业务验收时写 ${MANUAL_TEST_FILE_NAME} | 状态：未开始 |
 
 ## 验收标准
 
 - 计划中的每个子任务都有完成定义。
 - 纯逻辑改动有自动化测试或明确无法测试说明。
-- 页面相关改动有手工测试文档。
+- 页面、可视化、浏览器链路或人工业务验收有手工测试文档。
 - 阻塞点和后续风险同步到 status-doc。
 
-## 状态跟踪
+## 状态记录
 
 - 当前状态文件：\`code-helper-docs/status-doc/${featureName}-状态.md\`
 - 执行记录目录：\`code-helper-docs/result-doc/${featureName}/\`
@@ -237,16 +238,16 @@ function renderResultDocument(featureName: string): string {
 ## 验证
 
 - 纯逻辑测试：待记录命令和结论。
-- 页面测试：不由工具执行自动化测试，见 \`${MANUAL_TEST_FILE_NAME}\`。
+- 人工验收：涉及页面、可视化、浏览器链路或人工业务验收时，见 \`${MANUAL_TEST_FILE_NAME}\`。
 
 ## 风险与后续
 
-- 待记录阻塞点、回归入口和后续注意事项。
+- 待记录阻塞点、后续检查点和注意事项。
 `;
 }
 
 /**
- * 渲染当前状态驾驶舱模板。
+ * 渲染当前状态记录模板。
  * 该文件只保留当前仍影响决策的信息，不做流水账。
  */
 function renderStatusDocument(featureName: string): string {
@@ -254,7 +255,7 @@ function renderStatusDocument(featureName: string): string {
 
 ## 当前状态
 
-1. 状态：未开始；已创建计划工作台，等待拆分和执行。
+1. 状态：未开始；已创建计划文档，等待拆分和执行。
 
 ## 下一步
 
@@ -268,7 +269,7 @@ function renderStatusDocument(featureName: string): string {
 
 ## 关键结论
 
-- 页面相关测试只生成手工测试文档。
+- 页面、可视化和浏览器链路只生成手工测试文档。
 - 工具只执行纯逻辑测试。
 
 ## 关键索引
@@ -283,7 +284,7 @@ function renderStatusDocument(featureName: string): string {
 
 ## 最近一次更新
 
-- ${new Date().toISOString().slice(0, 10)}：创建 code-helper 状态驾驶舱。
+- ${new Date().toISOString().slice(0, 10)}：创建 code-helper 状态记录。
 `;
 }
 

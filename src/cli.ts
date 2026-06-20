@@ -554,7 +554,7 @@ async function askQuestionOrDefault(
 }
 
 /**
- * 计划工作台命令。
+ * 计划文档命令。
  * 参数：plan <需求文档相对路径> [功能名称]。
  */
 async function runPlan(projectRoot: string, args: string[]): Promise<number> {
@@ -747,7 +747,7 @@ function printHelp(): void {
   code-helper features list           查看功能开关
   code-helper features enable <key>   启用功能
   code-helper features disable <key>  关闭功能
-  code-helper plan <需求文档> [中文功能名] 生成项目计划工作台
+  code-helper plan <需求文档> [中文功能名] 生成项目计划文档
   code-helper manual-test <中文功能名> [标题] 生成页面手工测试文档
   code-helper archive <中文功能名>       将功能文档移动到 archive 并识别为已结束
   code-helper tasks [--json]           查看 active / archived / mixed 任务

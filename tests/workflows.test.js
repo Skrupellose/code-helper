@@ -41,8 +41,9 @@ test("createPlanWorkbench 会生成计划、结果、状态和手工测试文档
     const manual = await readFile(join(root, "code-helper-docs/result-doc/订单管理升级/手工测试.md"), "utf8");
 
     assert.equal(operations.length, 4);
-    assert.match(plan, /当前推进建议/);
-    assert.match(plan, /页面相关测试只生成手工测试文档/);
+    assert.match(plan, /下一步建议/);
+    assert.match(plan, /核心实现/);
+    assert.match(plan, /涉及页面、可视化或浏览器链路时，只生成手工测试文档/);
     assert.match(result, /实施总结/);
     assert.match(manual, /不默认执行 Playwright/);
   } finally {

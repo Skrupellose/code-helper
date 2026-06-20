@@ -6,17 +6,17 @@
 ### 核心规则
 
 1. 开始新需求、迁移、重构或反馈修复前，先读取本区块索引到的专题规则。
-2. 长期规则写入 `code-helper-docs/user-rules/`，短期过程写入 `code-helper-docs/result-doc/`，当前驾驶舱写入 `code-helper-docs/status-doc/`。
+2. 长期规则写入 `code-helper-docs/user-rules/`，短期过程写入 `code-helper-docs/result-doc/`，当前状态记录写入 `code-helper-docs/status-doc/`。
 3. 不把一次性调试过程、临时失败细节或大段实现流水写进入口文档。
 
 ### 专题规则索引
 
 - 项目记忆规则优化：整理或更新 `AGENTS.md` / `CLAUDE.md` 时，读取 `code-helper-docs/user-rules/项目记忆规则优化.md`。
-- 项目计划优化：开始大型需求、迁移、重构或多阶段任务时，读取 `code-helper-docs/user-rules/项目计划工作台规范.md`。
+- 项目计划优化：开始大型需求、迁移、重构或多阶段任务时，读取 `code-helper-docs/user-rules/项目计划管理规范.md`。
 - 执行结果总结：完成小节点后，读取 `code-helper-docs/user-rules/执行结果总结规范.md` 并写入 result-doc。
 - 测试策略约束：涉及页面的测试只生成手工测试文档；工具只执行纯逻辑测试，读取 `code-helper-docs/user-rules/测试策略规范.md`。
 - 文档归档：功能完成或手动移动到 archive 后，任务视为已结束，读取 `code-helper-docs/user-rules/文档归档规范.md`。
-- 规则检查：提交或阶段收口前运行 `npx code-helper check`，确认协作文档结构仍完整。
+- 规则检查：提交或阶段结束前运行 `npx code-helper check`，确认协作文档结构仍完整。
 - Skills 管理：需要让 Codex 或 Claude Code 在当前项目自动发现 code-helper skills 时，执行 `npx code-helper skills register`。
 
 ### 文档维护规则

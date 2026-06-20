@@ -6,7 +6,7 @@
 
 ## 调用时机
 
-- 修改 CLI 菜单、输入流程、功能开关、初始化、检查、计划工作台、归档或任务状态功能时
+- 修改 CLI 菜单、输入流程、功能开关、初始化、检查、计划文档、归档、任务状态、跨平台路径处理或用户可见文案时
 - 修改 `code-helper-docs/plan-doc/`、`code-helper-docs/result-doc/`、`code-helper-docs/status-doc/` 文档生成规则时
 - 修改测试策略、发布流程、GitHub 仓库初始化或提交推送流程时
 - 回答用户如何本地测试、分享、打包或发布 code-helper 时
@@ -38,3 +38,8 @@
 19. 用户可以用 `npx code-helper skills register all` 强制注册两套，也可以用 `npx code-helper skills register codex` 或 `npx code-helper skills register claudecode` 只注册单个 agent 工具。
 20. 取消注册只删除 `.agents/skills/code-helper-*` 和 `.claude/skills/code-helper-*` 受控目录，不触碰用户自己的 `.agents/skills` 或 `.claude/skills` 内容。
 21. 本地验证优先运行 `npm test`、`npm run check`、`npm pack --dry-run`，必要时再用同级 demo 项目验证真实 CLI 流程。
+22. 所有用户可见文案、README、规则文档和 skill 内容必须符合中文产品语境，避免“状态驾驶舱”“计划工作台”“执行工作台”“阶段收口”“当前推进建议”“阻塞回归入口”等生硬表达；优先使用“状态记录”“计划文档”“执行计划”“阶段结束”“下一步建议”“后续检查点”等自然表述。
+23. `code-helper-plan-workbench` 的内容必须保持通用，不应默认任务是前端页面或组件；计划描述要覆盖 CLI、后端服务、数据任务、平台能力、跨模块协作和页面等多种项目类型。
+24. 修改 `src/templates.ts` 中的内置 skill 或规则模板后，必须同步刷新 `.code-helper/skills/`，并在本项目同时刷新 `.agents/skills/code-helper-*` 与 `.claude/skills/code-helper-*`，保证 Codex 和 Claude Code 看到的项目级 skills 内容一致。
+25. 新增或修改 TypeScript 代码时，公共函数、复杂分支和跨平台兼容逻辑应保留清晰中文注释；简单自解释代码不添加空泛注释。
+26. 工具必须同时兼容 macOS 和 Windows。新增路径、文件移动、归档、拖拽输入、CLI 参数解析、skills 注册和文档生成逻辑时，必须使用跨平台路径 API，避免硬编码 `/`、反斜杠、盘符假设或仅适用于单一系统的 shell 行为；涉及路径的改动必须补充或更新 Windows 与 macOS 兼容用例。
