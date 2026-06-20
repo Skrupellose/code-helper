@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "entryFiles": {
+    "agents": true,
+    "claude": false
+  },
+  "directories": {
+    "workspace": ".agent/code-helper",
+    "userRules": ".agent/user-rules",
+    "planDoc": ".agent/plan-doc",
+    "resultDoc": ".agent/result-doc",
+    "statusDoc": ".agent/status-doc"
+  },
+  "features": {
+    "memoryTuning": {
+      "enabled": true
+    },
+    "planWorkbench": {
+      "enabled": true
+    },
+    "resultSummary": {
+      "enabled": true
+    },
+    "testingPolicy": {
+      "enabled": true
+    },
+    "checks": {
+      "enabled": true
+    },
+    "gitHooks": {
+      "enabled": false
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "name": "code-helper",
+  "version": "0.1.0",
+  "description": "通用 agent 协作工作流 CLI，用于初始化项目规则、维护记忆、生成计划工作台并检查协作规范。",
+  "type": "module",
+  "bin": {
+    "code-helper": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test tests/*.test.js",
+    "check": "npm run build && node dist/index.js check"
+  },
+  "keywords": [
+    "agent",
+    "workflow",
+    "codex",
+    "claude",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}
