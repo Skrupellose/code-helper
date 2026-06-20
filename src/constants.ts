@@ -15,6 +15,7 @@ export const FEATURE_KEYS: FeatureKey[] = [
   "planWorkbench",
   "resultSummary",
   "testingPolicy",
+  "documentArchive",
   "checks",
   "gitHooks"
 ];
@@ -28,6 +29,7 @@ export const FEATURE_LABELS: Record<FeatureKey, string> = {
   planWorkbench: "项目计划优化",
   resultSummary: "执行结果总结",
   testingPolicy: "测试策略约束",
+  documentArchive: "文档归档",
   checks: "项目规则检查",
   gitHooks: "Git hooks 模板"
 };
@@ -54,6 +56,7 @@ export const DEFAULT_CONFIG: CodeHelperConfig = {
     planWorkbench: { enabled: true },
     resultSummary: { enabled: true },
     testingPolicy: { enabled: true },
+    documentArchive: { enabled: true },
     checks: { enabled: true },
     gitHooks: { enabled: false }
   }

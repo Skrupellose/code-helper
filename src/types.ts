@@ -7,6 +7,7 @@ export type FeatureKey =
   | "planWorkbench"
   | "resultSummary"
   | "testingPolicy"
+  | "documentArchive"
   | "checks"
   | "gitHooks";
 

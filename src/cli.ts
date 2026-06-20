@@ -2,6 +2,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
 import { FEATURE_KEYS, FEATURE_LABELS } from "./constants.js";
+import { archiveFeature, listTasks } from "./archive.js";
 import { loadConfig, setFeatureEnabled } from "./config.js";
 import { runChecks } from "./checks.js";
 import { initializeProject } from "./init.js";
@@ -30,6 +31,10 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
         return runPlan(projectRoot, args);
       case "manual-test":
         return runManualTest(projectRoot, args);
+      case "archive":
+        return runArchive(projectRoot, args);
+      case "tasks":
+        return runTasks(projectRoot, args);
       case "help":
       case "--help":
       case "-h":
@@ -64,6 +69,8 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
       console.log("4. 生成人工页面测试文档");
       console.log("5. 功能开关管理");
       console.log("6. 项目规则检查");
+      console.log("7. 文档归档");
+      console.log("8. 查看任务状态");
       console.log("0. 退出");
 
       const answer = await rl.question("请选择操作：");
@@ -93,6 +100,14 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
           break;
         case "6":
           await runCheck(projectRoot);
+          break;
+        case "7": {
+          const featureName = await rl.question("请输入要归档的功能名称：");
+          await runArchive(projectRoot, [featureName.trim()].filter(Boolean));
+          break;
+        }
+        case "8":
+          await runTasks(projectRoot, []);
           break;
         case "0":
           shouldExit = true;
@@ -226,6 +241,53 @@ async function runManualTest(projectRoot: string, args: string[]): Promise<numbe
 }
 
 /**
+ * 文档归档命令。
+ * 参数：archive <功能名称>。
+ */
+async function runArchive(projectRoot: string, args: string[]): Promise<number> {
+  const [featureName] = args;
+
+  if (!featureName) {
+    console.error("缺少功能名称。用法：code-helper archive <功能名称>");
+    return 1;
+  }
+
+  printOperations(await archiveFeature(projectRoot, featureName));
+  await runTasks(projectRoot, []);
+  return 0;
+}
+
+/**
+ * 任务状态列表命令。
+ * 参数：tasks [--json]。
+ */
+async function runTasks(projectRoot: string, args: string[]): Promise<number> {
+  const tasks = await listTasks(projectRoot);
+
+  if (args.includes("--json")) {
+    console.log(JSON.stringify(tasks, null, 2));
+    return 0;
+  }
+
+  if (tasks.length === 0) {
+    console.log("当前没有发现 plan/result/status 任务文档。");
+    return 0;
+  }
+
+  for (const task of tasks) {
+    console.log(`${task.featureName}: ${task.status}`);
+    if (task.activeArtifacts.length > 0) {
+      console.log(`  active: ${task.activeArtifacts.join(", ")}`);
+    }
+    if (task.archivedArtifacts.length > 0) {
+      console.log(`  archived: ${task.archivedArtifacts.join(", ")}`);
+    }
+  }
+
+  return 0;
+}
+
+/**
  * 打印操作结果。
  * 路径可能是绝对路径，保留原样方便用户定位。
  */
@@ -281,5 +343,7 @@ function printHelp(): void {
   code-helper features disable <key>  关闭功能
   code-helper plan <需求文档> [名称]   生成项目计划工作台
   code-helper manual-test <名称> [标题] 生成页面手工测试文档
+  code-helper archive <名称>           将功能文档移动到 archive 并识别为已结束
+  code-helper tasks [--json]           查看 active / archived / mixed 任务
 `);
 }

@@ -69,10 +69,14 @@ async function createDirectories(
     `${config.directories.workspace}/skills`,
     `${config.directories.workspace}/hooks`,
     `${config.directories.workspace}/checks`,
+    `${config.directories.workspace}/archives`,
     config.directories.userRules,
     config.directories.planDoc,
+    `${config.directories.planDoc}/archive`,
     config.directories.resultDoc,
-    config.directories.statusDoc
+    `${config.directories.resultDoc}/archive`,
+    config.directories.statusDoc,
+    `${config.directories.statusDoc}/archive`
   ];
 
   for (const directory of directories) {

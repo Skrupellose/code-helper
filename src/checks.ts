@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { ENTRY_BLOCK_END, ENTRY_BLOCK_START, FEATURE_KEYS } from "./constants.js";
+import { listTasks } from "./archive.js";
 import { loadConfig } from "./config.js";
 import { projectPath, readTextIfExists, writeText } from "./fs-utils.js";
 import type { CheckIssue, CodeHelperConfig } from "./types.js";
@@ -23,11 +24,55 @@ export async function runChecks(projectRoot: string): Promise<CheckIssue[]> {
   issues.push(...(await checkRuleDocuments(projectRoot, config)));
   issues.push(...(await checkPlanDirectories(projectRoot, config)));
   issues.push(...(await checkTestingPolicy(projectRoot, config)));
+  issues.push(...(await checkArchiveState(projectRoot, config)));
 
   await writeText(
     projectPath(projectRoot, `${config.directories.workspace}/checks/latest.json`),
     `${JSON.stringify({ checkedAt: new Date().toISOString(), issues }, null, 2)}\n`
   );
+
+  return issues;
+}
+
+/**
+ * 检查文档归档目录和任务状态。
+ * archive 中的任务视为已结束；同名任务同时存在 active 与 archive 时提示人工收口。
+ */
+async function checkArchiveState(projectRoot: string, config: CodeHelperConfig): Promise<CheckIssue[]> {
+  const issues: CheckIssue[] = [];
+
+  if (!config.features.documentArchive.enabled) {
+    return issues;
+  }
+
+  for (const directory of [
+    `${config.directories.planDoc}/archive`,
+    `${config.directories.resultDoc}/archive`,
+    `${config.directories.statusDoc}/archive`
+  ]) {
+    const files = await safeReadDirectory(projectPath(projectRoot, directory));
+
+    if (files === undefined) {
+      issues.push({
+        level: "error",
+        code: "missing-archive-directory",
+        message: `归档目录不存在：${directory}`,
+        path: directory,
+        suggestion: "运行 `npx code-helper init` 创建文档归档目录。"
+      });
+    }
+  }
+
+  for (const task of await listTasks(projectRoot)) {
+    if (task.status === "mixed") {
+      issues.push({
+        level: "warning",
+        code: "mixed-task-archive-state",
+        message: `任务同时存在活动文档和归档文档：${task.featureName}`,
+        suggestion: "确认该任务是否已经结束；如果已结束，运行 `npx code-helper archive <feature>` 或手动补齐归档。"
+      });
+    }
+  }
 
   return issues;
 }

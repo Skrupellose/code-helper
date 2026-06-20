@@ -24,6 +24,9 @@
     "testingPolicy": {
       "enabled": true
     },
+    "documentArchive": {
+      "enabled": true
+    },
     "checks": {
       "enabled": true
     },
