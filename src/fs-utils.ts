@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, posix, resolve } from "node:path";
 
 import { ENTRY_BLOCK_END, ENTRY_BLOCK_START } from "./constants.js";
 import type { OperationResult } from "./types.js";
@@ -18,6 +18,14 @@ function isNotFoundError(error: unknown): boolean {
  */
 export function projectPath(projectRoot: string, relativePath: string): string {
   return resolve(projectRoot, relativePath);
+}
+
+/**
+ * 生成面向文档、状态 JSON 和检查结果展示的相对路径。
+ * 展示路径固定使用 POSIX 风格 `/`，避免 Windows 下输出反斜杠导致 agent 记忆和测试结果不一致。
+ */
+export function portablePath(...segments: string[]): string {
+  return posix.join(...segments.map((segment) => segment.replace(/\\/gu, "/")));
 }
 
 /**

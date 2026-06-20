@@ -2,7 +2,7 @@ import { mkdir, readdir, rename, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { loadConfig } from "./config.js";
-import { ensureDirectory, projectPath, writeText } from "./fs-utils.js";
+import { ensureDirectory, portablePath, projectPath, writeText } from "./fs-utils.js";
 import type { CodeHelperConfig, OperationResult } from "./types.js";
 import { normalizeDocumentName, normalizeFeatureName } from "./workflows.js";
 
@@ -104,20 +104,20 @@ export async function listTasks(projectRoot: string): Promise<TaskRecord[]> {
 function getArchiveMoves(config: CodeHelperConfig, featureName: string): Array<{ from: string; to: string }> {
   return [
     {
-      from: join(config.directories.planDoc, `${featureName}.md`),
-      to: join(config.directories.planDoc, "archive", `${featureName}.md`)
+      from: portablePath(config.directories.planDoc, `${featureName}.md`),
+      to: portablePath(config.directories.planDoc, "archive", `${featureName}.md`)
     },
     {
-      from: join(config.directories.resultDoc, featureName),
-      to: join(config.directories.resultDoc, "archive", featureName)
+      from: portablePath(config.directories.resultDoc, featureName),
+      to: portablePath(config.directories.resultDoc, "archive", featureName)
     },
     {
-      from: join(config.directories.statusDoc, `${featureName}-状态.md`),
-      to: join(config.directories.statusDoc, "archive", `${featureName}-状态.md`)
+      from: portablePath(config.directories.statusDoc, `${featureName}-状态.md`),
+      to: portablePath(config.directories.statusDoc, "archive", `${featureName}-状态.md`)
     },
     {
-      from: join(config.directories.statusDoc, `${featureName}-status.md`),
-      to: join(config.directories.statusDoc, "archive", `${featureName}-status.md`)
+      from: portablePath(config.directories.statusDoc, `${featureName}-status.md`),
+      to: portablePath(config.directories.statusDoc, "archive", `${featureName}-status.md`)
     }
   ];
 }
@@ -222,7 +222,7 @@ async function collectPlanDocuments(
   archived: boolean
 ): Promise<void> {
   const directory = archived
-    ? join(config.directories.planDoc, "archive")
+    ? portablePath(config.directories.planDoc, "archive")
     : config.directories.planDoc;
   const files = await safeReadDirectory(projectPath(projectRoot, directory));
 
@@ -232,7 +232,7 @@ async function collectPlanDocuments(
     }
 
     const featureName = file.slice(0, -".md".length);
-    addArtifact(tasks, featureName, join(directory, file), archived);
+    addArtifact(tasks, featureName, portablePath(directory, file), archived);
   }
 }
 
@@ -246,7 +246,7 @@ async function collectResultDocuments(
   archived: boolean
 ): Promise<void> {
   const directory = archived
-    ? join(config.directories.resultDoc, "archive")
+    ? portablePath(config.directories.resultDoc, "archive")
     : config.directories.resultDoc;
   const entries = await safeReadDirectory(projectPath(projectRoot, directory));
 
@@ -255,12 +255,12 @@ async function collectResultDocuments(
       continue;
     }
 
-    const absolutePath = projectPath(projectRoot, join(directory, entry));
+    const absolutePath = projectPath(projectRoot, portablePath(directory, entry));
     if (!(await isDirectory(absolutePath))) {
       continue;
     }
 
-    addArtifact(tasks, entry, join(directory, entry), archived);
+    addArtifact(tasks, entry, portablePath(directory, entry), archived);
   }
 }
 
@@ -274,7 +274,7 @@ async function collectStatusDocuments(
   archived: boolean
 ): Promise<void> {
   const directory = archived
-    ? join(config.directories.statusDoc, "archive")
+    ? portablePath(config.directories.statusDoc, "archive")
     : config.directories.statusDoc;
   const files = await safeReadDirectory(projectPath(projectRoot, directory));
 
@@ -285,7 +285,7 @@ async function collectStatusDocuments(
       continue;
     }
 
-    addArtifact(tasks, featureName, join(directory, file), archived);
+    addArtifact(tasks, featureName, portablePath(directory, file), archived);
   }
 }
 

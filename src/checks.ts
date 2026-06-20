@@ -1,10 +1,9 @@
 import { readdir } from "node:fs/promises";
-import { join } from "node:path";
 
 import { ENTRY_BLOCK_END, ENTRY_BLOCK_START, FEATURE_KEYS } from "./constants.js";
 import { listTasks } from "./archive.js";
 import { loadConfig } from "./config.js";
-import { projectPath, readTextIfExists, writeText } from "./fs-utils.js";
+import { portablePath, projectPath, readTextIfExists, writeText } from "./fs-utils.js";
 import type { CheckIssue, CodeHelperConfig } from "./types.js";
 
 /**
@@ -47,11 +46,11 @@ async function checkChineseWorkbenchDocuments(projectRoot: string, config: CodeH
   }
 
   issues.push(...(await checkPlanDocumentNames(projectRoot, config, config.directories.planDoc)));
-  issues.push(...(await checkPlanDocumentNames(projectRoot, config, join(config.directories.planDoc, "archive"))));
+  issues.push(...(await checkPlanDocumentNames(projectRoot, config, portablePath(config.directories.planDoc, "archive"))));
   issues.push(...(await checkResultDocumentNames(projectRoot, config, config.directories.resultDoc)));
-  issues.push(...(await checkResultDocumentNames(projectRoot, config, join(config.directories.resultDoc, "archive"))));
+  issues.push(...(await checkResultDocumentNames(projectRoot, config, portablePath(config.directories.resultDoc, "archive"))));
   issues.push(...(await checkStatusDocumentNames(projectRoot, config, config.directories.statusDoc)));
-  issues.push(...(await checkStatusDocumentNames(projectRoot, config, join(config.directories.statusDoc, "archive"))));
+  issues.push(...(await checkStatusDocumentNames(projectRoot, config, portablePath(config.directories.statusDoc, "archive"))));
 
   return issues;
 }
@@ -79,7 +78,7 @@ async function checkPlanDocumentNames(
 
     const featureName = file.slice(0, -".md".length);
     if (!containsChinese(featureName)) {
-      issues.push(createChineseNameIssue(join(relativeDirectory, file), "计划文档必须使用中文功能名，例如 订单管理升级.md。"));
+      issues.push(createChineseNameIssue(portablePath(relativeDirectory, file), "计划文档必须使用中文功能名，例如 订单管理升级.md。"));
     }
   }
 
@@ -107,7 +106,7 @@ async function checkResultDocumentNames(
       continue;
     }
 
-    const taskDirectory = join(relativeDirectory, entry);
+    const taskDirectory = portablePath(relativeDirectory, entry);
     if (!containsChinese(entry)) {
       issues.push(createChineseNameIssue(taskDirectory, "结果目录必须使用中文功能名，例如 订单管理升级/。"));
     }
@@ -123,7 +122,7 @@ async function checkResultDocumentNames(
       }
 
       if (file !== "实施记录.md" && file !== "手工测试.md") {
-        issues.push(createChineseNameIssue(join(taskDirectory, file), "结果文件必须使用中文命名，固定使用 实施记录.md 或 手工测试.md。"));
+        issues.push(createChineseNameIssue(portablePath(taskDirectory, file), "结果文件必须使用中文命名，固定使用 实施记录.md 或 手工测试.md。"));
       }
     }
   }
@@ -153,13 +152,13 @@ async function checkStatusDocumentNames(
     }
 
     if (!file.endsWith("-状态.md")) {
-      issues.push(createChineseNameIssue(join(relativeDirectory, file), "状态文档必须使用 <中文功能名>-状态.md。"));
+      issues.push(createChineseNameIssue(portablePath(relativeDirectory, file), "状态文档必须使用 <中文功能名>-状态.md。"));
       continue;
     }
 
     const featureName = file.slice(0, -"-状态.md".length);
     if (!containsChinese(featureName)) {
-      issues.push(createChineseNameIssue(join(relativeDirectory, file), "状态文档的功能名必须包含中文。"));
+      issues.push(createChineseNameIssue(portablePath(relativeDirectory, file), "状态文档的功能名必须包含中文。"));
     }
   }
 
@@ -328,7 +327,7 @@ async function checkRuleDocuments(projectRoot: string, config: CodeHelperConfig)
   }
 
   for (const file of markdownFiles) {
-    const relativePath = join(config.directories.userRules, file);
+    const relativePath = portablePath(config.directories.userRules, file);
     const content = await readTextIfExists(projectPath(projectRoot, relativePath));
 
     for (const section of requiredSections) {
