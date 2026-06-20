@@ -100,11 +100,9 @@ export async function upsertMarkdownSection(
   }
 
   const normalizedSection = `${sectionTitle}\n\n${sectionContent.trim()}`;
-  const pattern = new RegExp(`(^${escapeRegExp(sectionTitle)}\\n\\n)([\\s\\S]*?)(?=\\n## |\\s*$)`, "m");
+  const nextContent = replaceMarkdownSection(existing, sectionTitle, normalizedSection);
 
-  if (pattern.test(existing)) {
-    const nextContent = existing.replace(pattern, normalizedSection);
-
+  if (nextContent !== undefined) {
     if (nextContent === existing) {
       return {
         path,
@@ -129,6 +127,34 @@ export async function upsertMarkdownSection(
     action: "updated",
     message: `已追加 ${sectionTitle} 小节`
   };
+}
+
+/**
+ * 通过行扫描替换 Markdown 二级小节。
+ * 不使用复杂正则，是为了保证多次 init 时小节边界稳定、不会残留旧列表项。
+ */
+function replaceMarkdownSection(content: string, sectionTitle: string, replacement: string): string | undefined {
+  const lines = content.split("\n");
+  const startIndex = lines.findIndex((line) => line.trim() === sectionTitle);
+
+  if (startIndex === -1) {
+    return undefined;
+  }
+
+  let endIndex = lines.length;
+
+  for (let index = startIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+
+    if (line.startsWith("## ") && line.trim() !== sectionTitle) {
+      endIndex = index;
+      break;
+    }
+  }
+
+  const before = lines.slice(0, startIndex);
+  const after = lines.slice(endIndex);
+  return [...before, replacement, ...after].join("\n");
 }
 
 /**

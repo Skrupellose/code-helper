@@ -50,6 +50,8 @@ test("initializeProject 会自动维护用户手动创建的 CLAUDE.md 并同步
     await writeFile(join(root, "CLAUDE.md"), "# Existing Claude\n\n用户手动创建的 Claude 规则。\n", "utf8");
 
     await initializeProject({ projectRoot: root });
+    await initializeProject({ projectRoot: root });
+    await initializeProject({ projectRoot: root });
 
     const claude = await readFile(join(root, "CLAUDE.md"), "utf8");
     const config = await readFile(join(root, ".agent/code-helper/config.json"), "utf8");
@@ -60,6 +62,7 @@ test("initializeProject 会自动维护用户手动创建的 CLAUDE.md 并同步
     assert.match(config, /"claude": true/);
     assert.match(memoryRule, /- `AGENTS.md`/);
     assert.match(memoryRule, /- `CLAUDE.md`/);
+    assert.equal([...memoryRule.matchAll(/- `CLAUDE\.md`/g)].length, 1);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
