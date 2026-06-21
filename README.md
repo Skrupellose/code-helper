@@ -1,164 +1,112 @@
 # code-helper
 
-`code-helper` 是一个通用 agent 协作工作流 CLI，用于提高项目中多个 agent 协作时的规范度和上下文持久化能力。
+`code-helper` 是一个面向 agent 协作项目的 CLI，用于初始化协作规则、生成计划文档、记录执行状态，并在任务结束前检查是否还有未处理事项。
 
-## 使用方式
+## 快速开始
 
 ```bash
 npx @skrupellose/code-helper
 ```
 
-交互菜单支持方向键移动，空格或回车确认。不支持按键交互的终端会回退为数字菜单，输入 `0` 返回上一级。主菜单会用 `【分组】` 标题和空行区分功能区域；raw mode 菜单使用固定名称列展示说明，数字兜底菜单会把说明缩进到下一行，方便扫描。菜单动作会打印开始和完成状态，并在 TTY 模式下等待回车后再返回菜单，避免执行结果一闪而过。
-
-数字兜底菜单示例：
-
-```text
-【任务推进】
-   2. 生成任务计划
-      根据需求文档生成计划、状态记录和执行记录入口
-   3. 生成手工测试文档
-      为页面或交互验收生成需要人工执行的测试文档
-```
-
-主菜单按功能用途分组：
-
-| 分组 | 菜单项 | 说明 |
-| --- | --- | --- |
-| 项目准备 | 初始化/刷新项目配置 | 创建或更新工作区、入口索引、规则模板、Skills 和可用 hooks |
-| 任务推进 | 生成任务计划 | 根据需求文档生成计划、状态记录和执行记录入口 |
-| 任务推进 | 生成手工测试文档 | 为页面或交互验收生成需要人工执行的测试文档 |
-| 任务推进 | 检查功能完成情况 | 检查当前任务是否满足完成条件，并提示后续动作 |
-| 项目维护 | 查看任务列表 | 查看 active、archived 和 mixed 状态的任务文档 |
-| 项目维护 | 归档已完成任务 | 将已结束任务的计划、结果和状态文档移动到 archive |
-| 项目维护 | 检查协作规范 | 检查入口文档、规则目录、计划和归档结构是否完整 |
-| 工具设置 | 功能管理 | 应用或取消项目级 Skills、Agent hooks 和 Git hook |
-| 工具设置 | 管理项目 Skills | 查看、注册、取消注册、检查或分析项目级 Skills |
-| 工具设置 | 管理 Hooks | 查看、安装或卸载 code-helper 管理的 Git / Agent hooks |
-
-也可以使用非交互命令：
+首次在项目中使用时，建议先初始化：
 
 ```bash
 npx @skrupellose/code-helper init
-npx @skrupellose/code-helper sync-local
-npx @skrupellose/code-helper check
-npx @skrupellose/code-helper features list
+```
+
+初始化会根据当前项目已有的 `AGENTS.md`、`CLAUDE.md` 或 `.github/copilot-instructions.md` 判断要维护的 agent 工具。无法判断时，交互式初始化会让你选择目标；非交互环境会保守跳过项目级 skills 和 agent hooks。
+
+## 常用命令
+
+```bash
+npx @skrupellose/code-helper init
 npx @skrupellose/code-helper plan docs/订单管理需求.md 订单管理升级
 npx @skrupellose/code-helper manual-test 订单管理升级
 npx @skrupellose/code-helper finish 订单管理升级
 npx @skrupellose/code-helper archive 订单管理升级
-npx @skrupellose/code-helper archive 订单管理升级 --resolve-mixed
 npx @skrupellose/code-helper tasks
-npx @skrupellose/code-helper init codex
-npx @skrupellose/code-helper skills register
-npx @skrupellose/code-helper hooks install agent
-npx @skrupellose/code-helper hooks list
+npx @skrupellose/code-helper check
 ```
 
-在交互式“生成任务计划”里，可以直接把需求文档拖到终端；工具会识别引号、`file://`、反斜杠转义空格和项目内绝对路径。
+交互菜单支持方向键移动，空格或回车确认。不支持按键交互的终端会回退为数字菜单。
 
-生成项目计划时，会创建计划文档、实施记录和当前状态记录；`status-doc` 会同步生成当前执行入口，包含“当前执行节点”和“子计划队列”，用于让 agent 按计划逐步推进。手工测试文档由 `manual-test` 按需单独生成。
+不带功能名运行 `manual-test`、`finish` 或 `archive` 时，TTY 终端会优先展示当前活动任务列表；仍然支持直接传入中文功能名。
 
-完成小节点、识别到功能变更、准备最终回复或切换任务前，可以运行 `code-helper finish <中文功能名> --check-only`。它只输出完成判断和后续建议，不会自动更新长期记忆、归档或提交。
+## 功能概览
 
-生成手工测试文档、检查功能完成情况和归档已完成任务时，工具会优先读取当前 `plan-doc` / `result-doc` / `status-doc` 中的活动任务，让用户从列表选择；仍然支持直接传入中文功能名。
+| 命令 | 作用 |
+| --- | --- |
+| `init` | 创建或更新协作入口、规则模板、项目级 skills 和可选 hooks |
+| `plan` | 根据需求文档生成计划文档、执行记录和状态记录 |
+| `manual-test` | 为页面、可视化或人工验收场景生成手工测试文档 |
+| `finish` | 检查当前任务是否满足完成条件，并提示后续动作 |
+| `archive` | 将已结束任务的计划、结果和状态文档移动到 archive |
+| `tasks` | 查看 active、archived 和 mixed 状态的任务文档 |
+| `check` | 检查协作文档结构是否完整 |
+| `skills` | 查看、注册、取消注册或检查项目级 skills |
+| `hooks` | 查看、安装或卸载 code-helper 管理的 Git / Agent hooks |
 
-## 默认工作区
+## 会创建或更新的文件
 
-初始化后会创建或按目标写入：
+初始化后，工具可能会创建或更新以下受控内容：
 
-- `.code-helper/`：工具配置、内置 skills 模板、hook sample 和检查结果
-- `.agents/skills/`：Codex 项目级 skills 注册目录，当前项目选择或识别到 Codex 时注册 code-helper skills
-- `.claude/skills/`：Claude Code 项目级 skills 注册目录，当前项目选择或识别到 Claude Code 时注册 code-helper skills
-- `.github/copilot-instructions.md`：GitHub Copilot 项目入口记忆文档，当前项目选择或识别到 GitHub Copilot 时写入 code-helper 入口区块
-- `.github/skills/`：GitHub Copilot 项目级 skills 注册目录，当前项目选择或识别到 GitHub Copilot Agent Skills 时注册 code-helper skills
-- `code-helper-docs/user-rules/`：长期专题规则
-- `code-helper-docs/plan-doc/`：项目计划
-- `code-helper-docs/result-doc/`：执行结果和手工测试文档
-- `code-helper-docs/status-doc/`：当前状态记录
-- `code-helper-docs/*/archive/`：已完成或已结束任务的归档文档
+| 路径 | 用途 |
+| --- | --- |
+| `.code-helper/` | 工具配置、受控模板和可选检查输出 |
+| `code-helper-docs/user-rules/` | 长期协作规则 |
+| `code-helper-docs/plan-doc/` | 任务计划文档 |
+| `code-helper-docs/result-doc/` | 执行记录和手工测试文档 |
+| `code-helper-docs/status-doc/` | 当前任务状态记录 |
+| `AGENTS.md` | Codex 项目入口文档 |
+| `CLAUDE.md` | Claude Code 项目入口文档 |
+| `.github/copilot-instructions.md` | GitHub Copilot 项目入口文档 |
 
-## 默认策略
+入口文档只更新 `<!-- code-helper:start -->` 和 `<!-- code-helper:end -->` 之间的受控区块，不会覆盖用户已有内容。
 
-- 初始化会优先根据已有 `AGENTS.md`、`CLAUDE.md` 和 GitHub Copilot 入口判断 agent 工具；完全无法判断时，交互式 init 会让用户选择目标，非交互 init 会保守跳过项目级 skills 和 Agent hooks。
-- `init` 一旦确定目标，就会补齐对应入口记忆文档：Codex 写 `AGENTS.md`，Claude Code 写 `CLAUDE.md`，GitHub Copilot 写 `.github/copilot-instructions.md`；`init all` 会补齐三类入口。
-- 初始化不会覆盖已有专题规则。
-- `.code-helper/skills/` 只是内置 skills 模板源，不会被 Codex 或 Claude Code 默认识别。
-- `npx @skrupellose/code-helper init [target]` 支持显式指定 `codex`、`claudecode`、`githubcopilot` 或 `all`；init 确定目标后，会按同一批目标注册项目级 skills，并安装 Codex / Claude Code 对应的 Agent hooks。
-- `npx @skrupellose/code-helper skills register` 不带 target 时按当前项目已有 `AGENTS.md` / `CLAUDE.md` / GitHub Copilot 入口自动选择目标；无法识别时跳过，传 `all` 时强制注册全部三类目标。
-- 入口文档只更新 `<!-- code-helper:start -->` 和 `<!-- code-helper:end -->` 之间的受控区块。
-- 计划、结果、状态和测试文档必须使用中文命名与中文总结，例如 `code-helper-docs/plan-doc/订单管理升级.md`、`code-helper-docs/result-doc/订单管理升级/实施记录.md`、`code-helper-docs/status-doc/订单管理升级-状态.md`。
-- 页面相关测试只生成严格手工测试文档。
-- 工具自己只执行纯逻辑测试，例如函数单元测试或非浏览器集成测试。
-- 检查功能完成情况只做判断和提示；更新长期记忆、归档已完成任务、提交和发布都需要用户确认。
-- 功能完成后可以执行 `npx @skrupellose/code-helper archive <中文功能名>` 归档文档。
-- 不带功能名执行 `manual-test`、`finish` 或 `archive` 时，TTY 终端会优先展示当前活动任务选择列表。
-- 用户手动移动到 `archive/` 的任务会被识别为已结束任务。
-- `check` 默认只输出检查结果；需要写入 `.code-helper/checks/latest.json` 时使用 `check --write-report`。
-- init 不会自动安装 Git hook；Git hook 只在显式执行 `hooks install git` 时安装。`hooks install` / `hooks uninstall` 必须显式传入 `git`、`codex`、`claudecode`、`agent` 或 `all`，避免误安装全部 hooks。
+## 任务文档
 
-## 功能管理
+`plan` 默认生成三类文档：
+
+- `code-helper-docs/plan-doc/<中文功能名>.md`
+- `code-helper-docs/result-doc/<中文功能名>/实施记录.md`
+- `code-helper-docs/status-doc/<中文功能名>-状态.md`
+
+页面、可视化、浏览器链路或人工业务验收场景，可以用 `manual-test` 单独生成：
+
+- `code-helper-docs/result-doc/<中文功能名>/手工测试.md`
+
+已完成任务可以用 `archive` 移入对应的 `archive/` 目录。手动移动到 `archive/` 的任务也会被识别为已结束任务。
+
+## 完成检查
+
+完成小节点、识别到功能变更、准备最终回复或切换任务前，可以运行：
+
+```bash
+npx @skrupellose/code-helper finish 订单管理升级 --check-only
+```
+
+`finish` 只输出完成判断和后续建议，不会自动更新长期记忆、归档文档、提交代码或发布包。
+
+## 可选 Agent 集成
 
 ```bash
 npx @skrupellose/code-helper skills register
-npx @skrupellose/code-helper skills unregister
-npx @skrupellose/code-helper hooks install agent
-npx @skrupellose/code-helper hooks uninstall agent
-npx @skrupellose/code-helper hooks install git
-npx @skrupellose/code-helper hooks uninstall git
-```
-
-交互菜单中的“功能管理”会直接应用或取消 Skills、Agent hooks、Git hook，也可以刷新规则和模板。应用或取消项目级 Skills 时，可以选择 Codex、Claude Code、GitHub Copilot、全部，或使用当前项目识别到的默认 agent 工具；应用或取消 Agent hooks 时，只提供 Codex、Claude Code 和全部可用 Agent hooks，GitHub Copilot 不会安装 Agent hook。`features` 命令仍保留为高级配置接口，普通使用不需要先切换功能开关。
-
-## 管理项目 Skills
-
-```bash
-npx @skrupellose/code-helper skills list
+npx @skrupellose/code-helper skills register codex
+npx @skrupellose/code-helper skills register claudecode
 npx @skrupellose/code-helper skills register githubcopilot
-npx @skrupellose/code-helper skills doctor
-npx @skrupellose/code-helper skills audit
-```
-
-- `skills doctor`：检查项目级 skills 的结构、frontmatter、description 和 code-helper 模板是否过期。
-- `skills audit`：根据当前入口文档、专题规则和计划/归档目录，给出缺失注册或缺失 skill 的建议。
-
-## 管理 Hooks
-
-```bash
-npx @skrupellose/code-helper hooks list
-npx @skrupellose/code-helper hooks install git
 npx @skrupellose/code-helper hooks install codex
 npx @skrupellose/code-helper hooks install claudecode
-npx @skrupellose/code-helper hooks uninstall agent
 ```
 
-- `hooks install` 会直接应用对应 hook，并同步内部状态。
-- Agent hooks 只运行 `finish --check-only`，不会自动更新长期记忆、归档或提交。
-- 卸载只移除 code-helper 管理的 hook，不删除用户自己的 hooks。
+`skills register` 会把 code-helper 的项目级 skills 注册到对应 agent 工具目录。不带 target 时，会按当前项目已有入口文件推断目标；传 `all` 时强制注册 Codex、Claude Code 和 GitHub Copilot 三类目标。
 
-## 本地验证与发布检查
+`hooks install` 只安装指定目标的 hook。Git hook 需要显式执行 `hooks install git`，初始化不会自动安装 Git hook。
+
+## 本地验证
 
 ```bash
-npm run sync:local
 npm test
-npm run check
 npm pack --dry-run
 ```
 
-开发 code-helper 本仓库时，修改 `src/templates.ts`、入口规则、内置 skills 或项目级 skills 相关逻辑后，先运行 `npm run sync:local`。它会构建当前代码，刷新 `AGENTS.md` 的 code-helper 受控区块、`.code-helper/skills/` 内置模板，并注册 Codex、Claude Code、GitHub Copilot 三类项目级 skills；不会额外创建 `CLAUDE.md`、`.github/copilot-instructions.md` 或安装 hooks。
-
 `npm pack` 前会自动执行构建，避免发布包依赖本地残留的 `dist/`。
-
-## GitHub Actions 与 npm 发布
-
-仓库提供两个 GitHub Actions：
-
-- `CI`：在 PR 和 `main` push 时运行 `npm ci`、`npm test`、`npm run check`、`npm pack --dry-run`，覆盖 Node.js 20 和 22。
-- `Publish to npm`：只支持手动触发，发布当前 `package.json` 中的版本；触发时必须输入 `publish` 确认，并会先检查该版本是否已存在于 npm。
-
-npm 发布建议使用 Trusted Publishing / OIDC，不在 GitHub Secrets 中保存长期 npm token。需要在 npm package 设置中添加 trusted publisher：
-
-- Repository：当前 GitHub 仓库
-- Workflow：`npm-publish.yml`
-- Environment：`npm-publish`
-
-发布前仍需先在代码中完成版本号更新并提交；workflow 不自动改版本、不自动创建 tag、不自动发布未确认的提交。

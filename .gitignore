@@ -1,7 +1,18 @@
 node_modules/
 dist/
 example/
-.code-helper/checks/*.json
-.code-helper/state.json
+
+# code-helper local collaboration state.
+# These files are useful on the maintainer machine but should not be published in the public repository.
+AGENTS.md
+CLAUDE.md
+.codex/
+.agents/
+.claude/
+.code-helper/
+code-helper-docs/
+.github/skills/
+.github/copilot-instructions.md
+
 .DS_Store
 *.log
