@@ -38,13 +38,18 @@ test("createPlanWorkbench 会生成计划、结果、状态和手工测试文档
 
     const plan = await readFile(join(root, "code-helper-docs/plan-doc/订单管理升级.md"), "utf8");
     const result = await readFile(join(root, "code-helper-docs/result-doc/订单管理升级/实施记录.md"), "utf8");
+    const status = await readFile(join(root, "code-helper-docs/status-doc/订单管理升级-状态.md"), "utf8");
     const manual = await readFile(join(root, "code-helper-docs/result-doc/订单管理升级/手工测试.md"), "utf8");
 
     assert.equal(operations.length, 4);
     assert.match(plan, /下一步建议/);
     assert.match(plan, /核心实现/);
+    assert.match(plan, /当前执行节点/);
     assert.match(plan, /涉及页面、可视化或浏览器链路时，只生成手工测试文档/);
     assert.match(result, /实施总结/);
+    assert.match(status, /当前执行节点/);
+    assert.match(status, /子计划队列/);
+    assert.match(status, /一次只推进“当前执行节点”/);
     assert.match(manual, /不默认执行 Playwright/);
   } finally {
     await rm(root, { recursive: true, force: true });
