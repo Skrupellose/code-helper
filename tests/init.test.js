@@ -6,9 +6,29 @@ import { test } from "node:test";
 
 import { initializeProject } from "../dist/init.js";
 import { runChecks } from "../dist/checks.js";
+import { runCli } from "../dist/cli.js";
+
+async function runCliSilently(args, projectRoot) {
+  // CLI 测试只关心文件结果和退出码，捕获日志避免测试输出被初始化摘要刷屏。
+  const logs = [];
+  const originalLog = console.log;
+
+  try {
+    console.log = (...items) => {
+      logs.push(items.join(" "));
+    };
+
+    return {
+      exitCode: await runCli(args, projectRoot),
+      logs
+    };
+  } finally {
+    console.log = originalLog;
+  }
+}
 
 test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", async () => {
-  // 该测试覆盖老项目兼容：只有 AGENTS.md 时只注册 Codex，不误注册其他 agent 工具。
+  // 该测试覆盖老项目兼容：只有 AGENTS.md 时只注册 Codex，并同步安装 Codex Agent hook。
   const root = await mkdtemp(join(tmpdir(), "code-helper-init-"));
 
   try {
@@ -18,12 +38,19 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
     const agents = await readFile(join(root, "AGENTS.md"), "utf8");
     const config = await readFile(join(root, ".code-helper/config.json"), "utf8");
     const codexSkill = await readFile(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
+    const codexHook = await readFile(join(root, ".codex/hooks.json"), "utf8");
 
     assert.ok(result.operations.some((operation) => operation.path.endsWith("项目记忆规则优化.md")));
     assert.match(agents, /用户已有规则/);
     assert.match(agents, /code-helper:start/);
     assert.match(config, /"gitHooks":/);
+    assert.match(config, /"agentHooks": \{\n      "enabled": true\n    \}/);
     assert.match(codexSkill, /name: code-helper-memory-tuning/);
+    assert.match(codexHook, /@skrupellose\/code-helper/);
+    await assert.rejects(
+      () => stat(join(root, ".git/hooks/pre-commit")),
+      /ENOENT/
+    );
     await assert.rejects(
       () => stat(join(root, ".claude/skills/code-helper-memory-tuning/SKILL.md")),
       /ENOENT/
@@ -37,20 +64,199 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
   }
 });
 
-test("initializeProject 在没有入口文档的新项目中注册全部 agent skills", async () => {
-  // 该测试覆盖新项目初始化：无法判断实际使用工具时，默认准备所有支持的项目级 skills。
+test("initializeProject 在没有入口文档的新项目中跳过项目级 skills 和 Agent hooks", async () => {
+  // 该测试覆盖非交互/CI 场景：无法判断实际使用工具时不能默认全量注册。
   const root = await mkdtemp(join(tmpdir(), "code-helper-init-new-"));
 
   try {
-    await initializeProject({ projectRoot: root });
+    const result = await runCliSilently(["init"], root);
+    const config = await readFile(join(root, ".code-helper/config.json"), "utf8");
 
+    assert.equal(result.exitCode, 0);
+    assert.match(config, /"agents": false/);
+    assert.match(config, /"claude": false/);
+    assert.match(config, /"copilot": false/);
+    assert.match(result.logs.join("\n"), /不会默认全量安装/);
+    assert.match(result.logs.join("\n"), /跳过项目级 skills/);
+    await assert.rejects(
+      () => stat(join(root, "AGENTS.md")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, ".claude/settings.json")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, ".github/copilot-instructions.md")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, ".github/skills/code-helper-memory-tuning/SKILL.md")),
+      /ENOENT/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("code-helper init codex 会补齐 AGENTS.md 且不创建 CLAUDE.md", async () => {
+  // 显式选择 Codex 时，入口记忆文档、项目级 skills 和 Codex Agent hook 必须使用同一目标。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-init-codex-"));
+
+  try {
+    const result = await runCliSilently(["init", "codex"], root);
+
+    const agents = await readFile(join(root, "AGENTS.md"), "utf8");
     const codexSkill = await readFile(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
+    const codexHook = await readFile(join(root, ".codex/hooks.json"), "utf8");
+
+    assert.equal(result.exitCode, 0);
+    assert.match(agents, /code-helper:start/);
+    assert.match(codexSkill, /name: code-helper-memory-tuning/);
+    assert.match(codexHook, /@skrupellose\/code-helper/);
+    await assert.rejects(
+      () => stat(join(root, "CLAUDE.md")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, ".github/copilot-instructions.md")),
+      /ENOENT/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("code-helper init claudecode 会补齐 CLAUDE.md 且不创建 AGENTS.md", async () => {
+  // 显式选择 Claude Code 时，不能因为默认配置额外创建 Codex 入口。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-init-claudecode-"));
+
+  try {
+    const result = await runCliSilently(["init", "claudecode"], root);
+
+    const claude = await readFile(join(root, "CLAUDE.md"), "utf8");
     const claudeCodeSkill = await readFile(join(root, ".claude/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
+    const claudeHook = await readFile(join(root, ".claude/settings.json"), "utf8");
+
+    assert.equal(result.exitCode, 0);
+    assert.match(claude, /code-helper:start/);
+    assert.match(claudeCodeSkill, /name: code-helper-memory-tuning/);
+    assert.match(claudeHook, /@skrupellose\/code-helper/);
+    await assert.rejects(
+      () => stat(join(root, "AGENTS.md")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, ".github/copilot-instructions.md")),
+      /ENOENT/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("code-helper init githubcopilot 会补齐 Copilot instructions", async () => {
+  // 显式选择 GitHub Copilot 时，维护 .github/copilot-instructions.md 并注册 Copilot 项目级 skills。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-init-copilot-"));
+
+  try {
+    const result = await runCliSilently(["init", "githubcopilot"], root);
+
+    const copilot = await readFile(join(root, ".github/copilot-instructions.md"), "utf8");
     const githubCopilotSkill = await readFile(join(root, ".github/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
 
+    assert.equal(result.exitCode, 0);
+    assert.match(copilot, /code-helper:start/);
+    assert.match(copilot, /code-helper 协作入口/);
+    assert.match(githubCopilotSkill, /name: code-helper-memory-tuning/);
+    await assert.rejects(
+      () => stat(join(root, "AGENTS.md")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, "CLAUDE.md")),
+      /ENOENT/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("initializeProject 会自动维护已有 Copilot instructions", async () => {
+  // 已有 GitHub Copilot 入口时，init 应自动识别目标并只维护受控区块。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-init-existing-copilot-"));
+
+  try {
+    await mkdir(join(root, ".github"), { recursive: true });
+    await writeFile(join(root, ".github/copilot-instructions.md"), "# Copilot\n\n用户已有 Copilot 规则。\n", "utf8");
+
+    await initializeProject({ projectRoot: root });
+
+    const copilot = await readFile(join(root, ".github/copilot-instructions.md"), "utf8");
+    const config = await readFile(join(root, ".code-helper/config.json"), "utf8");
+    const githubCopilotSkill = await readFile(join(root, ".github/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
+
+    assert.match(copilot, /用户已有 Copilot 规则/);
+    assert.match(copilot, /code-helper:start/);
+    assert.match(config, /"copilot": true/);
+    assert.match(githubCopilotSkill, /name: code-helper-memory-tuning/);
+    await assert.rejects(
+      () => stat(join(root, "AGENTS.md")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, "CLAUDE.md")),
+      /ENOENT/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("code-helper init all 会补齐三类 agent 入口", async () => {
+  // 显式选择 all 时，Codex、Claude Code 和 GitHub Copilot 入口都必须被维护。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-init-all-"));
+
+  try {
+    const result = await runCliSilently(["init", "all"], root);
+
+    const agents = await readFile(join(root, "AGENTS.md"), "utf8");
+    const claude = await readFile(join(root, "CLAUDE.md"), "utf8");
+    const copilot = await readFile(join(root, ".github/copilot-instructions.md"), "utf8");
+
+    assert.equal(result.exitCode, 0);
+    assert.match(agents, /code-helper:start/);
+    assert.match(claude, /code-helper:start/);
+    assert.match(copilot, /code-helper:start/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("initializeProject 支持显式目标并按同一批目标安装 skills 和 Agent hooks", async () => {
+  // 该测试覆盖显式 init 目标：选择 Codex 和 Claude Code 时，同时创建入口、skills 与对应 Agent hooks。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-init-targets-"));
+
+  try {
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: ["codex", "claudecode"] });
+
+    const agents = await readFile(join(root, "AGENTS.md"), "utf8");
+    const claude = await readFile(join(root, "CLAUDE.md"), "utf8");
+    const codexSkill = await readFile(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
+    const claudeCodeSkill = await readFile(join(root, ".claude/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
+    const codexHook = await readFile(join(root, ".codex/hooks.json"), "utf8");
+    const claudeHook = await readFile(join(root, ".claude/settings.json"), "utf8");
+
+    assert.match(agents, /code-helper:start/);
+    assert.match(claude, /code-helper:start/);
     assert.match(codexSkill, /name: code-helper-memory-tuning/);
     assert.match(claudeCodeSkill, /name: code-helper-memory-tuning/);
-    assert.match(githubCopilotSkill, /name: code-helper-memory-tuning/);
+    assert.match(codexHook, /commandWindows/);
+    assert.match(claudeHook, /@skrupellose\/code-helper/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -68,12 +274,14 @@ test("initializeProject 在只有 CLAUDE.md 的项目中只注册 Claude Code sk
     const claude = await readFile(join(root, "CLAUDE.md"), "utf8");
     const config = await readFile(join(root, ".code-helper/config.json"), "utf8");
     const claudeCodeSkill = await readFile(join(root, ".claude/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
+    const claudeHook = await readFile(join(root, ".claude/settings.json"), "utf8");
 
     assert.match(claude, /用户已有 Claude 规则/);
     assert.match(claude, /code-helper:start/);
     assert.match(config, /"agents": false/);
     assert.match(config, /"claude": true/);
     assert.match(claudeCodeSkill, /name: code-helper-memory-tuning/);
+    assert.match(claudeHook, /@skrupellose\/code-helper/);
     await assert.rejects(
       () => stat(join(root, "AGENTS.md")),
       /ENOENT/

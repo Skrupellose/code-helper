@@ -31,6 +31,7 @@ export interface CodeHelperConfig {
   entryFiles: {
     agents: boolean;
     claude: boolean;
+    copilot: boolean;
   };
   directories: {
     workspace: string;

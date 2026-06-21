@@ -260,7 +260,8 @@ async function checkEntryDocuments(projectRoot: string, config: CodeHelperConfig
   const issues: CheckIssue[] = [];
   const entryFiles = [
     config.entryFiles.agents ? "AGENTS.md" : undefined,
-    config.entryFiles.claude ? "CLAUDE.md" : undefined
+    config.entryFiles.claude ? "CLAUDE.md" : undefined,
+    config.entryFiles.copilot ? ".github/copilot-instructions.md" : undefined
   ].filter((file): file is string => file !== undefined);
 
   for (const entryFile of entryFiles) {

@@ -94,6 +94,14 @@ export interface SkillAuditRecommendation {
 }
 
 /**
+ * 返回当前支持的项目级 skills 注册目标。
+ * 调用方拿到副本，避免外部修改模块内的稳定顺序。
+ */
+export function listSupportedSkillRegistrationTargets(): SkillRegistrationTarget[] {
+  return [...ALL_SKILL_REGISTRATION_TARGETS];
+}
+
+/**
  * 注册 code-helper 内置 skills 到当前项目。
  * 注册结果按目标写入对应项目级 skills 目录，只影响当前项目。
  */
@@ -134,7 +142,7 @@ export async function registerProjectSkills(
     operations.push({
       path: targetPath,
       action: existing === undefined ? "created" : "updated",
-      message: `已注册 ${formatTargetName(target)} 项目级 skill`
+      message: `已注册 ${formatSkillRegistrationTargetName(target)} 项目级 skill`
     });
   }
 
@@ -171,7 +179,7 @@ export async function unregisterProjectSkills(
     operations.push({
       path: targetDirectory,
       action: "updated",
-      message: `已取消注册 ${formatTargetName(target)} 项目级 skill`
+      message: `已取消注册 ${formatSkillRegistrationTargetName(target)} 项目级 skill`
     });
   }
 
@@ -233,7 +241,7 @@ export function parseSkillRegistrationTargets(value: string | undefined): SkillR
 
 /**
  * 根据当前项目实际入口文件推断需要注册的 agent 工具。
- * 根目录已有 AGENTS.md、CLAUDE.md 或 GitHub Copilot 入口时，以这些文件作为实际使用状态；完全没有入口文件的新项目默认注册全部。
+ * 根目录已有 AGENTS.md、CLAUDE.md 或 GitHub Copilot 入口时，以这些文件作为实际使用状态；完全没有入口文件时返回空数组，由调用方决定交互选择或保守跳过。
  */
 export async function resolveSkillRegistrationTargets(
   projectRoot: string
@@ -245,23 +253,19 @@ export async function resolveSkillRegistrationTargets(
   const copilotSkillsExists = (await directoryExists(projectPath(projectRoot, ".github/skills")));
   const targets: SkillRegistrationTarget[] = [];
 
-  if (agentsExists || claudeExists || copilotInstructionsExists || copilotSkillsExists) {
-    if (agentsExists) {
-      targets.push("codex");
-    }
-
-    if (claudeExists) {
-      targets.push("claudecode");
-    }
-
-    if (copilotInstructionsExists || copilotSkillsExists) {
-      targets.push("githubcopilot");
-    }
-
-    return targets;
+  if (agentsExists) {
+    targets.push("codex");
   }
 
-  return [...ALL_SKILL_REGISTRATION_TARGETS];
+  if (claudeExists) {
+    targets.push("claudecode");
+  }
+
+  if (copilotInstructionsExists || copilotSkillsExists) {
+    targets.push("githubcopilot");
+  }
+
+  return targets;
 }
 
 /**
@@ -302,7 +306,7 @@ export async function runSkillsAudit(projectRoot: string): Promise<SkillAuditRec
       recommendations.push({
         priority: "high",
         code: "missing-inferred-registration",
-        message: `${formatTargetName(target)} 是当前项目已识别的 agent 工具，但尚未注册 code-helper skills。`,
+        message: `${formatSkillRegistrationTargetName(target)} 是当前项目已识别的 agent 工具，但尚未注册 code-helper skills。`,
         suggestion: `运行 \`code-helper skills register ${target}\` 注册对应项目级 skills。`
       });
     }
@@ -395,7 +399,7 @@ function getProjectSkillsDirectory(target: SkillRegistrationTarget): string {
 /**
  * 返回面向用户展示的 agent 工具名称。
  */
-function formatTargetName(target: SkillRegistrationTarget): string {
+export function formatSkillRegistrationTargetName(target: SkillRegistrationTarget): string {
   if (target === "codex") {
     return "Codex";
   }
@@ -446,7 +450,7 @@ async function checkCodeHelperRegistration(
       issues.push({
         level: "warning",
         code: "outdated-code-helper-skill",
-        message: `${formatTargetName(target)} 中的 ${registration.directoryName} 与当前内置模板不一致。`,
+        message: `${formatSkillRegistrationTargetName(target)} 中的 ${registration.directoryName} 与当前内置模板不一致。`,
         path: skillPath,
         suggestion: `运行 \`code-helper skills register ${target}\` 刷新 code-helper 管理的 skill。`
       });
@@ -476,7 +480,7 @@ async function checkSkillDirectory(projectRoot: string, target: SkillRegistratio
       issues.push({
         level: "error",
         code: "missing-skill-md",
-        message: `${formatTargetName(target)} skill 目录缺少 SKILL.md：${entry}`,
+        message: `${formatSkillRegistrationTargetName(target)} skill 目录缺少 SKILL.md：${entry}`,
         path: join(skillsRoot, entry),
         suggestion: "补齐 SKILL.md，或删除空的 skill 目录。"
       });
@@ -505,7 +509,7 @@ function checkSkillDocument(
     issues.push({
       level: "error",
       code: "missing-frontmatter",
-      message: `${formatTargetName(target)} skill 缺少 YAML frontmatter：${directoryName}`,
+      message: `${formatSkillRegistrationTargetName(target)} skill 缺少 YAML frontmatter：${directoryName}`,
       path: skillPath,
       suggestion: "在文件开头补充包含 name 和 description 的 frontmatter。"
     });
@@ -516,7 +520,7 @@ function checkSkillDocument(
     issues.push({
       level: "error",
       code: "missing-skill-name",
-      message: `${formatTargetName(target)} skill 缺少 name：${directoryName}`,
+      message: `${formatSkillRegistrationTargetName(target)} skill 缺少 name：${directoryName}`,
       path: skillPath,
       suggestion: "在 frontmatter 中补充稳定的 name 字段。"
     });
@@ -524,7 +528,7 @@ function checkSkillDocument(
     issues.push({
       level: "warning",
       code: "skill-name-directory-mismatch",
-      message: `${formatTargetName(target)} skill 的 name 与目录名不一致：${directoryName}`,
+      message: `${formatSkillRegistrationTargetName(target)} skill 的 name 与目录名不一致：${directoryName}`,
       path: skillPath,
       suggestion: "优先保持目录名与 frontmatter name 一致，降低不同 agent 工具识别差异。"
     });
@@ -534,7 +538,7 @@ function checkSkillDocument(
     issues.push({
       level: "warning",
       code: "weak-skill-description",
-      message: `${formatTargetName(target)} skill 的 description 过短或缺失：${directoryName}`,
+      message: `${formatSkillRegistrationTargetName(target)} skill 的 description 过短或缺失：${directoryName}`,
       path: skillPath,
       suggestion: "补充包含触发场景、输入条件和输出目标的 description。"
     });
@@ -544,7 +548,7 @@ function checkSkillDocument(
     issues.push({
       level: "warning",
       code: "missing-skill-sections",
-      message: `${formatTargetName(target)} skill 缺少二级标题结构：${directoryName}`,
+      message: `${formatSkillRegistrationTargetName(target)} skill 缺少二级标题结构：${directoryName}`,
       path: skillPath,
       suggestion: "至少补充目标、适用场景、流程或边界规则等小节，便于 agent 按需读取。"
     });

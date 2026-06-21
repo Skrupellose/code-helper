@@ -153,11 +153,11 @@ test("parseSkillRegistrationTargets 只解析显式 CLI 目标", () => {
 });
 
 test("resolveSkillRegistrationTargets 会根据入口文件推断 agent 工具", async () => {
-  // 该测试覆盖当前项目注册策略：已有入口文件按实际工具注册，没有入口文件的新项目注册全部。
+  // 该测试覆盖当前项目注册策略：已有入口文件按实际工具注册，没有入口文件时保守返回空目标。
   const root = await mkdtemp(join(tmpdir(), "code-helper-skills-resolve-"));
 
   try {
-    assert.deepEqual(await resolveSkillRegistrationTargets(root), ["codex", "claudecode", "githubcopilot"]);
+    assert.deepEqual(await resolveSkillRegistrationTargets(root), []);
 
     await writeFile(join(root, "AGENTS.md"), "# Agents\n", "utf8");
     assert.deepEqual(await resolveSkillRegistrationTargets(root), ["codex"]);

@@ -48,7 +48,8 @@ export const DEFAULT_CONFIG: CodeHelperConfig = {
   version: CONFIG_VERSION,
   entryFiles: {
     agents: true,
-    claude: false
+    claude: false,
+    copilot: false
   },
   directories: {
     workspace: ".code-helper",

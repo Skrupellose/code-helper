@@ -13,6 +13,10 @@ import {
   writeTextIfMissing
 } from "./fs-utils.js";
 import {
+  installHook,
+  type HookInstallTarget
+} from "./hooks.js";
+import {
   listProjectSkillRegistrations,
   registerProjectSkills,
   resolveSkillRegistrationTargets,
@@ -27,6 +31,11 @@ import type { CodeHelperConfig, OperationResult } from "./types.js";
  */
 export interface InitializeOptions {
   projectRoot: string;
+  /**
+   * init 要应用的 agent 工具目标。
+   * 不传时仅根据初始化前已有入口文件推断；传空数组表示调用方已经确认应保守跳过项目级能力安装。
+   */
+  skillRegistrationTargets?: SkillRegistrationTarget[];
 }
 
 /**
@@ -45,9 +54,14 @@ export interface InitializeResult {
 export async function initializeProject(options: InitializeOptions): Promise<InitializeResult> {
   const config = await loadConfig(options.projectRoot);
   const operations: OperationResult[] = [];
+  const skillRegistrationTargets = options.skillRegistrationTargets
+    ?? await resolveSkillRegistrationTargets(options.projectRoot);
+  const agentHookTargets = resolveAgentHookTargets(skillRegistrationTargets);
 
-  await detectEntryFiles(options.projectRoot, config);
-  const skillRegistrationTargets = await resolveSkillRegistrationTargets(options.projectRoot);
+  await detectEntryFiles(options.projectRoot, config, skillRegistrationTargets);
+  if (agentHookTargets.length > 0) {
+    config.features.agentHooks.enabled = true;
+  }
 
   operations.push(...(await migrateLegacyAgentWorkspace(options.projectRoot, config)));
   await createDirectories(options.projectRoot, config, operations);
@@ -62,6 +76,7 @@ export async function initializeProject(options: InitializeOptions): Promise<Ini
   operations.push(...(await installRuleTemplates(options.projectRoot, config)));
   operations.push(...(await installSkillTemplates(options.projectRoot, config)));
   operations.push(...(await installProjectSkillRegistrations(options.projectRoot, config, skillRegistrationTargets)));
+  operations.push(...(await installProjectAgentHooks(options.projectRoot, config, skillRegistrationTargets, agentHookTargets)));
   operations.push(...(await installHookTemplates(options.projectRoot, config)));
   operations.push(await writeStateFile(options.projectRoot, config));
 
@@ -79,6 +94,16 @@ async function installProjectSkillRegistrations(
 ): Promise<OperationResult[]> {
   const operations: OperationResult[] = [];
 
+  if (targets.length === 0) {
+    return [
+      {
+        path: projectPath(projectRoot, `${config.directories.workspace}/skills`),
+        action: "skipped",
+        message: "未识别到明确的 agent 工具，已跳过项目级 skills 注册；请在交互式 init 中选择目标，或执行 `code-helper init codex|claudecode|githubcopilot|all`。"
+      }
+    ];
+  }
+
   if (!config.features.skillRegistration.enabled) {
     const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
 
@@ -94,6 +119,55 @@ async function installProjectSkillRegistrations(
   }
 
   return operations;
+}
+
+/**
+ * 根据 init 确定的同一批 agent 目标安装对应 Agent hooks。
+ * 当前只有 Codex 和 Claude Code 有项目级 Agent hook 配置；GitHub Copilot skills 不触发 Git hook 或其他 hook。
+ */
+async function installProjectAgentHooks(
+  projectRoot: string,
+  config: CodeHelperConfig,
+  skillTargets: SkillRegistrationTarget[],
+  hookTargets: Array<Exclude<HookInstallTarget, "git">>
+): Promise<OperationResult[]> {
+  if (skillTargets.length === 0) {
+    return [
+      {
+        path: projectPath(projectRoot, `${config.directories.workspace}/hooks`),
+        action: "skipped",
+        message: "未识别到明确的 agent 工具，已跳过 Agent hooks 安装"
+      }
+    ];
+  }
+
+  if (hookTargets.length === 0) {
+    return [
+      {
+        path: projectPath(projectRoot, `${config.directories.workspace}/hooks`),
+        action: "skipped",
+        message: "当前选择的 agent 工具没有可安装的 Agent hook，已跳过；Git hook 不会在 init 中自动安装"
+      }
+    ];
+  }
+
+  const operations: OperationResult[] = [];
+
+  for (const target of hookTargets) {
+    operations.push(await installHook(projectRoot, target));
+  }
+
+  return operations;
+}
+
+/**
+ * 从 skills 目标映射出支持 Agent hook 的目标。
+ * GitHub Copilot 只支持项目级 skills 注册，不在这里映射为 Git hook。
+ */
+function resolveAgentHookTargets(targets: SkillRegistrationTarget[]): Array<Exclude<HookInstallTarget, "git">> {
+  return targets.filter((target): target is Exclude<HookInstallTarget, "git"> =>
+    target === "codex" || target === "claudecode"
+  );
 }
 
 /**
@@ -234,7 +308,7 @@ async function createDirectories(
 }
 
 /**
- * 安装或更新 AGENTS.md / CLAUDE.md 入口文档。
+ * 安装或更新各 agent 工具的入口记忆文档。
  * 已存在文档只替换 code-helper 管理区块，不触碰用户其他内容。
  */
 async function installEntryDocuments(projectRoot: string, config: CodeHelperConfig): Promise<OperationResult[]> {
@@ -247,6 +321,10 @@ async function installEntryDocuments(projectRoot: string, config: CodeHelperConf
 
   if (config.entryFiles.claude) {
     operations.push(await upsertManagedMarkdownBlock(projectPath(projectRoot, "CLAUDE.md"), entryBlock));
+  }
+
+  if (config.entryFiles.copilot) {
+    operations.push(await upsertManagedMarkdownBlock(projectPath(projectRoot, ".github/copilot-instructions.md"), entryBlock));
   }
 
   return operations;
@@ -275,22 +353,28 @@ async function installRuleTemplates(projectRoot: string, config: CodeHelperConfi
 }
 
 /**
- * 检测用户已经手动创建的入口文件。
- * 已有入口文件优先代表当前项目实际使用的 agent；完全没有入口文件的新项目才默认维护 AGENTS.md。
+ * 检测用户已经手动创建的入口文件，并按 init 目标补齐需要维护的入口。
+ * 完全没有入口文件且没有选择目标时，不创建 agent 入口，避免后续 init 误判项目工具。
  */
-async function detectEntryFiles(projectRoot: string, config: CodeHelperConfig): Promise<void> {
+async function detectEntryFiles(
+  projectRoot: string,
+  config: CodeHelperConfig,
+  targets: SkillRegistrationTarget[]
+): Promise<void> {
   const agentsExists = (await readTextIfExists(projectPath(projectRoot, "AGENTS.md"))) !== undefined;
   const claudeExists = (await readTextIfExists(projectPath(projectRoot, "CLAUDE.md"))) !== undefined;
+  const copilotExists = (await readTextIfExists(projectPath(projectRoot, ".github/copilot-instructions.md"))) !== undefined;
 
-  if (agentsExists || claudeExists) {
-    config.entryFiles.agents = agentsExists;
-    config.entryFiles.claude = claudeExists;
+  if (agentsExists || claudeExists || copilotExists) {
+    config.entryFiles.agents = agentsExists || targets.includes("codex");
+    config.entryFiles.claude = claudeExists || targets.includes("claudecode");
+    config.entryFiles.copilot = copilotExists || targets.includes("githubcopilot");
     return;
   }
 
-  if (!config.entryFiles.agents && !config.entryFiles.claude) {
-    config.entryFiles.agents = true;
-  }
+  config.entryFiles.agents = targets.includes("codex");
+  config.entryFiles.claude = targets.includes("claudecode");
+  config.entryFiles.copilot = targets.includes("githubcopilot");
 }
 
 /**
@@ -300,7 +384,8 @@ async function detectEntryFiles(projectRoot: string, config: CodeHelperConfig): 
 function renderEntryFileList(config: CodeHelperConfig): string {
   const entries = [
     config.entryFiles.agents ? "- `AGENTS.md`" : undefined,
-    config.entryFiles.claude ? "- `CLAUDE.md`" : undefined
+    config.entryFiles.claude ? "- `CLAUDE.md`" : undefined,
+    config.entryFiles.copilot ? "- `.github/copilot-instructions.md`" : undefined
   ].filter((entry): entry is string => entry !== undefined);
 
   return entries.join("\n");

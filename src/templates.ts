@@ -7,7 +7,7 @@ import type { CodeHelperConfig, FeatureKey } from "./types.js";
 export function renderEntryBlock(config: CodeHelperConfig): string {
   const enabledRules = [
     config.features.memoryTuning.enabled
-      ? `- 项目记忆规则优化：整理或更新 \`AGENTS.md\` / \`CLAUDE.md\` 时，读取 \`${config.directories.userRules}/项目记忆规则优化.md\`。`
+      ? `- 项目记忆规则优化：整理或更新 \`AGENTS.md\` / \`CLAUDE.md\` / \`.github/copilot-instructions.md\` 时，读取 \`${config.directories.userRules}/项目记忆规则优化.md\`。`
       : undefined,
     config.features.planWorkbench.enabled
       ? `- 项目计划优化：开始大型需求、迁移、重构或多阶段任务时，读取 \`${config.directories.userRules}/项目计划管理规范.md\`。`
@@ -31,7 +31,7 @@ export function renderEntryBlock(config: CodeHelperConfig): string {
       ? "- Agent hooks：需要在 agent 生命周期中提醒完成检查时，参考 `.code-helper/hooks/` 下的 agent hook 模板。"
       : undefined,
     config.features.skillRegistration.enabled
-      ? "- Skills 管理：需要让 Codex 或 Claude Code 在当前项目自动发现 code-helper skills 时，执行 `npx @skrupellose/code-helper skills register`。"
+      ? "- Skills 管理：需要让 Codex、Claude Code 或 GitHub Copilot 在当前项目自动发现 code-helper skills 时，执行 `npx @skrupellose/code-helper skills register`。"
       : undefined
   ].filter((line): line is string => line !== undefined);
 
@@ -64,7 +64,8 @@ ${enabledRules.join("\n")}
 export function getRuleTemplates(config: CodeHelperConfig): Array<{ fileName: string; content: string }> {
   const entryFiles = [
     config.entryFiles.agents ? "`AGENTS.md`" : undefined,
-    config.entryFiles.claude ? "`CLAUDE.md`" : undefined
+    config.entryFiles.claude ? "`CLAUDE.md`" : undefined,
+    config.entryFiles.copilot ? "`.github/copilot-instructions.md`" : undefined
   ].filter((value): value is string => value !== undefined);
 
   return [

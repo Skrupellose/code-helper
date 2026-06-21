@@ -10,15 +10,18 @@ import { installHook, listHookInstallations, parseHookTargets, uninstallHook } f
 import { initializeProject } from "./init.js";
 import { normalizeDroppedPath } from "./input-utils.js";
 import {
+  formatSkillRegistrationTargetName,
   listProjectSkillRegistrations,
+  listSupportedSkillRegistrationTargets,
   parseSkillRegistrationTargets,
   registerProjectSkills,
   resolveSkillRegistrationTargets,
   runSkillsAudit,
   runSkillsDoctor,
+  type SkillRegistrationTarget,
   unregisterProjectSkills
 } from "./skills.js";
-import { canUseInteractiveKeys, promptContinue, promptSelect } from "./terminal-ui.js";
+import { canUseInteractiveKeys, promptContinue, promptMultiSelect, promptSelect } from "./terminal-ui.js";
 import { createManualTestDocument, createPlanWorkbench } from "./workflows.js";
 import type { FeatureKey, OperationResult } from "./types.js";
 
@@ -35,7 +38,7 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
       case "menu":
         return runInteractiveMenu(projectRoot);
       case "init":
-        return runInit(projectRoot);
+        return runInit(projectRoot, args);
       case "check":
         return runCheck(projectRoot);
       case "features":
@@ -592,10 +595,132 @@ function printInputHint(message: string): void {
  * 初始化命令实现。
  * 输出所有操作结果，便于用户看清哪些文件被创建、更新或跳过。
  */
-async function runInit(projectRoot: string): Promise<number> {
-  const result = await initializeProject({ projectRoot });
+async function runInit(projectRoot: string, args: string[] = []): Promise<number> {
+  if (args.length > 1) {
+    console.error("init 只接受一个可选 agent 目标。用法：code-helper init [all|codex|claudecode|githubcopilot]");
+    return 1;
+  }
+
+  const skillRegistrationTargets = args[0] === undefined
+    ? await resolveInitSkillRegistrationTargets(projectRoot)
+    : parseSkillRegistrationTargets(args[0]);
+  const result = await initializeProject({ projectRoot, skillRegistrationTargets });
   printOperations(result.operations);
   return 0;
+}
+
+/**
+ * 为 init 解析要应用的 agent 工具目标。
+ * 已有入口文件可以直接推断；完全无法判断时，交互终端让用户选择，非交互场景保守跳过。
+ */
+async function resolveInitSkillRegistrationTargets(projectRoot: string): Promise<SkillRegistrationTarget[]> {
+  const inferredTargets = await resolveSkillRegistrationTargets(projectRoot);
+  const canUseTextMenu = Boolean(input.isTTY && output.isTTY);
+
+  if (inferredTargets.length > 0) {
+    return inferredTargets;
+  }
+
+  if (canUseInteractiveKeys(input, output)) {
+    const result = await promptMultiSelect(
+      input,
+      output,
+      "选择 init 要应用的 agent 工具",
+      listSupportedSkillRegistrationTargets().map((target) => ({
+        value: target,
+        label: formatSkillRegistrationTargetName(target),
+        checked: false
+      }))
+    );
+    const selectedTargets = result.cancelled
+      ? []
+      : result.options.filter((option) => option.checked).map((option) => option.value);
+
+    if (selectedTargets.length === 0) {
+      console.log("未选择 agent 工具，init 将只刷新 code-helper 工作区和规则模板，跳过项目级 skills 与 Agent hooks。");
+    }
+
+    return selectedTargets;
+  }
+
+  if (canUseTextMenu) {
+    const rl = createInterface({ input, output });
+
+    try {
+      return await askTextInitTargetMenu(rl);
+    } finally {
+      rl.close();
+    }
+  }
+
+  console.log("未发现 AGENTS.md、CLAUDE.md 或 GitHub Copilot 入口；非交互模式不会默认全量安装项目级 skills 或 Agent hooks。");
+  console.log("如需应用能力，请改用 `code-helper init codex|claudecode|githubcopilot|all`，或先创建对应入口文件后再运行 init。");
+  return [];
+}
+
+/**
+ * raw mode 不可用但仍是 TTY 时，使用数字输入选择 init 目标。
+ * 空回车或 0 表示跳过，避免用户误入流程后无法退出。
+ */
+async function askTextInitTargetMenu(
+  rl: ReturnType<typeof createInterface>
+): Promise<SkillRegistrationTarget[]> {
+  console.log("\n选择 init 要应用的 agent 工具");
+  console.log("1. Codex");
+  console.log("2. Claude Code");
+  console.log("3. GitHub Copilot");
+  console.log("A. 全部");
+  console.log("0. 跳过项目级 skills 与 Agent hooks");
+  console.log("可输入多个编号或名称，例如：1,2 或 codex,claudecode。");
+
+  const answer = (await askQuestionOrDefault(rl, "请选择 agent 工具：", "0")).trim();
+  const targets = parseInitTargetSelection(answer);
+
+  if (targets.length === 0) {
+    console.log("未选择 agent 工具，init 将只刷新 code-helper 工作区和规则模板，跳过项目级 skills 与 Agent hooks。");
+  }
+
+  return targets;
+}
+
+/**
+ * 解析 init 文本兜底菜单的多目标输入。
+ * 同时支持数字、英文目标名和 all，方便 macOS / Windows 终端复制粘贴。
+ */
+function parseInitTargetSelection(value: string): SkillRegistrationTarget[] {
+  if (value === "" || value === "0") {
+    return [];
+  }
+
+  const targets = new Set<SkillRegistrationTarget>();
+  const tokens = value.toLowerCase().split(/[,\s]+/u).filter(Boolean);
+
+  for (const token of tokens) {
+    if (token === "a" || token === "all") {
+      return listSupportedSkillRegistrationTargets();
+    }
+
+    if (token === "1") {
+      targets.add("codex");
+      continue;
+    }
+
+    if (token === "2") {
+      targets.add("claudecode");
+      continue;
+    }
+
+    if (token === "3") {
+      targets.add("githubcopilot");
+      continue;
+    }
+
+    for (const target of parseSkillRegistrationTargets(token)) {
+      targets.add(target);
+    }
+  }
+
+  return [...targets];
 }
 
 /**
@@ -1046,8 +1171,12 @@ async function runSkills(projectRoot: string, args: string[]): Promise<number> {
   }
 
   if (action === "register") {
-    await setFeatureEnabled(projectRoot, "skillRegistration", true);
     const targets = await resolveTargetsForSkillAction(projectRoot, action, rawTarget);
+    if (targets.length === 0) {
+      printNoInferredSkillTargets(projectRoot, "注册");
+      return 0;
+    }
+    await setFeatureEnabled(projectRoot, "skillRegistration", true);
     const operations = (await Promise.all(targets.map((target) => registerProjectSkills(projectRoot, target)))).flat();
     const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
     printOperations(operations);
@@ -1057,6 +1186,10 @@ async function runSkills(projectRoot: string, args: string[]): Promise<number> {
 
   if (action === "unregister") {
     const targets = await resolveTargetsForSkillAction(projectRoot, action, rawTarget);
+    if (targets.length === 0) {
+      printNoInferredSkillTargets(projectRoot, "取消注册");
+      return 0;
+    }
     const operations = (await Promise.all(targets.map((target) => unregisterProjectSkills(projectRoot, target)))).flat();
     if (rawTarget === undefined || rawTarget === "all") {
       await setFeatureEnabled(projectRoot, "skillRegistration", false);
@@ -1080,6 +1213,20 @@ async function runSkills(projectRoot: string, args: string[]): Promise<number> {
 
   printSkillsHelp();
   return 1;
+}
+
+/**
+ * skills register/unregister 无法从入口文件推断目标时，输出可理解的跳过结果。
+ * 这里不默认处理全部目标，避免在 CI 或新项目里误写入多个 agent 的项目级目录。
+ */
+function printNoInferredSkillTargets(projectRoot: string, actionLabel: string): void {
+  printOperations([
+    {
+      path: projectRoot,
+      action: "skipped",
+      message: `未识别到明确的 agent 工具，已跳过项目级 skills ${actionLabel}；请显式传入 codex、claudecode、githubcopilot 或 all。`
+    }
+  ]);
 }
 
 /**
@@ -1292,7 +1439,7 @@ function printSkillsHelp(): void {
   console.log("  code-helper skills unregister [all|codex|claudecode|githubcopilot]");
   console.log("  code-helper skills doctor");
   console.log("  code-helper skills audit");
-  console.log("说明：register/unregister 不带 target 时按当前项目已有 AGENTS.md / CLAUDE.md / GitHub Copilot 入口自动选择目标。");
+  console.log("说明：register/unregister 不带 target 时按当前项目已有 AGENTS.md / CLAUDE.md / GitHub Copilot 入口自动选择目标；无法识别时会跳过，请显式传 target。");
 }
 
 /**
@@ -1303,7 +1450,7 @@ function printHooksHelp(): void {
   console.log("  code-helper hooks list");
   console.log("  code-helper hooks install [git|codex|claudecode|agent|all]");
   console.log("  code-helper hooks uninstall [git|codex|claudecode|agent|all]");
-  console.log("说明：安装 Git hook 需要启用 gitHooks；安装 Codex / Claude Code hook 需要启用 agentHooks。");
+  console.log("说明：hooks install 会直接应用对应 hook，并同步内部开关；init 只会安装选中 agent 对应的 Agent hooks，不会安装 Git hook。");
 }
 
 /**
@@ -1315,7 +1462,7 @@ function printHelp(): void {
 
 用法：
   code-helper                         打开交互菜单
-  code-helper init                    初始化项目规则和工作区
+  code-helper init [target]           初始化项目规则和工作区，可指定 all|codex|claudecode|githubcopilot
   code-helper check                   检查协作文档结构
   code-helper features list           查看高级功能配置
   code-helper features enable <key>   启用高级功能配置
