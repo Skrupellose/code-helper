@@ -27,8 +27,11 @@ export interface HookInstallationStatus {
  * code-helper 管理的 hook 标记。
  * 卸载时只删除带该命令特征的配置，避免误删用户自定义 hook。
  */
-const CODE_HELPER_HOOK_COMMAND = "npx @skrupellose/code-helper finish --check-only";
-const CODE_HELPER_HOOK_COMMAND_WINDOWS = "npx.cmd @skrupellose/code-helper finish --check-only";
+const CODE_HELPER_HOOK_COMMAND = "node .code-helper/hooks/agent-finish-check.mjs";
+const CODE_HELPER_HOOK_COMMAND_WINDOWS = "node .code-helper\\hooks\\agent-finish-check.mjs";
+const CODE_HELPER_LEGACY_HOOK_COMMAND = "npx @skrupellose/code-helper finish --check-only";
+const CODE_HELPER_LEGACY_HOOK_COMMAND_WINDOWS = "npx.cmd @skrupellose/code-helper finish --check-only";
+const CODE_HELPER_AGENT_HOOK_SCRIPT = ".code-helper/hooks/agent-finish-check.mjs";
 const CODE_HELPER_HOOK_STATUS_MESSAGE = "运行 code-helper 完成检查";
 const CODE_HELPER_GIT_HOOK_MARKER = "# code-helper:managed-pre-commit";
 
@@ -208,6 +211,7 @@ async function installAgentHook(projectRoot: string, target: Exclude<HookInstall
   const nextConfig = addCodeHelperStopHook(existingConfig, target);
   const existing = await readTextIfExists(targetPath);
   const nextContent = ensureTrailingNewline(JSON.stringify(nextConfig, null, 2));
+  await ensureAgentFinishCheckScript(projectRoot);
 
   if (existing === nextContent) {
     return {
@@ -392,9 +396,16 @@ function isCodeHelperHookHandler(handler: unknown): boolean {
     return false;
   }
 
-  return typeof handler.command === "string"
-    && handler.command.includes("@skrupellose/code-helper")
-    && handler.command.includes("finish");
+  if (typeof handler.command !== "string") {
+    return false;
+  }
+
+  const command = handler.command;
+
+  return command.includes(CODE_HELPER_AGENT_HOOK_SCRIPT)
+    || command.includes(CODE_HELPER_HOOK_COMMAND_WINDOWS)
+    || command.includes(CODE_HELPER_LEGACY_HOOK_COMMAND)
+    || command.includes(CODE_HELPER_LEGACY_HOOK_COMMAND_WINDOWS);
 }
 
 /**
@@ -441,6 +452,75 @@ function renderGitHook(): string {
   return `#!/bin/sh
 ${CODE_HELPER_GIT_HOOK_MARKER}
 npx @skrupellose/code-helper check
+`;
+}
+
+/**
+ * 确保 Agent Stop hook 使用包装脚本执行。
+ * Codex Stop hook 会把 stdout 当 JSON 解析，因此不能直接运行会输出中文文本的 CLI。
+ */
+async function ensureAgentFinishCheckScript(projectRoot: string): Promise<void> {
+  const targetPath = projectPath(projectRoot, CODE_HELPER_AGENT_HOOK_SCRIPT);
+  await writeText(targetPath, renderAgentFinishCheckScript());
+  await chmod(targetPath, 0o755);
+}
+
+/**
+ * 渲染 Agent Stop hook 包装脚本。
+ * 该脚本把 code-helper 的人类可读检查结果转发到 stderr，stdout 只保留 hook 协议需要的 JSON。
+ */
+function renderAgentFinishCheckScript(): string {
+  return `#!/usr/bin/env node
+/**
+ * code-helper Agent Stop hook 包装脚本。
+ * Codex Stop hook 会解析 stdout 为 JSON，因此所有检查文本都必须写入 stderr。
+ */
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const invocation = resolveCodeHelperInvocation();
+const result = spawnSync(invocation.command, invocation.args, {
+  cwd: process.cwd(),
+  encoding: "utf8"
+});
+
+// 把 code-helper 的人类可读输出转到 stderr，避免污染 Stop hook 的 JSON stdout。
+for (const chunk of [result.stdout, result.stderr]) {
+  const text = chunk.trim();
+  if (text !== "") {
+    console.error(text);
+  }
+}
+
+// Stop hook stdout 必须始终是合法 JSON；空对象表示不阻止 agent 停止。
+process.stdout.write("{}\\n");
+process.exit(result.status ?? 0);
+
+function resolveCodeHelperInvocation() {
+  const localEntry = join(process.cwd(), "dist", "index.js");
+
+  if (isCodeHelperRepository() && existsSync(localEntry)) {
+    return {
+      command: process.execPath,
+      args: [localEntry, "finish", "--check-only"]
+    };
+  }
+
+  return {
+    command: process.platform === "win32" ? "npx.cmd" : "npx",
+    args: ["@skrupellose/code-helper", "finish", "--check-only"]
+  };
+}
+
+function isCodeHelperRepository() {
+  try {
+    const packageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
+    return packageJson.name === "@skrupellose/code-helper";
+  } catch {
+    return false;
+  }
+}
 `;
 }
 

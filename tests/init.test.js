@@ -46,7 +46,7 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
     assert.match(config, /"gitHooks":/);
     assert.match(config, /"agentHooks": \{\n      "enabled": true\n    \}/);
     assert.match(codexSkill, /name: code-helper-memory-tuning/);
-    assert.match(codexHook, /@skrupellose\/code-helper/);
+    assert.match(codexHook, /agent-finish-check\.mjs/);
     await assert.rejects(
       () => stat(join(root, ".git/hooks/pre-commit")),
       /ENOENT/
@@ -117,7 +117,7 @@ test("code-helper init codex 会补齐 AGENTS.md 且不创建 CLAUDE.md", async 
     assert.equal(result.exitCode, 0);
     assert.match(agents, /code-helper:start/);
     assert.match(codexSkill, /name: code-helper-memory-tuning/);
-    assert.match(codexHook, /@skrupellose\/code-helper/);
+    assert.match(codexHook, /agent-finish-check\.mjs/);
     await assert.rejects(
       () => stat(join(root, "CLAUDE.md")),
       /ENOENT/
@@ -145,7 +145,7 @@ test("code-helper init claudecode 会补齐 CLAUDE.md 且不创建 AGENTS.md", a
     assert.equal(result.exitCode, 0);
     assert.match(claude, /code-helper:start/);
     assert.match(claudeCodeSkill, /name: code-helper-memory-tuning/);
-    assert.match(claudeHook, /@skrupellose\/code-helper/);
+    assert.match(claudeHook, /agent-finish-check\.mjs/);
     await assert.rejects(
       () => stat(join(root, "AGENTS.md")),
       /ENOENT/
@@ -256,7 +256,7 @@ test("initializeProject 支持显式目标并按同一批目标安装 skills 和
     assert.match(codexSkill, /name: code-helper-memory-tuning/);
     assert.match(claudeCodeSkill, /name: code-helper-memory-tuning/);
     assert.match(codexHook, /commandWindows/);
-    assert.match(claudeHook, /@skrupellose\/code-helper/);
+    assert.match(claudeHook, /agent-finish-check\.mjs/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -281,7 +281,7 @@ test("initializeProject 在只有 CLAUDE.md 的项目中只注册 Claude Code sk
     assert.match(config, /"agents": false/);
     assert.match(config, /"claude": true/);
     assert.match(claudeCodeSkill, /name: code-helper-memory-tuning/);
-    assert.match(claudeHook, /@skrupellose\/code-helper/);
+    assert.match(claudeHook, /agent-finish-check\.mjs/);
     await assert.rejects(
       () => stat(join(root, "AGENTS.md")),
       /ENOENT/

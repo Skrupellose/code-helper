@@ -964,27 +964,55 @@ npx @skrupellose/code-helper check
       feature: "agentHooks",
       content: `#!/usr/bin/env node
 /**
- * code-helper Agent hook 示例。
- * 适合接到 Codex / Claude Code 等 agent 的 Stop、收尾或提交前生命周期事件中。
- * 该脚本只运行完成检查，不自动修改文件、不归档、不更新长期记忆。
+ * code-helper Agent Stop hook 包装脚本。
+ * Codex Stop hook 会解析 stdout 为 JSON，因此所有检查文本都必须写入 stderr。
  */
 import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
-const command = process.platform === "win32" ? "npx.cmd" : "npx";
-const result = spawnSync(command, ["@skrupellose/code-helper", "finish", "--check-only"], {
+const invocation = resolveCodeHelperInvocation();
+const result = spawnSync(invocation.command, invocation.args, {
   cwd: process.cwd(),
   encoding: "utf8"
 });
 
-if (result.stdout.trim() !== "") {
-  console.log(result.stdout.trim());
+// 把 code-helper 的人类可读输出转到 stderr，避免污染 Stop hook 的 JSON stdout。
+for (const chunk of [result.stdout, result.stderr]) {
+  const text = chunk.trim();
+  if (text !== "") {
+    console.error(text);
+  }
 }
 
-if (result.stderr.trim() !== "") {
-  console.error(result.stderr.trim());
-}
-
+// Stop hook stdout 必须始终是合法 JSON；空对象表示不阻止 agent 停止。
+process.stdout.write("{}\\n");
 process.exit(result.status ?? 0);
+
+function resolveCodeHelperInvocation() {
+  const localEntry = join(process.cwd(), "dist", "index.js");
+
+  if (isCodeHelperRepository() && existsSync(localEntry)) {
+    return {
+      command: process.execPath,
+      args: [localEntry, "finish", "--check-only"]
+    };
+  }
+
+  return {
+    command: process.platform === "win32" ? "npx.cmd" : "npx",
+    args: ["@skrupellose/code-helper", "finish", "--check-only"]
+  };
+}
+
+function isCodeHelperRepository() {
+  try {
+    const packageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
+    return packageJson.name === "@skrupellose/code-helper";
+  } catch {
+    return false;
+  }
+}
 `
     },
     {

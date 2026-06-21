@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { test } from "node:test";
 
 import { runCli } from "../dist/cli.js";
@@ -105,13 +106,67 @@ test("installHook 支持 Codex 和 Claude Code Agent hooks", async () => {
 
     const codex = await readFile(join(root, ".codex/hooks.json"), "utf8");
     const claude = await readFile(join(root, ".claude/settings.json"), "utf8");
+    const agentHook = await readFile(join(root, ".code-helper/hooks/agent-finish-check.mjs"), "utf8");
     const statuses = await listHookInstallations(root);
+    const codexConfig = JSON.parse(codex);
+    const claudeConfig = JSON.parse(claude);
+    const codexCommand = codexConfig.hooks.Stop[0].hooks[0].command;
+    const claudeCommand = claudeConfig.hooks.Stop[0].hooks[0].command;
 
-    assert.match(codex, /@skrupellose\/code-helper/);
+    assert.match(codexCommand, /agent-finish-check\.mjs/);
+    assert.doesNotMatch(codexCommand, /@skrupellose\/code-helper/);
     assert.match(codex, /commandWindows/);
-    assert.match(claude, /@skrupellose\/code-helper/);
+    assert.match(claudeCommand, /agent-finish-check\.mjs/);
+    assert.doesNotMatch(claudeCommand, /@skrupellose\/code-helper/);
+    assert.match(agentHook, /process\.stdout\.write\("\{\}\\n"\)/);
     assert.equal(statuses.find((status) => status.target === "codex")?.installed, true);
     assert.equal(statuses.find((status) => status.target === "claudecode")?.installed, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Agent hook 包装脚本 stdout 只输出 JSON，检查内容写入 stderr", async () => {
+  // Codex Stop hook 会解析 stdout 为 JSON；该测试防止 finish 的中文文本再次污染 stdout。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-hooks-json-"));
+
+  try {
+    await setFeatureEnabled(root, "agentHooks", true);
+    await installHook(root, "codex");
+
+    const fakeBin = join(root, "fake-bin");
+    await mkdir(fakeBin, { recursive: true });
+
+    if (process.platform === "win32") {
+      await writeFile(
+        join(fakeBin, "npx.cmd"),
+        "@echo off\r\necho 功能完成检查：检测到活动任务\r\necho hook stderr text 1>&2\r\nexit /b 0\r\n",
+        "utf8"
+      );
+    } else {
+      const fakeNpx = join(fakeBin, "npx");
+      await writeFile(
+        fakeNpx,
+        "#!/bin/sh\necho '功能完成检查：检测到活动任务'\necho 'hook stderr text' >&2\nexit 0\n",
+        "utf8"
+      );
+      await chmod(fakeNpx, 0o755);
+    }
+
+    const scriptPath = join(root, ".code-helper/hooks/agent-finish-check.mjs");
+    const result = spawnSync(process.execPath, [scriptPath], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`
+      }
+    });
+
+    assert.equal(result.status, 0);
+    assert.deepEqual(JSON.parse(result.stdout), {});
+    assert.match(result.stderr, /功能完成检查：检测到活动任务/);
+    assert.match(result.stderr, /hook stderr text/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
