@@ -23,6 +23,16 @@ interface RegistryLatestResponse {
 }
 
 /**
+ * 版本检查结果。
+ * 该对象只暴露给交互菜单使用，避免普通命令为了展示升级提示而污染 stdout/stderr。
+ */
+export interface VersionUpdateState {
+  currentVersion: string;
+  latestVersion: string;
+  outdated: boolean;
+}
+
+/**
  * npm 包名在版本提醒、version 命令和安装提示中必须保持一致。
  * 集中定义可以避免 CLI 文案和 registry 查询地址出现分叉。
  */
@@ -36,9 +46,9 @@ export async function maybeNotifyVersionUpdate(
   projectRoot: string,
   command: string | undefined,
   env: NodeJS.ProcessEnv = process.env
-): Promise<void> {
+): Promise<VersionUpdateState | undefined> {
   if (shouldSkipVersionCheck(command, env)) {
-    return;
+    return undefined;
   }
 
   try {
@@ -46,12 +56,14 @@ export async function maybeNotifyVersionUpdate(
     const cache = await readVersionCache(projectRoot);
 
     if (cache !== undefined && isCacheFresh(cache)) {
-      printOutdatedMessageIfNeeded(currentVersion, cache.latestVersion);
-      return;
+      const cachedState = createVersionUpdateState(currentVersion, cache.latestVersion);
+      printOutdatedMessageIfNeeded(cachedState);
+      return cachedState.outdated ? cachedState : undefined;
     }
 
     const latestVersion = await fetchLatestPackageVersion();
-    const status = compareVersions(currentVersion, latestVersion) < 0 ? "outdated" : "latest";
+    const state = createVersionUpdateState(currentVersion, latestVersion);
+    const status = state.outdated ? "outdated" : "latest";
 
     await writeVersionCache(projectRoot, {
       checkedAt: new Date().toISOString(),
@@ -62,11 +74,11 @@ export async function maybeNotifyVersionUpdate(
       status
     });
 
-    if (status === "outdated") {
-      printOutdatedMessageIfNeeded(currentVersion, latestVersion);
-    }
+    printOutdatedMessageIfNeeded(state);
+    return state.outdated ? state : undefined;
   } catch {
     // 版本检查不能影响用户原命令，离线、代理或 registry 异常时静默跳过。
+    return undefined;
   }
 }
 
@@ -220,12 +232,24 @@ function isCacheFresh(cache: VersionCache): boolean {
  * 输出升级提醒。
  * 使用 stderr 是为了不污染 stdout，避免破坏脚本或 hook 协议。
  */
-function printOutdatedMessageIfNeeded(currentVersion: string, latestVersion: string): void {
-  const messageLines = formatOutdatedVersionMessage(currentVersion, latestVersion);
+function printOutdatedMessageIfNeeded(state: VersionUpdateState): void {
+  const messageLines = formatOutdatedVersionMessage(state.currentVersion, state.latestVersion);
 
   for (const line of messageLines) {
     console.error(line);
   }
+}
+
+/**
+ * 生成版本检查状态。
+ * 比较逻辑集中在这里，缓存命中和 registry 查询都能得到一致的菜单状态。
+ */
+function createVersionUpdateState(currentVersion: string, latestVersion: string): VersionUpdateState {
+  return {
+    currentVersion,
+    latestVersion,
+    outdated: compareVersions(currentVersion, latestVersion) < 0
+  };
 }
 
 /**
@@ -239,10 +263,7 @@ export function formatOutdatedVersionMessage(currentVersion: string, latestVersi
 
   return [
     `发现 code-helper 新版本：${latestVersion}（当前 ${currentVersion}）`,
-    "建议在当前项目执行：",
-    "  npm i -D @skrupellose/code-helper@latest",
-    "  npx code-helper update",
-    "更新会刷新 code-helper 管理的入口、skills 和 hooks，不会自动开启未启用能力；也可以忽略本次提醒。"
+    "主菜单顶部可选择“更新到最新版本”：会升级 npm 包并刷新当前项目 code-helper 入口、Skills 和 Hooks。"
   ];
 }
 

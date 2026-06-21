@@ -15,12 +15,15 @@ test("shouldSkipVersionCheck 在 CI 和非菜单命令中跳过", () => {
   assert.equal(shouldSkipVersionCheck(undefined, { CI: "true" }), true);
   assert.equal(shouldSkipVersionCheck("check", {}), true);
   assert.equal(shouldSkipVersionCheck("help", {}), true);
+  assert.equal(shouldSkipVersionCheck("update", {}), true);
+  assert.equal(shouldSkipVersionCheck("sync-local", {}), true);
 });
 
-test("formatOutdatedVersionMessage 包含本地安装升级和项目资产更新命令", () => {
-  // 升级提醒需要同时告诉用户更新 npm 包和刷新项目内 code-helper 资产。
+test("formatOutdatedVersionMessage 简洁说明菜单快捷升级含义", () => {
+  // 版本提示只用于交互菜单路径，文案应指向顶部快捷升级入口而不是污染普通命令输出。
   const message = formatOutdatedVersionMessage("0.1.3", "0.1.4").join("\n");
 
-  assert.match(message, /npm i -D @skrupellose\/code-helper@latest/);
-  assert.match(message, /npx code-helper update/);
+  assert.match(message, /发现 code-helper 新版本：0\.1\.4（当前 0\.1\.3）/);
+  assert.match(message, /主菜单顶部可选择“更新到最新版本”/);
+  assert.match(message, /升级 npm 包并刷新当前项目 code-helper 入口、Skills 和 Hooks/);
 });

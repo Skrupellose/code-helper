@@ -1,3 +1,5 @@
+import { access } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
@@ -8,6 +10,7 @@ import { loadConfig, setFeatureEnabled } from "./config.js";
 import { runChecks } from "./checks.js";
 import { installHook, listHookInstallations, parseHookTargets, uninstallHook, type HookInstallTarget } from "./hooks.js";
 import { initializeProject, installCodeHelperNpmScripts, updateProject } from "./init.js";
+import { projectPath, readTextIfExists } from "./fs-utils.js";
 import { normalizeDroppedPath } from "./input-utils.js";
 import {
   formatSkillRegistrationTargetName,
@@ -24,9 +27,11 @@ import {
 import { canUseInteractiveKeys, promptContinue, promptMultiSelect, promptSelect, type SelectOption } from "./terminal-ui.js";
 import {
   compareVersions,
+  CODE_HELPER_PACKAGE_NAME,
   fetchLatestPackageVersion,
   getCurrentPackageVersion,
-  maybeNotifyVersionUpdate
+  maybeNotifyVersionUpdate,
+  type VersionUpdateState
 } from "./version-check.js";
 import { createManualTestDocument, createPlanWorkbench } from "./workflows.js";
 import type { FeatureKey, OperationResult } from "./types.js";
@@ -39,12 +44,12 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
   const [command, ...args] = argv;
 
   try {
-    await maybeNotifyVersionUpdate(projectRoot, command);
+    const versionUpdateState = await maybeNotifyVersionUpdate(projectRoot, command);
 
     switch (command) {
       case undefined:
       case "menu":
-        return runInteractiveMenu(projectRoot);
+        return runInteractiveMenu(projectRoot, versionUpdateState);
       case "init":
         return runInit(projectRoot, args);
       case "update":
@@ -122,11 +127,6 @@ const MAIN_MENU_GROUPS: MainMenuGroup[] = [
         value: "1",
         name: "初始化/刷新项目配置",
         description: "创建或更新工作区、入口索引、规则模板、Skills 和可用 hooks"
-      },
-      {
-        value: "11",
-        name: "更新 code-helper 本地资产",
-        description: "按当前项目已启用能力刷新入口、Skills 和 Hooks"
       }
     ]
   },
@@ -193,6 +193,25 @@ const MAIN_MENU_GROUPS: MainMenuGroup[] = [
 ];
 
 const MAIN_MENU_NAME_COLUMN_WIDTH = 24;
+const QUICK_UPGRADE_MENU_VALUE = "__quick_upgrade_code_helper__";
+
+/**
+ * npm 包升级命令。
+ * command 是包管理器可执行文件，args 是传给该可执行文件的参数，二者分开保存以避免 shell 转义问题。
+ */
+export interface PackageUpgradeCommand {
+  command: string;
+  args: string[];
+}
+
+/**
+ * 快捷升级依赖项。
+ * 单元测试通过注入 runPackageCommand 和 runUpdateCommand 验证执行顺序，真实 CLI 使用默认实现。
+ */
+export interface CodeHelperQuickUpgradeOptions {
+  runPackageCommand?: (command: PackageUpgradeCommand, projectRoot: string) => Promise<number>;
+  runUpdateCommand?: (projectRoot: string) => Promise<number>;
+}
 
 /**
  * 导出主菜单分组，供测试锁定菜单分组、命名和说明。
@@ -226,6 +245,25 @@ export function formatMainMenuSelectItemLabel(item: MainMenuItem): string {
  */
 export function formatMainMenuTextItemLines(item: MainMenuItem): string[] {
   return [`  ${item.value.padStart(2, " ")}. ${item.name}`, `      ${item.description}`];
+}
+
+/**
+ * 渲染 raw mode 菜单顶部的快捷升级项。
+ * 该项不属于 MAIN_MENU_GROUPS，避免被误认为普通项目准备动作。
+ */
+export function formatVersionUpgradeSelectItemLabel(versionUpdate: VersionUpdateState): string {
+  return `  U. ${padMenuText("更新到最新版本", MAIN_MENU_NAME_COLUMN_WIDTH)} 升级 npm 包并刷新当前项目 code-helper 入口、Skills 和 Hooks（${versionUpdate.currentVersion} -> ${versionUpdate.latestVersion}）`;
+}
+
+/**
+ * 渲染数字兜底菜单顶部的快捷升级项。
+ * 文案和 raw mode 保持同一语义，只是拆行以便普通终端阅读。
+ */
+export function formatVersionUpgradeTextItemLines(versionUpdate: VersionUpdateState): string[] {
+  return [
+    "  U. 更新到最新版本",
+    `      升级 npm 包并刷新当前项目 code-helper 入口、Skills 和 Hooks（${versionUpdate.currentVersion} -> ${versionUpdate.latestVersion}）`
+  ];
 }
 
 /**
@@ -269,8 +307,20 @@ function isWideMenuCharacter(codePoint: number): boolean {
  * 构造 raw mode 单选菜单。
  * 分组标题和分组间空行作为 disabled 选项展示，方向键会自动跳过。
  */
-export function buildMainMenuSelectOptions(): Array<SelectOption<string>> {
+export function buildMainMenuSelectOptions(versionUpdate?: VersionUpdateState): Array<SelectOption<string>> {
   const options: Array<SelectOption<string>> = [];
+
+  if (versionUpdate?.outdated) {
+    options.push({
+      value: QUICK_UPGRADE_MENU_VALUE,
+      label: formatVersionUpgradeSelectItemLabel(versionUpdate)
+    });
+    options.push({
+      value: "__spacer_quick_upgrade",
+      label: "",
+      disabled: true
+    });
+  }
 
   for (const [groupIndex, group] of MAIN_MENU_GROUPS.entries()) {
     if (groupIndex > 0) {
@@ -309,12 +359,26 @@ function getMainMenuItemName(value: string): string {
 }
 
 /**
+ * 归一化主菜单输入。
+ * raw mode 返回内部快捷值，数字兜底菜单返回用户输入的 U/u；这里统一成同一个动作值，便于后续 switch 分发。
+ */
+function normalizeMainMenuAnswer(answer: string, versionUpdate?: VersionUpdateState): string {
+  const trimmedAnswer = answer.trim();
+
+  if (versionUpdate?.outdated && trimmedAnswer.toLowerCase() === "u") {
+    return QUICK_UPGRADE_MENU_VALUE;
+  }
+
+  return trimmedAnswer;
+}
+
+/**
  * 无参数时展示交互菜单。
  * 使用 Node 内置 readline，减少首版运行依赖和安装体积。
  */
-async function runInteractiveMenu(projectRoot: string): Promise<number> {
+async function runInteractiveMenu(projectRoot: string, versionUpdate?: VersionUpdateState): Promise<number> {
   const rl = createInterface({ input, output });
-  const menuOptions = buildMainMenuSelectOptions();
+  const menuOptions = buildMainMenuSelectOptions(versionUpdate);
 
   try {
     let shouldExit = false;
@@ -323,15 +387,16 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
       const useKeyMenu = canUseInteractiveKeys(input, output);
       const answer = useKeyMenu
         ? await promptSelect(input, output, "code-helper 操作菜单", menuOptions)
-        : await askTextMenu(rl);
+        : await askTextMenu(rl, versionUpdate);
+      const menuAnswer = normalizeMainMenuAnswer(answer, versionUpdate);
 
-      switch (answer.trim()) {
-        case "1":
-          await runMenuAction(getMainMenuItemName(answer), () => runInit(projectRoot));
+      switch (menuAnswer) {
+        case QUICK_UPGRADE_MENU_VALUE:
+          await runMenuAction("更新到最新版本", () => runCodeHelperQuickUpgrade(projectRoot));
           await pauseAfterMenuAction(useKeyMenu);
           break;
-        case "11":
-          await runMenuAction(getMainMenuItemName(answer), () => runUpdate(projectRoot));
+        case "1":
+          await runMenuAction(getMainMenuItemName(menuAnswer), () => runInit(projectRoot));
           await pauseAfterMenuAction(useKeyMenu);
           break;
         case "2": {
@@ -348,7 +413,7 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
             break;
           }
 
-          await runMenuAction(getMainMenuItemName(answer), () =>
+          await runMenuAction(getMainMenuItemName(menuAnswer), () =>
             runPlan(projectRoot, [normalizeDroppedPath(requirementPath, projectRoot), featureName].filter(Boolean))
           );
           await pauseAfterMenuAction(useKeyMenu);
@@ -372,7 +437,7 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
             break;
           }
 
-          await runMenuAction(getMainMenuItemName(answer), () =>
+          await runMenuAction(getMainMenuItemName(menuAnswer), () =>
             runManualTest(projectRoot, [featureName, title].filter(Boolean))
           );
           await pauseAfterMenuAction(useKeyMenu);
@@ -391,12 +456,12 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
               break;
             }
 
-            await runMenuAction(getMainMenuItemName(answer), () => runFinish(projectRoot, [featureName]));
+            await runMenuAction(getMainMenuItemName(menuAnswer), () => runFinish(projectRoot, [featureName]));
             await pauseAfterMenuAction(useKeyMenu);
             break;
           }
         case "5":
-          await runMenuAction(getMainMenuItemName(answer), () => runTasks(projectRoot, []));
+          await runMenuAction(getMainMenuItemName(menuAnswer), () => runTasks(projectRoot, []));
           await pauseAfterMenuAction(useKeyMenu);
           break;
         case "6": {
@@ -411,12 +476,12 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
             break;
           }
 
-          await runMenuAction(getMainMenuItemName(answer), () => runArchive(projectRoot, [featureName]));
+          await runMenuAction(getMainMenuItemName(menuAnswer), () => runArchive(projectRoot, [featureName]));
           await pauseAfterMenuAction(useKeyMenu);
           break;
         }
         case "7":
-          await runMenuAction(getMainMenuItemName(answer), () => runCheck(projectRoot));
+          await runMenuAction(getMainMenuItemName(menuAnswer), () => runCheck(projectRoot));
           await pauseAfterMenuAction(useKeyMenu);
           break;
         case "8":
@@ -1244,6 +1309,188 @@ async function runUpdate(projectRoot: string, args: string[] = []): Promise<numb
 }
 
 /**
+ * 主菜单顶部的快捷升级动作。
+ * 该动作只在交互菜单中出现，执行顺序固定为：升级 npm 包，再刷新当前项目已有 code-helper 本地资产。
+ */
+export async function runCodeHelperQuickUpgrade(
+  projectRoot: string,
+  options: CodeHelperQuickUpgradeOptions = {}
+): Promise<number> {
+  const runPackageCommand = options.runPackageCommand ?? runPackageUpgradeCommand;
+  const runUpdateCommand = options.runUpdateCommand ?? runLatestCodeHelperUpdateCommand;
+
+  try {
+    const command = await resolveCodeHelperUpgradeCommand(projectRoot);
+
+    console.log(`准备升级 npm 包：${command.command} ${command.args.join(" ")}`);
+    const installExitCode = await runPackageCommand(command, projectRoot);
+
+    if (installExitCode !== 0) {
+      console.error(`npm 包升级失败，退出码：${installExitCode}`);
+      return installExitCode;
+    }
+
+    console.log("npm 包升级成功，开始刷新当前项目 code-helper 入口、Skills 和 Hooks。");
+    const updateExitCode = await runUpdateCommand(projectRoot);
+
+    if (updateExitCode !== 0) {
+      console.error(`code-helper 本地资产刷新失败，退出码：${updateExitCode}`);
+      return updateExitCode;
+    }
+
+    console.log("当前项目 code-helper 本地资产刷新完成。");
+    return 0;
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    return 1;
+  }
+}
+
+/**
+ * 运行升级后安装到项目里的 code-helper update。
+ * 不能直接调用当前进程的 updateProject，否则 npm 包虽然已升级，刷新逻辑仍然来自旧版本代码。
+ */
+function runLatestCodeHelperUpdateCommand(projectRoot: string): Promise<number> {
+  return runPackageUpgradeCommand(
+    {
+      command: "npx",
+      args: ["code-helper", "update"]
+    },
+    projectRoot
+  );
+}
+
+/**
+ * 推断当前项目的 code-helper 包升级命令。
+ * 优先读取 package.json 的 packageManager 字段，再参考常见锁文件；都无法判断时使用 npm。
+ */
+export async function resolveCodeHelperUpgradeCommand(projectRoot: string): Promise<PackageUpgradeCommand> {
+  const packageJsonPath = projectPath(projectRoot, "package.json");
+  const rawPackageJson = await readTextIfExists(packageJsonPath);
+
+  if (rawPackageJson === undefined) {
+    throw new Error("当前目录没有 package.json，无法升级 code-helper。请在 Node 项目根目录执行菜单升级。");
+  }
+
+  const packageManager = await inferPackageManager(projectRoot, rawPackageJson, packageJsonPath);
+  const packageSpecifier = `${CODE_HELPER_PACKAGE_NAME}@latest`;
+
+  switch (packageManager) {
+    case "pnpm":
+      return { command: "pnpm", args: ["add", "-D", packageSpecifier] };
+    case "yarn":
+      return { command: "yarn", args: ["add", "-D", packageSpecifier] };
+    case "bun":
+      return { command: "bun", args: ["add", "-d", packageSpecifier] };
+    case "npm":
+    default:
+      return { command: "npm", args: ["install", "-D", packageSpecifier] };
+  }
+}
+
+/**
+ * 推断包管理器。
+ * packageManager 字段最能代表项目当前约定；锁文件作为兼容旧项目的兜底信号。
+ */
+async function inferPackageManager(
+  projectRoot: string,
+  rawPackageJson: string,
+  packageJsonPath: string
+): Promise<"npm" | "pnpm" | "yarn" | "bun"> {
+  const packageManagerFromJson = readPackageManagerField(rawPackageJson, packageJsonPath);
+
+  if (packageManagerFromJson !== undefined) {
+    return packageManagerFromJson;
+  }
+
+  if (await pathExists(projectPath(projectRoot, "pnpm-lock.yaml"))) {
+    return "pnpm";
+  }
+
+  if (await pathExists(projectPath(projectRoot, "yarn.lock"))) {
+    return "yarn";
+  }
+
+  if (
+    await pathExists(projectPath(projectRoot, "bun.lock"))
+    || await pathExists(projectPath(projectRoot, "bun.lockb"))
+  ) {
+    return "bun";
+  }
+
+  return "npm";
+}
+
+/**
+ * 从 package.json 中读取 packageManager 字段。
+ * 字段不存在或不是已支持的管理器时回退到锁文件/默认 npm；JSON 语法错误则直接失败，避免在未知项目结构下写入依赖。
+ */
+function readPackageManagerField(
+  rawPackageJson: string,
+  packageJsonPath: string
+): "npm" | "pnpm" | "yarn" | "bun" | undefined {
+  let packageJson: { packageManager?: unknown };
+
+  try {
+    packageJson = JSON.parse(rawPackageJson) as { packageManager?: unknown };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${packageJsonPath} 不是合法 JSON，无法升级 code-helper：${message}`);
+  }
+
+  if (typeof packageJson.packageManager !== "string") {
+    return undefined;
+  }
+
+  const [name] = packageJson.packageManager.split("@");
+
+  if (name === "npm" || name === "pnpm" || name === "yarn" || name === "bun") {
+    return name;
+  }
+
+  return undefined;
+}
+
+/**
+ * 判断路径是否存在。
+ * 用 access 而不是读取文件内容，才能安全识别 bun.lockb 这类二进制锁文件。
+ */
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 执行包管理器升级命令。
+ * Windows 下 npm/pnpm/yarn/bun 通过 .cmd 启动；其他平台直接执行二进制，避免额外 shell 层污染参数。
+ */
+function runPackageUpgradeCommand(command: PackageUpgradeCommand, projectRoot: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(resolvePackageManagerExecutable(command.command), command.args, {
+      cwd: projectRoot,
+      stdio: "inherit"
+    });
+
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve(code ?? 1);
+    });
+  });
+}
+
+/**
+ * 解析跨平台可执行文件名。
+ * Node 在 Windows 上不通过 shell 启动 .cmd 文件时需要显式补后缀。
+ */
+function resolvePackageManagerExecutable(command: string): string {
+  return process.platform === "win32" ? `${command}.cmd` : command;
+}
+
+/**
  * 输出当前 code-helper 版本。
  * npm latest 查询是附加信息，失败或被测试/CI 环境跳过时不影响命令退出码。
  */
@@ -1664,8 +1911,15 @@ async function askOptionalMenuInput(
  * 非 TTY 环境下的文本菜单兜底。
  * 当终端不支持 raw mode 时，仍允许用户输入数字选择。
  */
-async function askTextMenu(rl: ReturnType<typeof createInterface>): Promise<string> {
+async function askTextMenu(rl: ReturnType<typeof createInterface>, versionUpdate?: VersionUpdateState): Promise<string> {
   console.log("\ncode-helper 操作菜单");
+
+  if (versionUpdate?.outdated) {
+    console.log("\n【快捷升级】");
+    for (const line of formatVersionUpgradeTextItemLines(versionUpdate)) {
+      console.log(line);
+    }
+  }
 
   for (const group of MAIN_MENU_GROUPS) {
     console.log(`\n${formatMainMenuGroupTitle(group.title)}`);

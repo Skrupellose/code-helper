@@ -1,6 +1,6 @@
 {
   "name": "@skrupellose/code-helper",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "通用 agent 协作流程 CLI，用于初始化项目规则、维护记忆、生成计划文档并检查协作规范。",
   "type": "module",
   "repository": {
