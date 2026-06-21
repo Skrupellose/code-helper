@@ -2,7 +2,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
 import { FEATURE_KEYS, FEATURE_LABELS } from "./constants.js";
-import { archiveFeature, listTasks } from "./archive.js";
+import { archiveFeature, listTasks, type TaskRecord, type TaskStatus } from "./archive.js";
 import { loadConfig, setFeatureEnabled } from "./config.js";
 import { runChecks } from "./checks.js";
 import { initializeProject } from "./init.js";
@@ -126,8 +126,12 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
           break;
         }
         case "4": {
-          printInputHint("生成人工页面测试文档需要功能名称。输入 0 或直接回车返回。");
-          const featureName = await askRequiredMenuInput(rl, "请输入功能名称：");
+          const featureName = await selectTaskFeatureNameForMenu(projectRoot, rl, {
+            title: "选择要生成手工测试文档的任务",
+            statuses: ["active", "mixed"],
+            manualHint: "未找到合适任务或需要新建文档时，可手动输入功能名称。输入 0 或直接回车返回。",
+            manualQuestion: "请输入功能名称："
+          });
           if (featureName === undefined) {
             console.log("已取消生成人工页面测试文档，返回主菜单。");
             break;
@@ -155,8 +159,12 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
           await pauseAfterMenuAction(useKeyMenu);
           break;
         case "7": {
-          printInputHint("文档归档需要中文功能名称，例如 订单管理升级。输入 0 或直接回车返回。");
-          const featureName = await askRequiredMenuInput(rl, "请输入要归档的功能名称：");
+          const featureName = await selectTaskFeatureNameForMenu(projectRoot, rl, {
+            title: "选择要归档的任务",
+            statuses: ["active", "mixed"],
+            manualHint: "未找到合适任务或需要兼容旧文档时，可手动输入功能名称。输入 0 或直接回车返回。",
+            manualQuestion: "请输入要归档的功能名称："
+          });
           if (featureName === undefined) {
             console.log("已取消文档归档，返回主菜单。");
             break;
@@ -188,6 +196,142 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
   } finally {
     rl.close();
   }
+}
+
+/**
+ * 在菜单中选择一个任务功能名。
+ * 优先从已有任务文档选择；没有合适任务或用户选择手动输入时，再回退到文本输入。
+ */
+async function selectTaskFeatureNameForMenu(
+  projectRoot: string,
+  rl: ReturnType<typeof createInterface>,
+  options: {
+    title: string;
+    statuses: TaskStatus[];
+    manualHint: string;
+    manualQuestion: string;
+  }
+): Promise<string | undefined> {
+  const tasks = await getSelectableTasks(projectRoot, options.statuses);
+
+  if (tasks.length > 0) {
+    const answer = canUseInteractiveKeys(input, output)
+      ? await promptSelect(input, output, options.title, buildTaskSelectOptions(tasks, true))
+      : await askTextTaskMenu(rl, options.title, tasks);
+
+    if (answer === "__return__") {
+      return undefined;
+    }
+
+    if (answer !== "__manual__") {
+      return tasks[Number.parseInt(answer, 10)]?.featureName;
+    }
+  } else {
+    console.log("当前没有发现可选择的活动任务。");
+  }
+
+  printInputHint(options.manualHint);
+  return askRequiredMenuInput(rl, options.manualQuestion);
+}
+
+/**
+ * 直接命令缺少功能名时，从已有任务中选择。
+ * 非 TTY 场景不进入交互，只打印可用任务和正确用法。
+ */
+async function selectTaskFeatureNameForCommand(
+  projectRoot: string,
+  title: string,
+  statuses: TaskStatus[]
+): Promise<string | undefined> {
+  const tasks = await getSelectableTasks(projectRoot, statuses);
+
+  if (tasks.length === 0) {
+    console.error("缺少功能名称，且当前没有发现可选择的活动任务。");
+    return undefined;
+  }
+
+  if (!canUseInteractiveKeys(input, output)) {
+    console.error("缺少功能名称。可用任务：");
+    for (const task of tasks) {
+      console.error(`- ${task.featureName}（${task.status}）`);
+    }
+    return undefined;
+  }
+
+  const answer = await promptSelect(input, output, title, buildTaskSelectOptions(tasks, false));
+
+  if (answer === "__return__" || answer === "__manual__") {
+    return undefined;
+  }
+
+  return tasks[Number.parseInt(answer, 10)]?.featureName;
+}
+
+/**
+ * 读取可供动作选择的任务。
+ * archived 任务已经结束，不会默认出现在生成手工测试和归档动作中。
+ */
+async function getSelectableTasks(projectRoot: string, statuses: TaskStatus[]): Promise<TaskRecord[]> {
+  const allowedStatuses = new Set(statuses);
+
+  return (await listTasks(projectRoot)).filter((task) => allowedStatuses.has(task.status));
+}
+
+/**
+ * 为任务选择菜单生成稳定 value。
+ * value 使用数组下标，避免功能名中包含特殊字符时影响菜单控制项。
+ */
+function buildTaskSelectOptions(
+  tasks: TaskRecord[],
+  includeManualInput: boolean
+): Array<{ value: string; label: string }> {
+  const options = tasks.map((task, index) => ({
+    value: String(index),
+    label: `${task.featureName}（${task.status}）`
+  }));
+
+  if (includeManualInput) {
+    options.push({ value: "__manual__", label: "手动输入功能名称" });
+  }
+
+  options.push({ value: "__return__", label: "返回" });
+  return options;
+}
+
+/**
+ * 非 raw mode 终端下的任务选择菜单。
+ * 数字选择任务，M 表示手动输入，0 表示返回。
+ */
+async function askTextTaskMenu(
+  rl: ReturnType<typeof createInterface>,
+  title: string,
+  tasks: TaskRecord[]
+): Promise<string> {
+  console.log(`\n${title}`);
+  tasks.forEach((task, index) => {
+    console.log(`${index + 1}. ${task.featureName}（${task.status}）`);
+  });
+  console.log("M. 手动输入功能名称");
+  console.log("0. 返回");
+
+  const answer = (await askQuestionOrDefault(rl, "请选择任务：", "0")).trim();
+
+  if (answer === "0" || answer === "") {
+    return "__return__";
+  }
+
+  if (answer.toLowerCase() === "m") {
+    return "__manual__";
+  }
+
+  const selectedIndex = Number.parseInt(answer, 10);
+
+  if (Number.isInteger(selectedIndex) && selectedIndex >= 1 && selectedIndex <= tasks.length) {
+    return String(selectedIndex - 1);
+  }
+
+  console.log("无效选择，返回上一级。");
+  return "__return__";
 }
 
 /**
@@ -593,7 +737,12 @@ async function runPlan(projectRoot: string, args: string[]): Promise<number> {
  * 参数：manual-test <功能名称> [标题]。
  */
 async function runManualTest(projectRoot: string, args: string[]): Promise<number> {
-  const [featureName, title] = args;
+  const [rawFeatureName, title] = args;
+  const featureName = rawFeatureName ?? await selectTaskFeatureNameForCommand(
+    projectRoot,
+    "选择要生成手工测试文档的任务",
+    ["active", "mixed"]
+  );
 
   if (!featureName) {
     console.error("缺少功能名称。用法：code-helper manual-test <中文功能名> [标题]");
@@ -609,7 +758,12 @@ async function runManualTest(projectRoot: string, args: string[]): Promise<numbe
  * 参数：archive <功能名称>。
  */
 async function runArchive(projectRoot: string, args: string[]): Promise<number> {
-  const [featureName] = args;
+  const [rawFeatureName] = args;
+  const featureName = rawFeatureName ?? await selectTaskFeatureNameForCommand(
+    projectRoot,
+    "选择要归档的任务",
+    ["active", "mixed"]
+  );
 
   if (!featureName) {
     console.error("缺少功能名称。用法：code-helper archive <中文功能名>");

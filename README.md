@@ -25,6 +25,8 @@ npx @skrupellose/code-helper skills register
 
 在交互式“项目计划优化”里，可以直接把需求文档拖到终端；工具会识别引号、`file://`、反斜杠转义空格和项目内绝对路径。
 
+生成手工测试文档和文档归档时，工具会优先读取当前 `plan-doc` / `result-doc` / `status-doc` 中的活动任务，让用户从列表选择；仍然支持直接传入中文功能名。
+
 ## 默认工作区
 
 初始化后会创建：
@@ -51,6 +53,7 @@ npx @skrupellose/code-helper skills register
 - 页面相关测试只生成严格手工测试文档。
 - 工具自己只执行纯逻辑测试，例如函数单元测试或非浏览器集成测试。
 - 功能完成后可以执行 `npx @skrupellose/code-helper archive <中文功能名>` 归档文档。
+- 不带功能名执行 `manual-test` 或 `archive` 时，TTY 终端会优先展示当前活动任务选择列表。
 - 用户手动移动到 `archive/` 的任务会被识别为已结束任务。
 - Git hooks 默认关闭，只生成 sample 模板。
 
