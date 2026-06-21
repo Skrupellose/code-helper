@@ -8,8 +8,10 @@ export type FeatureKey =
   | "resultSummary"
   | "testingPolicy"
   | "documentArchive"
+  | "completionReview"
   | "checks"
   | "gitHooks"
+  | "agentHooks"
   | "skillRegistration";
 
 /**

@@ -16,8 +16,10 @@ export const FEATURE_KEYS: FeatureKey[] = [
   "resultSummary",
   "testingPolicy",
   "documentArchive",
+  "completionReview",
   "checks",
   "gitHooks",
+  "agentHooks",
   "skillRegistration"
 ];
 
@@ -31,8 +33,10 @@ export const FEATURE_LABELS: Record<FeatureKey, string> = {
   resultSummary: "执行结果总结",
   testingPolicy: "测试策略约束",
   documentArchive: "文档归档",
+  completionReview: "功能完成检查",
   checks: "项目规则检查",
   gitHooks: "Git hooks 模板",
+  agentHooks: "Agent hooks 模板",
   skillRegistration: "Skills 管理"
 };
 
@@ -59,8 +63,10 @@ export const DEFAULT_CONFIG: CodeHelperConfig = {
     resultSummary: { enabled: true },
     testingPolicy: { enabled: true },
     documentArchive: { enabled: true },
+    completionReview: { enabled: true },
     checks: { enabled: true },
     gitHooks: { enabled: false },
+    agentHooks: { enabled: false },
     skillRegistration: { enabled: true }
   }
 };

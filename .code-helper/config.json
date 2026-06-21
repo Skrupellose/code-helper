@@ -27,10 +27,16 @@
     "documentArchive": {
       "enabled": true
     },
+    "completionReview": {
+      "enabled": true
+    },
     "checks": {
       "enabled": true
     },
     "gitHooks": {
+      "enabled": false
+    },
+    "agentHooks": {
       "enabled": false
     },
     "skillRegistration": {

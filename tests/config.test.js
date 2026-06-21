@@ -15,7 +15,9 @@ test("mergeConfig 会补齐缺失的默认功能开关", () => {
   assert.equal(config.features.memoryTuning.enabled, true);
   assert.equal(config.features.planWorkbench.enabled, true);
   assert.equal(config.features.testingPolicy.enabled, true);
+  assert.equal(config.features.completionReview.enabled, true);
   assert.equal(config.features.gitHooks.enabled, true);
+  assert.equal(config.features.agentHooks.enabled, false);
   assert.equal(config.features.skillRegistration.enabled, true);
   assert.deepEqual(config.directories, DEFAULT_CONFIG.directories);
 });

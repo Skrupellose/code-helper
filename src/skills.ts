@@ -34,6 +34,10 @@ const CODE_HELPER_SKILL_REGISTRATIONS = [
   {
     templateFileName: "document-archive.SKILL.md",
     directoryName: "code-helper-document-archive"
+  },
+  {
+    templateFileName: "completion-review.SKILL.md",
+    directoryName: "code-helper-completion-review"
   }
 ] as const;
 

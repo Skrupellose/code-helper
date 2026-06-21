@@ -23,16 +23,16 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
     const firstOperations = await registerProjectSkills(root);
     const secondOperations = await registerProjectSkills(root);
     const statuses = await listProjectSkillRegistrations(root);
-    const memorySkill = await readFile(
-      join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"),
+    const completionSkill = await readFile(
+      join(root, ".agents/skills/code-helper-completion-review/SKILL.md"),
       "utf8"
     );
 
-    assert.equal(firstOperations.length, 3);
+    assert.equal(firstOperations.length, 4);
     assert.ok(firstOperations.every((operation) => operation.action === "created"));
     assert.ok(secondOperations.every((operation) => operation.action === "skipped"));
     assert.ok(statuses.every((status) => status.registered));
-    assert.match(memorySkill, /name: code-helper-memory-tuning/);
+    assert.match(completionSkill, /name: code-helper-completion-review/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -50,7 +50,7 @@ test("registerProjectSkills 支持 Claude Code 项目级 skills", async () => {
       "utf8"
     );
 
-    assert.equal(operations.length, 3);
+    assert.equal(operations.length, 4);
     assert.ok(operations.every((operation) => operation.action === "created"));
     assert.ok(statuses.every((status) => status.target === "claudecode" && status.registered));
     assert.match(memorySkill, /name: code-helper-memory-tuning/);
@@ -71,7 +71,7 @@ test("registerProjectSkills 支持 GitHub Copilot 项目级 skills", async () =>
       "utf8"
     );
 
-    assert.equal(operations.length, 3);
+    assert.equal(operations.length, 4);
     assert.ok(operations.every((operation) => operation.action === "created"));
     assert.ok(statuses.every((status) => status.target === "githubcopilot" && status.registered));
     assert.match(memorySkill, /name: code-helper-memory-tuning/);
@@ -109,7 +109,7 @@ test("unregisterProjectSkills 只删除 code-helper 管理的项目级 skills", 
     const statuses = await listProjectSkillRegistrations(root);
     const userSkill = await readFile(join(root, ".agents/skills/user-skill/SKILL.md"), "utf8");
 
-    assert.equal(operations.length, 3);
+    assert.equal(operations.length, 4);
     assert.ok(operations.every((operation) => operation.action === "updated"));
     assert.ok(statuses.every((status) => !status.registered));
     assert.match(userSkill, /name: user-skill/);
@@ -131,7 +131,7 @@ test("unregisterProjectSkills 不会删除用户自己的 Claude Code skills", a
     const statuses = await listProjectSkillRegistrations(root, "claudecode");
     const userSkill = await readFile(join(root, ".claude/skills/user-skill/SKILL.md"), "utf8");
 
-    assert.equal(operations.length, 3);
+    assert.equal(operations.length, 4);
     assert.ok(operations.every((operation) => operation.action === "updated"));
     assert.ok(statuses.every((status) => !status.registered));
     assert.match(userSkill, /name: user-skill/);

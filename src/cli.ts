@@ -3,8 +3,10 @@ import { stdin as input, stdout as output } from "node:process";
 
 import { FEATURE_KEYS, FEATURE_LABELS } from "./constants.js";
 import { archiveFeature, listTasks, type TaskRecord, type TaskStatus } from "./archive.js";
+import { createCompletionReview, type CompletionReview } from "./completion.js";
 import { loadConfig, setFeatureEnabled } from "./config.js";
 import { runChecks } from "./checks.js";
+import { installHook, listHookInstallations, parseHookTargets, uninstallHook } from "./hooks.js";
 import { initializeProject } from "./init.js";
 import { normalizeDroppedPath } from "./input-utils.js";
 import {
@@ -16,7 +18,7 @@ import {
   runSkillsDoctor,
   unregisterProjectSkills
 } from "./skills.js";
-import { canUseInteractiveKeys, promptContinue, promptMultiSelect, promptSelect } from "./terminal-ui.js";
+import { canUseInteractiveKeys, promptContinue, promptSelect } from "./terminal-ui.js";
 import { createManualTestDocument, createPlanWorkbench } from "./workflows.js";
 import type { FeatureKey, OperationResult } from "./types.js";
 
@@ -44,10 +46,14 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
         return runManualTest(projectRoot, args);
       case "archive":
         return runArchive(projectRoot, args);
+      case "finish":
+        return runFinish(projectRoot, args);
       case "tasks":
         return runTasks(projectRoot, args);
       case "skills":
         return runSkills(projectRoot, args);
+      case "hooks":
+        return runHooks(projectRoot, args);
       case "help":
       case "--help":
       case "-h":
@@ -75,11 +81,13 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
     { value: "2", label: "项目记忆规则优化" },
     { value: "3", label: "项目计划优化" },
     { value: "4", label: "生成人工页面测试文档" },
-    { value: "5", label: "功能开关管理" },
+    { value: "5", label: "项目能力应用" },
     { value: "6", label: "项目规则检查" },
     { value: "7", label: "文档归档" },
     { value: "8", label: "查看任务状态" },
     { value: "9", label: "Skills 管理" },
+    { value: "10", label: "功能完成检查" },
+    { value: "11", label: "Hooks 管理" },
     { value: "0", label: "退出" }
   ];
 
@@ -150,7 +158,7 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
           break;
         }
         case "5":
-          if (await runFeatureMenu(projectRoot, rl)) {
+          if (await runApplyMenu(projectRoot, rl)) {
             await pauseAfterMenuAction(useKeyMenu);
           }
           break;
@@ -180,6 +188,27 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
           break;
         case "9":
           if (await runSkillMenu(projectRoot, rl)) {
+            await pauseAfterMenuAction(useKeyMenu);
+          }
+          break;
+        case "10": {
+          const featureName = await selectTaskFeatureNameForMenu(projectRoot, rl, {
+            title: "选择要检查完成情况的任务",
+            statuses: ["active", "mixed"],
+            manualHint: "未找到合适任务或需要兼容旧文档时，可手动输入功能名称。输入 0 或直接回车返回。",
+            manualQuestion: "请输入要检查的功能名称："
+          });
+          if (featureName === undefined) {
+            console.log("已取消功能完成检查，返回主菜单。");
+            break;
+          }
+
+          await runMenuAction("功能完成检查", () => runFinish(projectRoot, [featureName]));
+          await pauseAfterMenuAction(useKeyMenu);
+          break;
+        }
+        case "11":
+          if (await runHooksMenu(projectRoot, rl)) {
             await pauseAfterMenuAction(useKeyMenu);
           }
           break;
@@ -401,6 +430,126 @@ async function runSkillMenu(
 }
 
 /**
+ * 交互式 Hooks 管理菜单。
+ * hooks 安装动作受 gitHooks / agentHooks 开关控制，卸载动作不受开关限制。
+ */
+async function runHooksMenu(
+  projectRoot: string,
+  rl: ReturnType<typeof createInterface>
+): Promise<boolean> {
+  const useKeyMenu = canUseInteractiveKeys(input, output);
+  const options = [
+    { value: "1", label: "查看 Hooks 状态" },
+    { value: "2", label: "安装 Git pre-commit hook" },
+    { value: "3", label: "卸载 Git pre-commit hook" },
+    { value: "4", label: "安装 Codex Agent hook" },
+    { value: "5", label: "卸载 Codex Agent hook" },
+    { value: "6", label: "安装 Claude Code Agent hook" },
+    { value: "7", label: "卸载 Claude Code Agent hook" },
+    { value: "8", label: "安装全部 Hooks" },
+    { value: "9", label: "卸载全部 Hooks" },
+    { value: "0", label: "返回" }
+  ];
+  const answer = useKeyMenu
+    ? await promptSelect(input, output, "Hooks 管理", options)
+    : await askTextHooksMenu(rl);
+
+  switch (answer.trim()) {
+    case "1":
+      await runMenuAction("查看 Hooks 状态", () => runHooks(projectRoot, ["list"]));
+      return true;
+    case "2":
+      await runMenuAction("安装 Git pre-commit hook", () => runHooks(projectRoot, ["install", "git"]));
+      return true;
+    case "3":
+      await runMenuAction("卸载 Git pre-commit hook", () => runHooks(projectRoot, ["uninstall", "git"]));
+      return true;
+    case "4":
+      await runMenuAction("安装 Codex Agent hook", () => runHooks(projectRoot, ["install", "codex"]));
+      return true;
+    case "5":
+      await runMenuAction("卸载 Codex Agent hook", () => runHooks(projectRoot, ["uninstall", "codex"]));
+      return true;
+    case "6":
+      await runMenuAction("安装 Claude Code Agent hook", () => runHooks(projectRoot, ["install", "claudecode"]));
+      return true;
+    case "7":
+      await runMenuAction("卸载 Claude Code Agent hook", () => runHooks(projectRoot, ["uninstall", "claudecode"]));
+      return true;
+    case "8":
+      await runMenuAction("安装全部 Hooks", () => runHooks(projectRoot, ["install", "all"]));
+      return true;
+    case "9":
+      await runMenuAction("卸载全部 Hooks", () => runHooks(projectRoot, ["uninstall", "all"]));
+      return true;
+    case "0":
+      console.log("已返回主菜单。");
+      return false;
+    default:
+      console.log("无效选择，返回主菜单。");
+      return false;
+  }
+}
+
+/**
+ * 项目能力应用菜单。
+ * 面向用户的一级入口应直接应用或取消能力，不要求用户理解内部 feature key。
+ */
+async function runApplyMenu(
+  projectRoot: string,
+  rl: ReturnType<typeof createInterface>
+): Promise<boolean> {
+  const useKeyMenu = canUseInteractiveKeys(input, output);
+  const options = [
+    { value: "1", label: "应用项目级 Skills" },
+    { value: "2", label: "取消项目级 Skills" },
+    { value: "3", label: "应用 Agent hooks" },
+    { value: "4", label: "取消 Agent hooks" },
+    { value: "5", label: "应用 Git hook" },
+    { value: "6", label: "取消 Git hook" },
+    { value: "7", label: "刷新规则和模板" },
+    { value: "8", label: "查看应用状态" },
+    { value: "0", label: "返回" }
+  ];
+  const answer = useKeyMenu
+    ? await promptSelect(input, output, "项目能力应用", options)
+    : await askTextApplyMenu(rl);
+
+  switch (answer.trim()) {
+    case "1":
+      await runMenuAction("应用项目级 Skills", () => applyProjectSkills(projectRoot));
+      return true;
+    case "2":
+      await runMenuAction("取消项目级 Skills", () => removeProjectSkills(projectRoot));
+      return true;
+    case "3":
+      await runMenuAction("应用 Agent hooks", () => applyAgentHooks(projectRoot));
+      return true;
+    case "4":
+      await runMenuAction("取消 Agent hooks", () => removeAgentHooks(projectRoot));
+      return true;
+    case "5":
+      await runMenuAction("应用 Git hook", () => applyGitHook(projectRoot));
+      return true;
+    case "6":
+      await runMenuAction("取消 Git hook", () => removeGitHook(projectRoot));
+      return true;
+    case "7":
+      await runMenuAction("刷新规则和模板", () => runInit(projectRoot));
+      return true;
+    case "8":
+      await runMenuAction("查看应用状态", () => printApplyStatus(projectRoot));
+      return true;
+    case "0":
+      console.log("已返回主菜单。");
+      return false;
+    default:
+      console.log("无效选择，返回主菜单。");
+      return false;
+  }
+}
+
+/**
  * TTY 菜单动作结束后暂停，避免下一轮菜单清屏导致结果一闪而过。
  * 非 TTY 兜底模式不暂停，保证管道和脚本执行不会被阻塞。
  */
@@ -473,6 +622,73 @@ async function runCheck(projectRoot: string): Promise<number> {
 }
 
 /**
+ * 应用项目级 Skills。
+ * 先启用底层能力，再按当前项目入口文件注册，避免用户手动切换 feature key。
+ */
+async function applyProjectSkills(projectRoot: string): Promise<number> {
+  return runSkills(projectRoot, ["register"]);
+}
+
+/**
+ * 取消项目级 Skills。
+ * 先卸载 code-helper 管理的 skills，再关闭后续 init 自动注册。
+ */
+async function removeProjectSkills(projectRoot: string): Promise<number> {
+  const exitCode = await runSkills(projectRoot, ["unregister"]);
+  await setFeatureEnabled(projectRoot, "skillRegistration", false);
+  console.log("已关闭后续初始化时的项目级 Skills 自动注册。");
+  return exitCode;
+}
+
+/**
+ * 应用 Agent hooks。
+ * Agent hooks 安装到 Codex / Claude Code 项目级配置，只运行 finish --check-only。
+ */
+async function applyAgentHooks(projectRoot: string): Promise<number> {
+  return runHooks(projectRoot, ["install", "agent"]);
+}
+
+/**
+ * 取消 Agent hooks。
+ * 卸载 code-helper 管理的 agent hooks，并关闭后续安装入口。
+ */
+async function removeAgentHooks(projectRoot: string): Promise<number> {
+  const exitCode = await runHooks(projectRoot, ["uninstall", "agent"]);
+  await setFeatureEnabled(projectRoot, "agentHooks", false);
+  console.log("已关闭 Agent hooks 应用能力。");
+  return exitCode;
+}
+
+/**
+ * 应用 Git pre-commit hook。
+ */
+async function applyGitHook(projectRoot: string): Promise<number> {
+  return runHooks(projectRoot, ["install", "git"]);
+}
+
+/**
+ * 取消 Git pre-commit hook。
+ */
+async function removeGitHook(projectRoot: string): Promise<number> {
+  const exitCode = await runHooks(projectRoot, ["uninstall", "git"]);
+  await setFeatureEnabled(projectRoot, "gitHooks", false);
+  console.log("已关闭 Git hook 应用能力。");
+  return exitCode;
+}
+
+/**
+ * 查看项目能力应用状态。
+ */
+async function printApplyStatus(projectRoot: string): Promise<number> {
+  console.log("Skills 状态：");
+  await runSkills(projectRoot, ["list"]);
+  console.log("");
+  console.log("Hooks 状态：");
+  await runHooks(projectRoot, ["list"]);
+  return 0;
+}
+
+/**
  * 非交互功能开关命令。
  * 支持：features list、features enable <key>、features disable <key>。
  */
@@ -498,53 +714,6 @@ async function runFeatures(projectRoot: string, args: string[]): Promise<number>
 
   printFeatureHelp();
   return 1;
-}
-
-/**
- * 交互式功能开关菜单。
- * 修改后只保存配置，不自动重写模板；用户可再执行初始化刷新模板。
- */
-async function runFeatureMenu(
-  projectRoot: string,
-  rl: ReturnType<typeof createInterface>
-): Promise<boolean> {
-  const config = await loadConfig(projectRoot);
-
-  if (canUseInteractiveKeys(input, output)) {
-    const selectedFeatures = await promptMultiSelect(
-      input,
-      output,
-      "功能开关管理",
-      FEATURE_KEYS.map((feature) => ({
-        value: feature,
-        label: `${feature} - ${FEATURE_LABELS[feature]}`,
-        checked: config.features[feature].enabled
-      }))
-    );
-
-    if (selectedFeatures.cancelled) {
-      console.log("已取消功能开关修改，返回主菜单。");
-      return false;
-    }
-
-    console.log(`\n▶ 开始：功能开关管理`);
-    let changedCount = 0;
-
-    for (const feature of selectedFeatures.options) {
-      if (config.features[feature.value].enabled !== feature.checked) {
-        await setFeatureEnabled(projectRoot, feature.value, feature.checked);
-        changedCount += 1;
-      }
-    }
-
-    console.log(`已保存功能开关，变更 ${changedCount} 项。`);
-    printFeatureList(await loadConfig(projectRoot));
-    console.log(`✓ 完成：功能开关管理`);
-    return true;
-  }
-
-  await runTextFeatureMenu(projectRoot, rl);
-  return false;
 }
 
 /**
@@ -582,47 +751,6 @@ async function askOptionalMenuInput(
 }
 
 /**
- * 非 TTY 环境下的数字功能开关菜单。
- * 输入 1..N 切换对应功能，输入 0 返回上一级。
- */
-async function runTextFeatureMenu(
-  projectRoot: string,
-  rl: ReturnType<typeof createInterface>
-): Promise<void> {
-  let shouldReturn = false;
-
-  while (!shouldReturn) {
-    const config = await loadConfig(projectRoot);
-
-    console.log("\n功能开关管理");
-    FEATURE_KEYS.forEach((feature, index) => {
-      const status = config.features[feature].enabled ? "启用" : "关闭";
-      console.log(`${index + 1}. ${FEATURE_LABELS[feature]}（${feature}）：${status}`);
-    });
-    console.log("0. 返回");
-
-    const answer = await askQuestionOrDefault(rl, "请输入数字切换功能，或输入 0 返回：", "0");
-    const selectedIndex = Number.parseInt(answer.trim(), 10);
-
-    if (selectedIndex === 0) {
-      shouldReturn = true;
-      continue;
-    }
-
-    if (!Number.isInteger(selectedIndex) || selectedIndex < 1 || selectedIndex > FEATURE_KEYS.length) {
-      console.log("无效选择，请输入列表中的数字。");
-      continue;
-    }
-
-    const selectedFeature = FEATURE_KEYS[selectedIndex - 1];
-    const current = config.features[selectedFeature].enabled;
-
-    await setFeatureEnabled(projectRoot, selectedFeature, !current);
-    console.log(`已${current ? "关闭" : "启用"}：${FEATURE_LABELS[selectedFeature]}`);
-  }
-}
-
-/**
  * 非 TTY 环境下的文本菜单兜底。
  * 当终端不支持 raw mode 时，仍允许用户输入数字选择。
  */
@@ -632,11 +760,13 @@ async function askTextMenu(rl: ReturnType<typeof createInterface>): Promise<stri
   console.log("2. 项目记忆规则优化");
   console.log("3. 项目计划优化");
   console.log("4. 生成人工页面测试文档");
-  console.log("5. 功能开关管理");
+  console.log("5. 项目能力应用");
   console.log("6. 项目规则检查");
   console.log("7. 文档归档");
   console.log("8. 查看任务状态");
   console.log("9. Skills 管理");
+  console.log("10. 功能完成检查");
+  console.log("11. Hooks 管理");
   console.log("0. 退出");
 
   return askQuestionOrDefault(rl, "请选择操作：", "0");
@@ -658,6 +788,43 @@ async function askTextSkillMenu(rl: ReturnType<typeof createInterface>): Promise
   console.log("8. 取消注册全部");
   console.log("9. Skills 质量检查");
   console.log("10. Skills 建议分析");
+  console.log("0. 返回");
+
+  return askQuestionOrDefault(rl, "请选择操作：", "0");
+}
+
+/**
+ * 非 TTY 环境下的项目能力应用菜单。
+ */
+async function askTextApplyMenu(rl: ReturnType<typeof createInterface>): Promise<string> {
+  console.log("\n项目能力应用");
+  console.log("1. 应用项目级 Skills");
+  console.log("2. 取消项目级 Skills");
+  console.log("3. 应用 Agent hooks");
+  console.log("4. 取消 Agent hooks");
+  console.log("5. 应用 Git hook");
+  console.log("6. 取消 Git hook");
+  console.log("7. 刷新规则和模板");
+  console.log("8. 查看应用状态");
+  console.log("0. 返回");
+
+  return askQuestionOrDefault(rl, "请选择操作：", "0");
+}
+
+/**
+ * 非 TTY 环境下的 Hooks 管理菜单。
+ */
+async function askTextHooksMenu(rl: ReturnType<typeof createInterface>): Promise<string> {
+  console.log("\nHooks 管理");
+  console.log("1. 查看 Hooks 状态");
+  console.log("2. 安装 Git pre-commit hook");
+  console.log("3. 卸载 Git pre-commit hook");
+  console.log("4. 安装 Codex Agent hook");
+  console.log("5. 卸载 Codex Agent hook");
+  console.log("6. 安装 Claude Code Agent hook");
+  console.log("7. 卸载 Claude Code Agent hook");
+  console.log("8. 安装全部 Hooks");
+  console.log("9. 卸载全部 Hooks");
   console.log("0. 返回");
 
   return askQuestionOrDefault(rl, "请选择操作：", "0");
@@ -776,6 +943,59 @@ async function runArchive(projectRoot: string, args: string[]): Promise<number> 
 }
 
 /**
+ * 功能完成检查命令。
+ * 参数：finish [中文功能名] [--check-only] [--json]。
+ */
+async function runFinish(projectRoot: string, args: string[]): Promise<number> {
+  const flags = new Set(args.filter((arg) => arg.startsWith("--")));
+  const rawFeatureName = args.find((arg) => !arg.startsWith("--"));
+
+  if (rawFeatureName === undefined && flags.has("--check-only") && !canUseInteractiveKeys(input, output)) {
+    printFinishCheckOnlyCandidates(await getSelectableTasks(projectRoot, ["active", "mixed"]));
+    return 0;
+  }
+
+  const featureName = rawFeatureName ?? await selectTaskFeatureNameForCommand(
+    projectRoot,
+    "选择要检查完成情况的任务",
+    ["active", "mixed"]
+  );
+
+  if (!featureName) {
+    console.error("缺少功能名称。用法：code-helper finish <中文功能名> [--check-only] [--json]");
+    return 1;
+  }
+
+  const review = await createCompletionReview(projectRoot, featureName);
+
+  if (flags.has("--json")) {
+    console.log(JSON.stringify(review, null, 2));
+    return 0;
+  }
+
+  printCompletionReview(review, flags.has("--check-only"));
+  return 0;
+}
+
+/**
+ * Agent hook 常用 check-only 模式没有明确功能名。
+ * 这时只提示候选任务并返回成功，避免 hook 把正常收尾流程误判为命令失败。
+ */
+function printFinishCheckOnlyCandidates(tasks: TaskRecord[]): void {
+  if (tasks.length === 0) {
+    console.log("功能完成检查：当前没有发现活动任务。");
+    console.log("如果本轮变更形成长期规则，请询问用户是否更新项目记忆。");
+    return;
+  }
+
+  console.log("功能完成检查：检测到活动任务，请 agent 选择当前任务后运行更精确的检查。");
+  for (const task of tasks) {
+    console.log(`- ${task.featureName}（${task.status}）`);
+  }
+  console.log("建议命令：code-helper finish <中文功能名> --check-only");
+}
+
+/**
  * 任务状态列表命令。
  * 参数：tasks [--json]。
  */
@@ -826,6 +1046,7 @@ async function runSkills(projectRoot: string, args: string[]): Promise<number> {
   }
 
   if (action === "register") {
+    await setFeatureEnabled(projectRoot, "skillRegistration", true);
     const targets = await resolveTargetsForSkillAction(projectRoot, action, rawTarget);
     const operations = (await Promise.all(targets.map((target) => registerProjectSkills(projectRoot, target)))).flat();
     const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
@@ -837,6 +1058,9 @@ async function runSkills(projectRoot: string, args: string[]): Promise<number> {
   if (action === "unregister") {
     const targets = await resolveTargetsForSkillAction(projectRoot, action, rawTarget);
     const operations = (await Promise.all(targets.map((target) => unregisterProjectSkills(projectRoot, target)))).flat();
+    if (rawTarget === undefined || rawTarget === "all") {
+      await setFeatureEnabled(projectRoot, "skillRegistration", false);
+    }
     const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
     printOperations(operations);
     printSkillRegistrationStatus(statuses);
@@ -859,6 +1083,48 @@ async function runSkills(projectRoot: string, args: string[]): Promise<number> {
 }
 
 /**
+ * Hooks 管理命令。
+ * 支持：hooks list、hooks install <target>、hooks uninstall <target>。
+ */
+async function runHooks(projectRoot: string, args: string[]): Promise<number> {
+  const [action = "list", rawTarget] = args;
+
+  if (action === "help" || action === "--help" || action === "-h") {
+    printHooksHelp();
+    return 0;
+  }
+
+  if (action === "list") {
+    printHookInstallationStatus(await listHookInstallations(projectRoot));
+    return 0;
+  }
+
+  if (action === "install" || action === "uninstall") {
+    const targets = parseHookTargets(rawTarget);
+    const operations: OperationResult[] = [];
+
+    for (const target of targets) {
+      if (action === "install") {
+        operations.push(await installHook(projectRoot, target));
+        await setFeatureEnabled(projectRoot, target === "git" ? "gitHooks" : "agentHooks", true);
+      } else {
+        operations.push(await uninstallHook(projectRoot, target));
+        if (target === "git" || rawTarget === undefined || rawTarget === "all" || rawTarget === "agent" || rawTarget === "agents" || rawTarget === "agentHooks") {
+          await setFeatureEnabled(projectRoot, target === "git" ? "gitHooks" : "agentHooks", false);
+        }
+      }
+    }
+
+    printOperations(operations);
+    printHookInstallationStatus(await listHookInstallations(projectRoot));
+    return 0;
+  }
+
+  printHooksHelp();
+  return 1;
+}
+
+/**
  * 打印操作结果。
  * 路径可能是绝对路径，保留原样方便用户定位。
  */
@@ -866,6 +1132,70 @@ function printOperations(operations: OperationResult[]): void {
   for (const operation of operations) {
     console.log(`[${operation.action}] ${operation.path} - ${operation.message}`);
   }
+}
+
+/**
+ * 打印功能完成检查结果。
+ * checkOnly 模式用于 agent hook，输出更强调“下一步必须判断什么”。
+ */
+function printCompletionReview(review: CompletionReview, checkOnly: boolean): void {
+  console.log(`功能完成检查：${review.featureName}`);
+  console.log(`任务状态：${review.taskStatus}`);
+  console.log(`检查结论：${formatCompletionReviewStatus(review.reviewStatus)}`);
+  console.log(`运行模式：${checkOnly ? "仅检查，不修改文件" : "检查并给出下一步建议"}`);
+  console.log("");
+  console.log("文档状态：");
+  console.log(`- 计划文档：${formatDocumentPresence(review.documents.plan)}`);
+  console.log(`- 实施记录：${formatDocumentPresence(review.documents.result)}`);
+  console.log(`- 状态记录：${formatDocumentPresence(review.documents.status)}`);
+  console.log(`- 手工测试：${formatDocumentPresence(review.documents.manualTest)}`);
+  console.log("");
+  console.log("状态枚举：");
+  console.log(`- 未开始：${review.statusCounts.notStarted}`);
+  console.log(`- 进行中：${review.statusCounts.inProgress}`);
+  console.log(`- 部分完成：${review.statusCounts.partial}`);
+  console.log(`- 被阻塞：${review.statusCounts.blocked}`);
+  console.log(`- 已完成：${review.statusCounts.done}`);
+  console.log("");
+  console.log(`当前执行节点：${review.hasCurrentExecutionNode ? "已存在" : "缺失"}`);
+  console.log(`子计划队列：${review.hasSubPlanQueue ? "已存在" : "缺失"}`);
+  console.log(`建议询问更新记忆：${review.shouldAskMemoryUpdate ? "是" : "否"}`);
+  console.log(`建议询问归档：${review.shouldAskArchive ? "是" : "否"}`);
+  console.log("");
+  console.log("下一步建议：");
+  review.recommendations.forEach((recommendation, index) => {
+    console.log(`${index + 1}. ${recommendation}`);
+  });
+
+  if (review.changedPaths.length > 0) {
+    console.log("");
+    console.log("检测到的当前变更：");
+    review.changedPaths.forEach((path) => {
+      console.log(`- ${path}`);
+    });
+  }
+}
+
+/**
+ * 把完成检查状态转成中文文案。
+ */
+function formatCompletionReviewStatus(status: CompletionReview["reviewStatus"]): string {
+  const labels: Record<CompletionReview["reviewStatus"], string> = {
+    "needs-work": "当前任务仍需继续推进",
+    blocked: "当前任务存在阻塞",
+    "node-review": "需要先补齐当前执行节点",
+    "ready-to-archive": "可在用户确认后归档",
+    "missing-docs": "缺少必要协作文档"
+  };
+
+  return labels[status];
+}
+
+/**
+ * 把文档存在状态转成稳定中文输出。
+ */
+function formatDocumentPresence(document: CompletionReview["documents"]["plan"]): string {
+  return `${document.exists ? "已存在" : "缺失"} - ${document.relativePath}`;
 }
 
 /**
@@ -888,6 +1218,19 @@ function printSkillRegistrationStatus(
 ): void {
   for (const status of statuses) {
     console.log(`${status.target}/${status.name}: ${status.registered ? "已注册" : "未注册"}`);
+    console.log(`  path: ${status.path}`);
+  }
+}
+
+/**
+ * 打印 hooks 安装状态。
+ */
+function printHookInstallationStatus(
+  statuses: Awaited<ReturnType<typeof listHookInstallations>>
+): void {
+  for (const status of statuses) {
+    console.log(`${status.target}: ${status.installed ? "已安装" : "未安装"} - ${status.label}`);
+    console.log(`  开关：${status.enabled ? "启用" : "关闭"}`);
     console.log(`  path: ${status.path}`);
   }
 }
@@ -953,6 +1296,17 @@ function printSkillsHelp(): void {
 }
 
 /**
+ * 打印 hooks 命令帮助。
+ */
+function printHooksHelp(): void {
+  console.log("用法：");
+  console.log("  code-helper hooks list");
+  console.log("  code-helper hooks install [git|codex|claudecode|agent|all]");
+  console.log("  code-helper hooks uninstall [git|codex|claudecode|agent|all]");
+  console.log("说明：安装 Git hook 需要启用 gitHooks；安装 Codex / Claude Code hook 需要启用 agentHooks。");
+}
+
+/**
  * 打印 CLI 帮助。
  * 所有子命令都提供非交互入口，便于测试和集成到脚本。
  */
@@ -963,18 +1317,22 @@ function printHelp(): void {
   code-helper                         打开交互菜单
   code-helper init                    初始化项目规则和工作区
   code-helper check                   检查协作文档结构
-  code-helper features list           查看功能开关
-  code-helper features enable <key>   启用功能
-  code-helper features disable <key>  关闭功能
+  code-helper features list           查看高级功能配置
+  code-helper features enable <key>   启用高级功能配置
+  code-helper features disable <key>  关闭高级功能配置
   code-helper plan <需求文档> [中文功能名] 生成项目计划文档
   code-helper manual-test <中文功能名> [标题] 生成页面手工测试文档
   code-helper archive <中文功能名>       将功能文档移动到 archive 并识别为已结束
+  code-helper finish [中文功能名]        检查当前功能是否完成并提示后续动作
   code-helper tasks [--json]           查看 active / archived / mixed 任务
   code-helper skills list              查看项目级 skills 注册状态
   code-helper skills register [target] 按项目入口或指定 target 注册项目级 skills
   code-helper skills unregister [target] 按项目入口或指定 target 取消注册项目级 skills
   code-helper skills doctor            检查项目级 skills 结构和质量
   code-helper skills audit             根据项目状态给出 skills 建议
+  code-helper hooks list               查看 Git / Agent hooks 安装状态
+  code-helper hooks install [target]   安装 Git / Agent hooks
+  code-helper hooks uninstall [target] 卸载 code-helper 管理的 hooks
 `);
 }
 

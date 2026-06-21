@@ -335,13 +335,15 @@ async function installHookTemplates(projectRoot: string, config: CodeHelperConfi
 
   for (const template of getHookTemplates()) {
     const targetPath = projectPath(projectRoot, join(config.directories.workspace, "hooks", template.fileName));
+    const enabled = config.features[template.feature].enabled;
+
     await writeText(targetPath, template.content);
     operations.push({
       path: targetPath,
-      action: config.features.gitHooks.enabled ? "updated" : "skipped",
-      message: config.features.gitHooks.enabled
-        ? "已刷新可选 Git hook 模板"
-        : "Git hooks 默认关闭，仅保留 sample 模板"
+      action: enabled ? "updated" : "skipped",
+      message: enabled
+        ? `已刷新可选 ${template.feature === "gitHooks" ? "Git hook" : "Agent hook"} 模板`
+        : `${template.feature === "gitHooks" ? "Git hooks" : "Agent hooks"} 默认关闭，仅保留 sample 模板`
     });
   }
 

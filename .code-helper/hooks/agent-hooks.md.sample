@@ -1,0 +1,32 @@
+# code-helper Agent hooks 模板
+
+## 用途
+
+Agent hooks 用于在 agent 准备最终回复、停止任务、提交前检查或切换任务前，提醒运行完成检查。
+
+## 推荐命令
+
+```bash
+node .code-helper/hooks/agent-finish-check.mjs
+```
+
+如果所在 agent 工具支持分别配置 macOS/Linux 和 Windows 命令，Windows 可以使用：
+
+```powershell
+node .code-helper\hooks\agent-finish-check.mjs
+```
+
+## 行为边界
+
+- hook 只运行 `code-helper finish --check-only`。
+- hook 不自动更新长期记忆。
+- hook 不自动归档文档。
+- hook 不自动提交代码。
+- agent 仍需要根据输出主动询问用户是否更新记忆、归档或选择下一任务。
+
+## code-helper 安装命令
+
+```bash
+npx @skrupellose/code-helper hooks install codex
+npx @skrupellose/code-helper hooks install claudecode
+```
