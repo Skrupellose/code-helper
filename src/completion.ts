@@ -218,7 +218,7 @@ function resolveReviewStatus(input: {
  * 非 git 项目或 git 不可用时返回空数组，保证 completion review 可在任意目录运行。
  */
 function readGitChangedPaths(projectRoot: string): string[] {
-  const result = spawnSync("git", ["status", "--porcelain"], {
+  const result = spawnSync("git", ["status", "--porcelain", "-z"], {
     cwd: projectRoot,
     encoding: "utf8"
   });
@@ -227,26 +227,36 @@ function readGitChangedPaths(projectRoot: string): string[] {
     return [];
   }
 
-  return result.stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => normalizeGitStatusPath(line));
+  return normalizeGitStatusEntries(result.stdout);
 }
 
 /**
- * 从 git porcelain 行中提取路径。
- * rename 行形如 `R  old -> new`，完成检查只关心新路径。
+ * 从 git porcelain -z 输出中提取路径。
+ * -z 会保留中文路径原文，避免普通 porcelain 把非 ASCII 路径转成带反斜杠的引号形式。
  */
-function normalizeGitStatusPath(line: string): string {
-  const rawPath = line.slice(3).trim();
-  const renameSeparator = " -> ";
+function normalizeGitStatusEntries(stdout: string): string[] {
+  const entries = stdout.split("\0").filter(Boolean);
+  const paths: string[] = [];
 
-  if (rawPath.includes(renameSeparator)) {
-    return rawPath.slice(rawPath.lastIndexOf(renameSeparator) + renameSeparator.length);
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    const status = entry.slice(0, 2);
+    const rawPath = entry.slice(3);
+
+    if (rawPath.length > 0) {
+      paths.push(rawPath.replace(/\\/gu, "/"));
+    }
+
+    /**
+     * rename / copy 在 -z 格式中会额外跟一个旧路径字段。
+     * 完成检查只关心当前路径，因此跳过旧路径。
+     */
+    if (status.includes("R") || status.includes("C")) {
+      index += 1;
+    }
   }
 
-  return rawPath.replace(/\\/gu, "/");
+  return paths;
 }
 
 /**

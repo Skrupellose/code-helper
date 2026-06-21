@@ -8,7 +8,32 @@
 npx @skrupellose/code-helper
 ```
 
-交互菜单支持方向键移动，空格或回车确认。不支持按键交互的终端会回退为数字菜单，输入 `0` 返回上一级。菜单动作会打印开始和完成状态，并在 TTY 模式下等待回车后再返回菜单，避免执行结果一闪而过。
+交互菜单支持方向键移动，空格或回车确认。不支持按键交互的终端会回退为数字菜单，输入 `0` 返回上一级。主菜单会用 `【分组】` 标题和空行区分功能区域；raw mode 菜单使用固定名称列展示说明，数字兜底菜单会把说明缩进到下一行，方便扫描。菜单动作会打印开始和完成状态，并在 TTY 模式下等待回车后再返回菜单，避免执行结果一闪而过。
+
+数字兜底菜单示例：
+
+```text
+【任务推进】
+   2. 生成任务计划
+      根据需求文档生成计划、状态记录和执行记录入口
+   3. 生成手工测试文档
+      为页面或交互验收生成需要人工执行的测试文档
+```
+
+主菜单按功能用途分组：
+
+| 分组 | 菜单项 | 说明 |
+| --- | --- | --- |
+| 项目准备 | 初始化/刷新项目配置 | 创建或更新工作区、入口索引、规则模板、Skills 和可用 hooks |
+| 任务推进 | 生成任务计划 | 根据需求文档生成计划、状态记录和执行记录入口 |
+| 任务推进 | 生成手工测试文档 | 为页面或交互验收生成需要人工执行的测试文档 |
+| 任务推进 | 检查功能完成情况 | 检查当前任务是否满足完成条件，并提示后续动作 |
+| 项目维护 | 查看任务列表 | 查看 active、archived 和 mixed 状态的任务文档 |
+| 项目维护 | 归档已完成任务 | 将已结束任务的计划、结果和状态文档移动到 archive |
+| 项目维护 | 检查协作规范 | 检查入口文档、规则目录、计划和归档结构是否完整 |
+| 工具设置 | 功能管理 | 应用或取消项目级 Skills、Agent hooks 和 Git hook |
+| 工具设置 | 管理项目 Skills | 查看、注册、取消注册、检查或分析项目级 Skills |
+| 工具设置 | 管理 Hooks | 查看、安装或卸载 code-helper 管理的 Git / Agent hooks |
 
 也可以使用非交互命令：
 
@@ -27,13 +52,13 @@ npx @skrupellose/code-helper hooks install agent
 npx @skrupellose/code-helper hooks list
 ```
 
-在交互式“项目计划优化”里，可以直接把需求文档拖到终端；工具会识别引号、`file://`、反斜杠转义空格和项目内绝对路径。
+在交互式“生成任务计划”里，可以直接把需求文档拖到终端；工具会识别引号、`file://`、反斜杠转义空格和项目内绝对路径。
 
 生成项目计划时，`status-doc` 会同步生成当前执行入口，包含“当前执行节点”和“子计划队列”，用于让 agent 按计划逐步推进。
 
 完成小节点、识别到功能变更、准备最终回复或切换任务前，可以运行 `code-helper finish <中文功能名> --check-only`。它只输出完成判断和后续建议，不会自动更新长期记忆、归档或提交。
 
-生成手工测试文档和文档归档时，工具会优先读取当前 `plan-doc` / `result-doc` / `status-doc` 中的活动任务，让用户从列表选择；仍然支持直接传入中文功能名。
+生成手工测试文档、检查功能完成情况和归档已完成任务时，工具会优先读取当前 `plan-doc` / `result-doc` / `status-doc` 中的活动任务，让用户从列表选择；仍然支持直接传入中文功能名。
 
 ## 默认工作区
 
@@ -62,9 +87,9 @@ npx @skrupellose/code-helper hooks list
 - 计划、结果、状态和测试文档必须使用中文命名与中文总结，例如 `code-helper-docs/plan-doc/订单管理升级.md`、`code-helper-docs/result-doc/订单管理升级/实施记录.md`、`code-helper-docs/status-doc/订单管理升级-状态.md`。
 - 页面相关测试只生成严格手工测试文档。
 - 工具自己只执行纯逻辑测试，例如函数单元测试或非浏览器集成测试。
-- 功能完成检查只做判断和提示；更新长期记忆、文档归档、提交和发布都需要用户确认。
+- 检查功能完成情况只做判断和提示；更新长期记忆、归档已完成任务、提交和发布都需要用户确认。
 - 功能完成后可以执行 `npx @skrupellose/code-helper archive <中文功能名>` 归档文档。
-- 不带功能名执行 `manual-test` 或 `archive` 时，TTY 终端会优先展示当前活动任务选择列表。
+- 不带功能名执行 `manual-test`、`finish` 或 `archive` 时，TTY 终端会优先展示当前活动任务选择列表。
 - 用户手动移动到 `archive/` 的任务会被识别为已结束任务。
 - init 不会自动安装 Git hook；Git hook 只在显式执行 `hooks install git` 时安装。执行 `hooks install` 时会直接应用到项目，执行 `hooks uninstall` 会取消 code-helper 管理的 hooks。
 
@@ -81,7 +106,7 @@ npx @skrupellose/code-helper hooks uninstall git
 
 交互菜单中的“功能管理”会直接应用或取消 Skills、Agent hooks、Git hook，也可以刷新规则和模板。应用或取消项目级 Skills 时，可以选择 Codex、Claude Code、GitHub Copilot、全部，或使用当前项目识别到的默认 agent 工具；应用或取消 Agent hooks 时，只提供 Codex、Claude Code 和全部可用 Agent hooks，GitHub Copilot 不会安装 Agent hook。`features` 命令仍保留为高级配置接口，普通使用不需要先切换功能开关。
 
-## Skills 管理
+## 管理项目 Skills
 
 ```bash
 npx @skrupellose/code-helper skills list
@@ -93,7 +118,7 @@ npx @skrupellose/code-helper skills audit
 - `skills doctor`：检查项目级 skills 的结构、frontmatter、description 和 code-helper 模板是否过期。
 - `skills audit`：根据当前入口文档、专题规则和计划/归档目录，给出缺失注册或缺失 skill 的建议。
 
-## Hooks 管理
+## 管理 Hooks
 
 ```bash
 npx @skrupellose/code-helper hooks list

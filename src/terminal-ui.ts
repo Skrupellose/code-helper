@@ -8,6 +8,11 @@ import type { ReadStream, WriteStream } from "node:tty";
 export interface SelectOption<T extends string> {
   value: T;
   label: string;
+  /**
+   * disabled 用于展示不可选的分组标题。
+   * 单选菜单会跳过这些项，避免用户把分组标题当成功能动作确认。
+   */
+  disabled?: boolean;
 }
 
 /**
@@ -48,7 +53,7 @@ export async function promptSelect<T extends string>(
   title: string,
   options: Array<SelectOption<T>>
 ): Promise<T> {
-  let selectedIndex = 0;
+  let selectedIndex = findNextEnabledOptionIndex(options, -1, 1);
 
   return withRawMode(input, output, () => {
     return new Promise<T>((resolve) => {
@@ -63,7 +68,7 @@ export async function promptSelect<T extends string>(
         output.write("使用 ↑/↓ 移动，空格或回车确认，Ctrl+C 退出。\n\n");
 
         for (const [index, option] of options.entries()) {
-          const pointer = index === selectedIndex ? ">" : " ";
+          const pointer = !option.disabled && index === selectedIndex ? ">" : " ";
           output.write(`${pointer} ${option.label}\n`);
         }
       };
@@ -79,19 +84,23 @@ export async function promptSelect<T extends string>(
         }
 
         if (key.name === "up" || key.name === "k") {
-          selectedIndex = (selectedIndex - 1 + options.length) % options.length;
+          selectedIndex = findNextEnabledOptionIndex(options, selectedIndex, -1);
           render();
           return;
         }
 
         if (key.name === "down" || key.name === "j") {
-          selectedIndex = (selectedIndex + 1) % options.length;
+          selectedIndex = findNextEnabledOptionIndex(options, selectedIndex, 1);
           render();
           return;
         }
 
         if (key.name === "return" || key.name === "space") {
           const selectedValue = options[selectedIndex]?.value;
+          if (selectedValue === undefined || options[selectedIndex]?.disabled) {
+            render();
+            return;
+          }
           cleanup();
           resolve(selectedValue);
         }
@@ -109,6 +118,26 @@ export async function promptSelect<T extends string>(
       render();
     });
   });
+}
+
+/**
+ * 查找下一个可选菜单项。
+ * 分组标题等 disabled 项只参与展示，不参与方向键停留和确认。
+ */
+function findNextEnabledOptionIndex<T extends string>(
+  options: Array<SelectOption<T>>,
+  currentIndex: number,
+  direction: 1 | -1
+): number {
+  for (let step = 1; step <= options.length; step += 1) {
+    const candidateIndex = (currentIndex + direction * step + options.length) % options.length;
+
+    if (!options[candidateIndex]?.disabled) {
+      return candidateIndex;
+    }
+  }
+
+  return 0;
 }
 
 /**

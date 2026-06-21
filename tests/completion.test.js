@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -47,6 +48,46 @@ test("createCompletionReview 缺少任务文档时会报错", async () => {
       () => createCompletionReview(root, "不存在功能"),
       /未找到任务文档/
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 会保留 git 当前变更路径的首字符和中文路径", async (t) => {
+  // 完成检查会把当前变更展示给用户，路径不能因为 git porcelain 解析丢首字符或把中文转成转义片段。
+  try {
+    execFileSync("git", ["--version"], { stdio: "ignore" });
+  } catch {
+    t.skip("当前环境缺少 git，跳过 git 当前变更路径解析测试。");
+    return;
+  }
+
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-git-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await writeFile(join(root, "requirement.md"), "# 菜单优化\n\n优化 CLI 菜单。", "utf8");
+    await createPlanWorkbench({
+      projectRoot: root,
+      requirementPath: "requirement.md",
+      featureName: "菜单优化"
+    });
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "README.md"), "# 测试 README\n", "utf8");
+    await writeFile(join(root, "src/cli.ts"), "export const value = 1;\n", "utf8");
+
+    execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["add", "README.md", "src/cli.ts", "code-helper-docs/plan-doc/菜单优化.md"], {
+      cwd: root,
+      stdio: "ignore"
+    });
+
+    const review = await createCompletionReview(root, "菜单优化");
+
+    assert.ok(review.changedPaths.includes("README.md"));
+    assert.ok(review.changedPaths.includes("src/cli.ts"));
+    assert.ok(review.changedPaths.includes("code-helper-docs/plan-doc/菜单优化.md"));
+    assert.equal(review.changedPaths.some((path) => path === "EADME.md" || path === "rc/cli.ts"), false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

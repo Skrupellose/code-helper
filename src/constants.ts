@@ -28,16 +28,16 @@ export const FEATURE_KEYS: FeatureKey[] = [
  * 这让 CLI 输出保持稳定，也避免各模块重复写同一份文案。
  */
 export const FEATURE_LABELS: Record<FeatureKey, string> = {
-  memoryTuning: "项目记忆规则优化",
-  planWorkbench: "项目计划优化",
+  memoryTuning: "规则记忆维护",
+  planWorkbench: "生成任务计划",
   resultSummary: "执行结果总结",
   testingPolicy: "测试策略约束",
-  documentArchive: "文档归档",
-  completionReview: "功能完成检查",
-  checks: "项目规则检查",
-  gitHooks: "Git hooks 模板",
-  agentHooks: "Agent hooks 模板",
-  skillRegistration: "Skills 管理"
+  documentArchive: "归档已完成任务",
+  completionReview: "检查功能完成情况",
+  checks: "检查协作规范",
+  gitHooks: "Git hook",
+  agentHooks: "Agent hooks",
+  skillRegistration: "管理项目 Skills"
 };
 
 /**

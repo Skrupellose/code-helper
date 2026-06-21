@@ -21,7 +21,7 @@ import {
   type SkillRegistrationTarget,
   unregisterProjectSkills
 } from "./skills.js";
-import { canUseInteractiveKeys, promptContinue, promptMultiSelect, promptSelect } from "./terminal-ui.js";
+import { canUseInteractiveKeys, promptContinue, promptMultiSelect, promptSelect, type SelectOption } from "./terminal-ui.js";
 import { createManualTestDocument, createPlanWorkbench } from "./workflows.js";
 import type { FeatureKey, OperationResult } from "./types.js";
 
@@ -74,25 +74,224 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
 }
 
 /**
+ * 主菜单条目。
+ * value 是数字兜底菜单和 switch 分发共用的稳定值，name 与 description 共同组成用户可见文案。
+ */
+export interface MainMenuItem {
+  value: string;
+  name: string;
+  description: string;
+}
+
+/**
+ * 主菜单分组。
+ * 交互式 raw mode 菜单和非 raw mode 数字菜单都从这里生成，避免两套文案不同步。
+ */
+export interface MainMenuGroup {
+  title: string;
+  items: MainMenuItem[];
+}
+
+/**
+ * 主菜单信息架构。
+ * 分组按用户完成一次协作任务的常见顺序排列：准备项目、推进任务、维护文档，再管理工具能力。
+ */
+const MAIN_MENU_GROUPS: MainMenuGroup[] = [
+  {
+    title: "项目准备",
+    items: [
+      {
+        value: "1",
+        name: "初始化/刷新项目配置",
+        description: "创建或更新工作区、入口索引、规则模板、Skills 和可用 hooks"
+      }
+    ]
+  },
+  {
+    title: "任务推进",
+    items: [
+      {
+        value: "2",
+        name: "生成任务计划",
+        description: "根据需求文档生成计划、状态记录和执行记录入口"
+      },
+      {
+        value: "3",
+        name: "生成手工测试文档",
+        description: "为页面或交互验收生成需要人工执行的测试文档"
+      },
+      {
+        value: "4",
+        name: "检查功能完成情况",
+        description: "检查当前任务是否满足完成条件，并提示后续动作"
+      }
+    ]
+  },
+  {
+    title: "项目维护",
+    items: [
+      {
+        value: "5",
+        name: "查看任务列表",
+        description: "查看 active、archived 和 mixed 状态的任务文档"
+      },
+      {
+        value: "6",
+        name: "归档已完成任务",
+        description: "将已结束任务的计划、结果和状态文档移动到 archive"
+      },
+      {
+        value: "7",
+        name: "检查协作规范",
+        description: "检查入口文档、规则目录、计划和归档结构是否完整"
+      }
+    ]
+  },
+  {
+    title: "工具设置",
+    items: [
+      {
+        value: "8",
+        name: "功能管理",
+        description: "应用或取消项目级 Skills、Agent hooks 和 Git hook"
+      },
+      {
+        value: "9",
+        name: "管理项目 Skills",
+        description: "查看、注册、取消注册、检查或分析项目级 Skills"
+      },
+      {
+        value: "10",
+        name: "管理 Hooks",
+        description: "查看、安装或卸载 code-helper 管理的 Git / Agent hooks"
+      }
+    ]
+  }
+];
+
+const MAIN_MENU_NAME_COLUMN_WIDTH = 24;
+
+/**
+ * 导出主菜单分组，供测试锁定菜单分组、命名和说明。
+ */
+export function getMainMenuGroups(): MainMenuGroup[] {
+  return MAIN_MENU_GROUPS.map((group) => ({
+    title: group.title,
+    items: group.items.map((item) => ({ ...item }))
+  }));
+}
+
+/**
+ * 渲染主菜单分组标题。
+ * 标题使用中文常见的书名号式括号，和功能项形成明确视觉区分，且不依赖 ANSI 样式。
+ */
+export function formatMainMenuGroupTitle(title: string): string {
+  return `【${title}】`;
+}
+
+/**
+ * 渲染 raw mode 菜单中的单行功能项。
+ * 功能名按终端显示宽度补齐，保证说明从稳定列开始，便于快速扫描。
+ */
+export function formatMainMenuSelectItemLabel(item: MainMenuItem): string {
+  return `  ${item.value.padStart(2, " ")}. ${padMenuText(item.name, MAIN_MENU_NAME_COLUMN_WIDTH)} ${item.description}`;
+}
+
+/**
+ * 渲染数字兜底菜单中的功能项。
+ * 数字兜底没有高亮能力，因此把功能名和说明拆成两行，避免长说明挤在同一行。
+ */
+export function formatMainMenuTextItemLines(item: MainMenuItem): string[] {
+  return [`  ${item.value.padStart(2, " ")}. ${item.name}`, `      ${item.description}`];
+}
+
+/**
+ * 按终端显示宽度补齐文本。
+ * 中文字符通常占两个终端列，这里做轻量宽字符判断，避免主菜单说明列明显错位。
+ */
+function padMenuText(text: string, width: number): string {
+  const paddingLength = Math.max(width - getMenuTextWidth(text), 0);
+  return `${text}${" ".repeat(paddingLength)}`;
+}
+
+/**
+ * 计算菜单文本在常见等宽终端中的显示宽度。
+ * 该函数只用于菜单排版，不参与业务逻辑；宽字符范围覆盖中文、日文、韩文和全角符号。
+ */
+function getMenuTextWidth(text: string): number {
+  return Array.from(text).reduce((width, character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return width + (isWideMenuCharacter(codePoint) ? 2 : 1);
+  }, 0);
+}
+
+/**
+ * 判断字符是否通常按双列宽度显示。
+ * 范围参考 Unicode 中常见 CJK 和全角字符区间，避免引入额外依赖。
+ */
+function isWideMenuCharacter(codePoint: number): boolean {
+  return (
+    (codePoint >= 0x1100 && codePoint <= 0x115f) ||
+    (codePoint >= 0x2e80 && codePoint <= 0xa4cf) ||
+    (codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
+    (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+    (codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
+    (codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
+    (codePoint >= 0xff00 && codePoint <= 0xff60) ||
+    (codePoint >= 0xffe0 && codePoint <= 0xffe6)
+  );
+}
+
+/**
+ * 构造 raw mode 单选菜单。
+ * 分组标题和分组间空行作为 disabled 选项展示，方向键会自动跳过。
+ */
+export function buildMainMenuSelectOptions(): Array<SelectOption<string>> {
+  const options: Array<SelectOption<string>> = [];
+
+  for (const [groupIndex, group] of MAIN_MENU_GROUPS.entries()) {
+    if (groupIndex > 0) {
+      options.push({
+        value: `__spacer_${group.title}`,
+        label: "",
+        disabled: true
+      });
+    }
+
+    options.push({
+      value: `__group_${group.title}`,
+      label: formatMainMenuGroupTitle(group.title),
+      disabled: true
+    });
+
+    for (const item of group.items) {
+      options.push({
+        value: item.value,
+        label: formatMainMenuSelectItemLabel(item)
+      });
+    }
+  }
+
+  options.push({ value: "__spacer_exit", label: "", disabled: true });
+  options.push({ value: "0", label: "   0. 退出                 关闭 code-helper 菜单" });
+  return options;
+}
+
+/**
+ * 根据主菜单数字取回用户可见功能名。
+ * 菜单动作回显复用这里的名称，避免旧文案散落在 switch 分支里。
+ */
+function getMainMenuItemName(value: string): string {
+  return MAIN_MENU_GROUPS.flatMap((group) => group.items).find((item) => item.value === value)?.name ?? value;
+}
+
+/**
  * 无参数时展示交互菜单。
  * 使用 Node 内置 readline，减少首版运行依赖和安装体积。
  */
 async function runInteractiveMenu(projectRoot: string): Promise<number> {
   const rl = createInterface({ input, output });
-  const menuOptions = [
-    { value: "1", label: "初始化项目" },
-    { value: "2", label: "项目记忆规则优化" },
-    { value: "3", label: "项目计划优化" },
-    { value: "4", label: "生成人工页面测试文档" },
-    { value: "5", label: "功能管理" },
-    { value: "6", label: "项目规则检查" },
-    { value: "7", label: "文档归档" },
-    { value: "8", label: "查看任务状态" },
-    { value: "9", label: "Skills 管理" },
-    { value: "10", label: "功能完成检查" },
-    { value: "11", label: "Hooks 管理" },
-    { value: "0", label: "退出" }
-  ];
+  const menuOptions = buildMainMenuSelectOptions();
 
   try {
     let shouldExit = false;
@@ -105,38 +304,30 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
 
       switch (answer.trim()) {
         case "1":
-          await runMenuAction("初始化项目", () => runInit(projectRoot));
+          await runMenuAction(getMainMenuItemName(answer), () => runInit(projectRoot));
           await pauseAfterMenuAction(useKeyMenu);
           break;
-        case "2":
-          await runMenuAction("项目记忆规则优化", async () => {
-            await runInit(projectRoot);
-            console.log("已刷新项目记忆规则模板。请根据当前变更定向修改 code-helper-docs/user-rules/ 中的专题规则。");
-            return 0;
-          });
-          await pauseAfterMenuAction(useKeyMenu);
-          break;
-        case "3": {
-          printInputHint("项目计划优化需要需求文档路径，支持直接把文件拖到终端。输入 0 或直接回车返回。");
+        case "2": {
+          printInputHint("生成任务计划需要需求文档路径，支持直接把文件拖到终端。输入 0 或直接回车返回。");
           const requirementPath = await askRequiredMenuInput(rl, "请输入或拖拽需求文档路径：");
           if (requirementPath === undefined) {
-            console.log("已取消项目计划优化，返回主菜单。");
+            console.log("已取消生成任务计划，返回主菜单。");
             break;
           }
 
           const featureName = await askOptionalMenuInput(rl, "请输入中文功能名称（可留空，默认取需求标题或中文文件名；输入 0 返回）：");
           if (featureName === undefined) {
-            console.log("已取消项目计划优化，返回主菜单。");
+            console.log("已取消生成任务计划，返回主菜单。");
             break;
           }
 
-          await runMenuAction("项目计划优化", () =>
+          await runMenuAction(getMainMenuItemName(answer), () =>
             runPlan(projectRoot, [normalizeDroppedPath(requirementPath, projectRoot), featureName].filter(Boolean))
           );
           await pauseAfterMenuAction(useKeyMenu);
           break;
         }
-        case "4": {
+        case "3": {
           const featureName = await selectTaskFeatureNameForMenu(projectRoot, rl, {
             title: "选择要生成手工测试文档的任务",
             statuses: ["active", "mixed"],
@@ -144,32 +335,44 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
             manualQuestion: "请输入功能名称："
           });
           if (featureName === undefined) {
-            console.log("已取消生成人工页面测试文档，返回主菜单。");
+            console.log("已取消生成手工测试文档，返回主菜单。");
             break;
           }
 
           const title = await askOptionalMenuInput(rl, "请输入测试文档标题（可留空；输入 0 返回）：");
           if (title === undefined) {
-            console.log("已取消生成人工页面测试文档，返回主菜单。");
+            console.log("已取消生成手工测试文档，返回主菜单。");
             break;
           }
 
-          await runMenuAction("生成人工页面测试文档", () =>
+          await runMenuAction(getMainMenuItemName(answer), () =>
             runManualTest(projectRoot, [featureName, title].filter(Boolean))
           );
           await pauseAfterMenuAction(useKeyMenu);
           break;
         }
-        case "5":
-          if (await runApplyMenu(projectRoot, rl)) {
+        case "4":
+          {
+            const featureName = await selectTaskFeatureNameForMenu(projectRoot, rl, {
+              title: "选择要检查完成情况的任务",
+              statuses: ["active", "mixed"],
+              manualHint: "未找到合适任务或需要兼容旧文档时，可手动输入功能名称。输入 0 或直接回车返回。",
+              manualQuestion: "请输入要检查的功能名称："
+            });
+            if (featureName === undefined) {
+              console.log("已取消检查功能完成情况，返回主菜单。");
+              break;
+            }
+
+            await runMenuAction(getMainMenuItemName(answer), () => runFinish(projectRoot, [featureName]));
             await pauseAfterMenuAction(useKeyMenu);
+            break;
           }
-          break;
-        case "6":
-          await runMenuAction("项目规则检查", () => runCheck(projectRoot));
+        case "5":
+          await runMenuAction(getMainMenuItemName(answer), () => runTasks(projectRoot, []));
           await pauseAfterMenuAction(useKeyMenu);
           break;
-        case "7": {
+        case "6": {
           const featureName = await selectTaskFeatureNameForMenu(projectRoot, rl, {
             title: "选择要归档的任务",
             statuses: ["active", "mixed"],
@@ -177,40 +380,29 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
             manualQuestion: "请输入要归档的功能名称："
           });
           if (featureName === undefined) {
-            console.log("已取消文档归档，返回主菜单。");
+            console.log("已取消归档已完成任务，返回主菜单。");
             break;
           }
 
-          await runMenuAction("文档归档", () => runArchive(projectRoot, [featureName]));
+          await runMenuAction(getMainMenuItemName(answer), () => runArchive(projectRoot, [featureName]));
           await pauseAfterMenuAction(useKeyMenu);
           break;
         }
-        case "8":
-          await runMenuAction("查看任务状态", () => runTasks(projectRoot, []));
+        case "7":
+          await runMenuAction(getMainMenuItemName(answer), () => runCheck(projectRoot));
           await pauseAfterMenuAction(useKeyMenu);
+          break;
+        case "8":
+          if (await runApplyMenu(projectRoot, rl)) {
+            await pauseAfterMenuAction(useKeyMenu);
+          }
           break;
         case "9":
           if (await runSkillMenu(projectRoot, rl)) {
             await pauseAfterMenuAction(useKeyMenu);
           }
           break;
-        case "10": {
-          const featureName = await selectTaskFeatureNameForMenu(projectRoot, rl, {
-            title: "选择要检查完成情况的任务",
-            statuses: ["active", "mixed"],
-            manualHint: "未找到合适任务或需要兼容旧文档时，可手动输入功能名称。输入 0 或直接回车返回。",
-            manualQuestion: "请输入要检查的功能名称："
-          });
-          if (featureName === undefined) {
-            console.log("已取消功能完成检查，返回主菜单。");
-            break;
-          }
-
-          await runMenuAction("功能完成检查", () => runFinish(projectRoot, [featureName]));
-          await pauseAfterMenuAction(useKeyMenu);
-          break;
-        }
-        case "11":
+        case "10":
           if (await runHooksMenu(projectRoot, rl)) {
             await pauseAfterMenuAction(useKeyMenu);
           }
@@ -367,7 +559,7 @@ async function askTextTaskMenu(
 }
 
 /**
- * 交互式 Skills 管理菜单。
+ * 交互式项目 Skills 管理菜单。
  * 这里只管理 code-helper 自己的项目级 skill，不触碰用户自定义 skills。
  */
 async function runSkillMenu(
@@ -389,7 +581,7 @@ async function runSkillMenu(
     { value: "0", label: "返回" }
   ];
   const answer = useKeyMenu
-    ? await promptSelect(input, output, "Skills 管理", options)
+    ? await promptSelect(input, output, "管理项目 Skills", options)
     : await askTextSkillMenu(rl);
 
   switch (answer.trim()) {
@@ -454,7 +646,7 @@ async function runHooksMenu(
     { value: "0", label: "返回" }
   ];
   const answer = useKeyMenu
-    ? await promptSelect(input, output, "Hooks 管理", options)
+    ? await promptSelect(input, output, "管理 Hooks", options)
     : await askTextHooksMenu(rl);
 
   switch (answer.trim()) {
@@ -1288,28 +1480,29 @@ async function askOptionalMenuInput(
  */
 async function askTextMenu(rl: ReturnType<typeof createInterface>): Promise<string> {
   console.log("\ncode-helper 操作菜单");
-  console.log("1. 初始化项目");
-  console.log("2. 项目记忆规则优化");
-  console.log("3. 项目计划优化");
-  console.log("4. 生成人工页面测试文档");
-  console.log("5. 功能管理");
-  console.log("6. 项目规则检查");
-  console.log("7. 文档归档");
-  console.log("8. 查看任务状态");
-  console.log("9. Skills 管理");
-  console.log("10. 功能完成检查");
-  console.log("11. Hooks 管理");
-  console.log("0. 退出");
+
+  for (const group of MAIN_MENU_GROUPS) {
+    console.log(`\n${formatMainMenuGroupTitle(group.title)}`);
+
+    for (const item of group.items) {
+      for (const line of formatMainMenuTextItemLines(item)) {
+        console.log(line);
+      }
+    }
+  }
+
+  console.log("\n  0. 退出");
+  console.log("      关闭 code-helper 菜单");
 
   return askQuestionOrDefault(rl, "请选择操作：", "0");
 }
 
 /**
- * 非 TTY 环境下的 Skills 管理菜单。
+ * 非 TTY 环境下的项目 Skills 管理菜单。
  * 输入 0 立即返回，避免用户误入子菜单后无法退出。
  */
 async function askTextSkillMenu(rl: ReturnType<typeof createInterface>): Promise<string> {
-  console.log("\nSkills 管理");
+  console.log("\n管理项目 Skills");
   console.log("1. 查看注册状态");
   console.log("2. 按当前项目注册 Skills");
   console.log("3. 按当前项目取消注册 Skills");
@@ -1347,7 +1540,7 @@ async function askTextApplyMenu(rl: ReturnType<typeof createInterface>): Promise
  * 非 TTY 环境下的 Hooks 管理菜单。
  */
 async function askTextHooksMenu(rl: ReturnType<typeof createInterface>): Promise<string> {
-  console.log("\nHooks 管理");
+  console.log("\n管理 Hooks");
   console.log("1. 查看 Hooks 状态");
   console.log("2. 安装 Git pre-commit hook");
   console.log("3. 卸载 Git pre-commit hook");

@@ -110,7 +110,7 @@ async function installProjectSkillRegistrations(
     return statuses.map((status) => ({
       path: status.path,
       action: "skipped",
-      message: "Skills 管理功能已关闭，跳过项目级注册"
+      message: "管理项目 Skills 功能已关闭，跳过项目级注册"
     }));
   }
 

@@ -113,7 +113,7 @@ export async function registerProjectSkills(
 
   const config = await loadConfig(projectRoot);
   if (!config.features.skillRegistration.enabled) {
-    throw new Error("Skills 管理功能已关闭，请先执行 `code-helper features enable skillRegistration`。");
+    throw new Error("管理项目 Skills 功能已关闭，请先执行 `code-helper features enable skillRegistration`。");
   }
 
   const operations: OperationResult[] = [];

@@ -89,7 +89,7 @@ test("registerProjectSkills 会尊重 skillRegistration 功能开关", async () 
 
     await assert.rejects(
       () => registerProjectSkills(root),
-      /Skills 管理功能已关闭/
+      /管理项目 Skills 功能已关闭/
     );
   } finally {
     await rm(root, { recursive: true, force: true });
