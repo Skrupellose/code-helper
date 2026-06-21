@@ -42,19 +42,21 @@
 23. 用户可以用 `npx @skrupellose/code-helper skills register all` 强制注册全部三类目标，也可以用 `npx @skrupellose/code-helper skills register codex`、`npx @skrupellose/code-helper skills register claudecode` 或 `npx @skrupellose/code-helper skills register githubcopilot` 只注册单个 agent 工具。
 24. 取消注册只删除 `.agents/skills/code-helper-*`、`.claude/skills/code-helper-*` 和 `.github/skills/code-helper-*` 受控目录，不触碰用户自己的 skills 内容。
 25. 本地验证优先运行 `npm test`、`npm run check`、`npm pack --dry-run`，必要时再用同级 demo 项目验证真实 CLI 流程；发布包必须通过 `prepack` 或等效流程自动构建，避免依赖本地残留的 ignored `dist/`。
-26. 所有用户可见文案、README、规则文档和 skill 内容必须符合中文产品语境，避免“状态驾驶舱”“计划工作台”“执行工作台”“阶段收口”“当前推进建议”“阻塞回归入口”等生硬表达；优先使用“状态记录”“计划文档”“执行计划”“阶段结束”“下一步建议”“后续检查点”等自然表述。
-27. `code-helper-plan-workbench` 的内容必须保持通用，不应默认任务是前端页面或组件；计划描述要覆盖 CLI、后端服务、数据任务、平台能力、跨模块协作和页面等多种项目类型。
-28. 修改 `src/templates.ts` 中的内置 skill 或规则模板后，必须同步刷新 `.code-helper/skills/`，并在本项目同时刷新 `.agents/skills/code-helper-*`、`.claude/skills/code-helper-*` 与 `.github/skills/code-helper-*`，保证 Codex、Claude Code 和 GitHub Copilot 看到的项目级 skills 内容一致。
-29. 新增或修改 TypeScript 代码时，公共函数、复杂分支和跨平台兼容逻辑应保留清晰中文注释；简单自解释代码不添加空泛注释。
-30. 工具必须同时兼容 macOS 和 Windows。新增路径、文件移动、归档、拖拽输入、CLI 参数解析、skills 注册和文档生成逻辑时，必须使用跨平台路径 API，避免硬编码 `/`、反斜杠、盘符假设或仅适用于单一系统的 shell 行为；涉及路径的改动必须补充或更新 Windows 与 macOS 兼容用例。
-31. `finish` 功能只做完成检查和建议输出，不自动更新长期记忆、不自动归档、不自动提交；需要更新记忆、归档、提交或发布时必须询问用户；检查 archived 任务时必须识别为已结束任务，不得因 active 路径缺文档误判为缺失。
-32. Agent hooks 和 Git hooks 必须分开管理：Agent hooks 只用于 agent 生命周期中的完成检查提醒，Git hooks 只用于提交前兜底检查；init 只允许按选中的 agent 目标同步安装 Codex / Claude Code Agent hooks，不允许因为 init 自动安装 Git hook。
-33. 依赖任务状态的命令包括 `manual-test`、`archive`、`finish`，都必须优先从活动任务列表选择功能名，并保留手动输入作为兼容入口。
-34. `skills register/unregister` 和 `hooks install/uninstall` 是直接应用或取消能力的命令，应同步维护内部配置状态，不要求用户先进入功能开关管理；`hooks install/uninstall` 必须显式传入 `git`、`codex`、`claudecode`、`agent` 或 `all`，不能把空 target 解释为全部，避免误安装 Git hook。
-35. “功能管理”中的 Skills 应用和取消必须支持按 agent 目标选择 Codex、Claude Code、GitHub Copilot 或全部；可以根据当前项目入口给出默认目标，但不能退化为无选择的“按当前项目”或“一键 agent”。
-36. “功能管理”中的 Agent hooks 应用和取消必须支持按 Codex、Claude Code 或全部可用 Agent hooks 选择目标；GitHub Copilot 不支持 Agent hook，不能被安装 Agent hook，用户选择或输入 GitHub Copilot 时必须给出清晰提示。
-37. 涉及 agent 协作执行模型的规则变更，例如主会话与子代理职责边界、任务派发、审阅、降级执行或结果同步要求，必须同时更新 `src/templates.ts` 中的入口区块和 `Agent协作规范.md` 模板，并同步当前项目的 `code-helper-docs/user-rules/Agent协作规范.md`，避免新项目模板和本项目规则不一致。
-38. `plan` 默认只生成计划文档、实施记录和状态记录；`手工测试.md` 只在用户执行 `manual-test` 或需求明确需要页面、可视化、浏览器链路、人工业务验收时生成，不得默认创建“页面回归测试”文档。
-39. 英文或非中文功能名不能静默坍缩到同一个中文兜底名；从需求标题或文件名推断中文名时必须尽量保留可区分后缀，避免多个任务覆盖同一套文档。
-40. `check` 默认只输出检查结果，不写 `.code-helper/checks/latest.json`；需要持久化报告时使用显式 `--write-report` 或等效开关。
-41. 归档遇到 active/archive 同名 mixed 冲突时，默认只提示冲突并停止；只有用户明确确认后才允许通过 `archive --resolve-mixed` 或等效入口清理活动副本。
+26. GitHub Actions CI 必须至少运行 `npm ci`、`npm test`、`npm run check`、`npm pack --dry-run`；npm 发布 workflow 必须手动触发或由明确 release/tag 触发，不允许 main 分支普通 push 自动发布。
+27. npm 发布优先使用 Trusted Publishing / OIDC 和 `npm publish --provenance`，避免在 GitHub Secrets 中保存长期高权限 npm token；发布 workflow 不自动修改版本号、不自动创建 tag。
+28. 所有用户可见文案、README、规则文档和 skill 内容必须符合中文产品语境，避免“状态驾驶舱”“计划工作台”“执行工作台”“阶段收口”“当前推进建议”“阻塞回归入口”等生硬表达；优先使用“状态记录”“计划文档”“执行计划”“阶段结束”“下一步建议”“后续检查点”等自然表述。
+29. `code-helper-plan-workbench` 的内容必须保持通用，不应默认任务是前端页面或组件；计划描述要覆盖 CLI、后端服务、数据任务、平台能力、跨模块协作和页面等多种项目类型。
+30. 修改 `src/templates.ts` 中的内置 skill 或规则模板后，必须同步刷新 `.code-helper/skills/`，并在本项目同时刷新 `.agents/skills/code-helper-*`、`.claude/skills/code-helper-*` 与 `.github/skills/code-helper-*`，保证 Codex、Claude Code 和 GitHub Copilot 看到的项目级 skills 内容一致。
+31. 新增或修改 TypeScript 代码时，公共函数、复杂分支和跨平台兼容逻辑应保留清晰中文注释；简单自解释代码不添加空泛注释。
+32. 工具必须同时兼容 macOS 和 Windows。新增路径、文件移动、归档、拖拽输入、CLI 参数解析、skills 注册和文档生成逻辑时，必须使用跨平台路径 API，避免硬编码 `/`、反斜杠、盘符假设或仅适用于单一系统的 shell 行为；涉及路径的改动必须补充或更新 Windows 与 macOS 兼容用例。
+33. `finish` 功能只做完成检查和建议输出，不自动更新长期记忆、不自动归档、不自动提交；需要更新记忆、归档、提交或发布时必须询问用户；检查 archived 任务时必须识别为已结束任务，不得因 active 路径缺文档误判为缺失。
+34. Agent hooks 和 Git hooks 必须分开管理：Agent hooks 只用于 agent 生命周期中的完成检查提醒，Git hooks 只用于提交前兜底检查；init 只允许按选中的 agent 目标同步安装 Codex / Claude Code Agent hooks，不允许因为 init 自动安装 Git hook。
+35. 依赖任务状态的命令包括 `manual-test`、`archive`、`finish`，都必须优先从活动任务列表选择功能名，并保留手动输入作为兼容入口。
+36. `skills register/unregister` 和 `hooks install/uninstall` 是直接应用或取消能力的命令，应同步维护内部配置状态，不要求用户先进入功能开关管理；`hooks install/uninstall` 必须显式传入 `git`、`codex`、`claudecode`、`agent` 或 `all`，不能把空 target 解释为全部，避免误安装 Git hook。
+37. “功能管理”中的 Skills 应用和取消必须支持按 agent 目标选择 Codex、Claude Code、GitHub Copilot 或全部；可以根据当前项目入口给出默认目标，但不能退化为无选择的“按当前项目”或“一键 agent”。
+38. “功能管理”中的 Agent hooks 应用和取消必须支持按 Codex、Claude Code 或全部可用 Agent hooks 选择目标；GitHub Copilot 不支持 Agent hook，不能被安装 Agent hook，用户选择或输入 GitHub Copilot 时必须给出清晰提示。
+39. 涉及 agent 协作执行模型的规则变更，例如主会话与子代理职责边界、任务派发、审阅、降级执行或结果同步要求，必须同时更新 `src/templates.ts` 中的入口区块和 `Agent协作规范.md` 模板，并同步当前项目的 `code-helper-docs/user-rules/Agent协作规范.md`，避免新项目模板和本项目规则不一致。
+40. `plan` 默认只生成计划文档、实施记录和状态记录；`手工测试.md` 只在用户执行 `manual-test` 或需求明确需要页面、可视化、浏览器链路、人工业务验收时生成，不得默认创建“页面回归测试”文档。
+41. 英文或非中文功能名不能静默坍缩到同一个中文兜底名；从需求标题或文件名推断中文名时必须尽量保留可区分后缀，避免多个任务覆盖同一套文档。
+42. `check` 默认只输出检查结果，不写 `.code-helper/checks/latest.json`；需要持久化报告时使用显式 `--write-report` 或等效开关。
+43. 归档遇到 active/archive 同名 mixed 冲突时，默认只提示冲突并停止；只有用户明确确认后才允许通过 `archive --resolve-mixed` 或等效入口清理活动副本。

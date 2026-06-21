@@ -143,3 +143,18 @@ npm pack --dry-run
 ```
 
 `npm pack` 前会自动执行构建，避免发布包依赖本地残留的 `dist/`。
+
+## GitHub Actions 与 npm 发布
+
+仓库提供两个 GitHub Actions：
+
+- `CI`：在 PR 和 `main` push 时运行 `npm ci`、`npm test`、`npm run check`、`npm pack --dry-run`，覆盖 Node.js 20 和 22。
+- `Publish to npm`：只支持手动触发，发布当前 `package.json` 中的版本；触发时必须输入 `publish` 确认，并会先检查该版本是否已存在于 npm。
+
+npm 发布建议使用 Trusted Publishing / OIDC，不在 GitHub Secrets 中保存长期 npm token。需要在 npm package 设置中添加 trusted publisher：
+
+- Repository：当前 GitHub 仓库
+- Workflow：`npm-publish.yml`
+- Environment：`npm-publish`
+
+发布前仍需先在代码中完成版本号更新并提交；workflow 不自动改版本、不自动创建 tag、不自动发布未确认的提交。

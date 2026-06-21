@@ -1,0 +1,63 @@
+name: Publish to npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type "publish" to publish the current package.json version.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish current version
+    runs-on: ubuntu-latest
+    environment: npm-publish
+
+    steps:
+      - name: Validate manual confirmation
+        if: inputs.confirm != 'publish'
+        run: |
+          echo 'Refusing to publish: confirmation input must be exactly "publish".'
+          exit 1
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Read package metadata
+        id: package
+        run: |
+          node -e "const pkg = require('./package.json'); console.log('name=' + pkg.name); console.log('version=' + pkg.version)" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure version is not already published
+        run: |
+          if npm view "${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}" version >/dev/null 2>&1; then
+            echo "Version already exists on npm: ${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}"
+            exit 1
+          fi
+
+      - name: Run tests
+        run: npm test
+
+      - name: Run project checks
+        run: npm run check
+
+      - name: Verify package contents
+        run: npm pack --dry-run
+
+      - name: Publish package
+        run: npm publish --access public --provenance
