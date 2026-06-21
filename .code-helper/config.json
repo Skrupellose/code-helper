@@ -2,7 +2,8 @@
   "version": 1,
   "entryFiles": {
     "agents": true,
-    "claude": false
+    "claude": false,
+    "copilot": false
   },
   "directories": {
     "workspace": ".code-helper",

@@ -33,6 +33,55 @@ test("createCompletionReview 会识别当前执行节点和子计划队列", asy
     assert.equal(review.hasCurrentExecutionNode, true);
     assert.equal(review.hasSubPlanQueue, true);
     assert.ok(review.recommendations.some((recommendation) => recommendation.includes("继续推进")));
+    assert.ok(review.requiredConfirmations.some((confirmation) => confirmation.includes("不得询问归档")));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 会列出必须确认的归档和记忆问题", async (t) => {
+  // 该测试锁定完成检查的防漏清单，避免 agent 忽略必须询问用户的步骤。
+  try {
+    execFileSync("git", ["--version"], { stdio: "ignore" });
+  } catch {
+    t.skip("当前环境缺少 git，跳过 git 变更检测测试。");
+    return;
+  }
+
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-required-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await writeFile(join(root, "requirement.md"), "# 收尾检查\n\n验证必须确认事项。", "utf8");
+    await createPlanWorkbench({
+      projectRoot: root,
+      requirementPath: "requirement.md",
+      featureName: "收尾检查"
+    });
+    await writeFile(
+      join(root, "code-helper-docs/plan-doc/收尾检查.md"),
+      "# 收尾检查\n\n## 当前执行节点\n\n状态：已完成\n\n## 子计划队列\n\n状态：已完成\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/收尾检查-状态.md"),
+      "# 收尾检查状态\n\n## 当前执行节点\n\n状态：已完成\n\n## 子计划队列\n\n状态：已完成\n",
+      "utf8"
+    );
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src/cli.ts"), "export const changed = true;\n", "utf8");
+
+    execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["add", "src/cli.ts"], { cwd: root, stdio: "ignore" });
+
+    const review = await createCompletionReview(root, "收尾检查");
+
+    assert.equal(review.reviewStatus, "ready-to-archive");
+    assert.equal(review.shouldAskMemoryUpdate, true);
+    assert.equal(review.shouldAskArchive, true);
+    assert.ok(review.requiredConfirmations.some((confirmation) => confirmation.includes("更新长期记忆")));
+    assert.ok(review.requiredConfirmations.some((confirmation) => confirmation.includes("归档当前任务文档")));
+    assert.ok(review.requiredConfirmations.some((confirmation) => confirmation.includes("选择下一个活动任务")));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

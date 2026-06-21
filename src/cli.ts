@@ -1949,6 +1949,15 @@ function printCompletionReview(review: CompletionReview, checkOnly: boolean): vo
   console.log(`建议询问更新记忆：${review.shouldAskMemoryUpdate ? "是" : "否"}`);
   console.log(`建议询问归档：${review.shouldAskArchive ? "是" : "否"}`);
   console.log("");
+  console.log("必须确认事项：");
+  if (review.requiredConfirmations.length === 0) {
+    console.log("- 无必须向用户确认的事项。");
+  } else {
+    review.requiredConfirmations.forEach((confirmation, index) => {
+      console.log(`${index + 1}. ${confirmation}`);
+    });
+  }
+  console.log("");
   console.log("下一步建议：");
   review.recommendations.forEach((recommendation, index) => {
     console.log(`${index + 1}. ${recommendation}`);

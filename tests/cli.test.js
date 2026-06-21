@@ -204,3 +204,45 @@ test("finish check-only 缺少功能名时只提示候选任务", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("finish 输出必须确认事项以防遗漏收尾步骤", async () => {
+  // CLI 必须把归档、记忆更新等确认项单独展示，避免 agent 在最终回复中漏问。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-cli-finish-required-"));
+  const logs = [];
+  const originalLog = console.log;
+
+  try {
+    console.log = (...args) => {
+      logs.push(args.join(" "));
+    };
+
+    await initializeProject({ projectRoot: root });
+    await writeFile(join(root, "requirement.md"), "# 收尾确认\n\n验证 finish 输出。", "utf8");
+    await createPlanWorkbench({
+      projectRoot: root,
+      requirementPath: "requirement.md",
+      featureName: "收尾确认"
+    });
+    await writeFile(
+      join(root, "code-helper-docs/plan-doc/收尾确认.md"),
+      "# 收尾确认\n\n## 当前执行节点\n\n状态：已完成\n\n## 子计划队列\n\n状态：已完成\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/收尾确认-状态.md"),
+      "# 收尾确认状态\n\n## 当前执行节点\n\n状态：已完成\n\n## 子计划队列\n\n状态：已完成\n",
+      "utf8"
+    );
+
+    const exitCode = await runCli(["finish", "收尾确认", "--check-only"], root);
+    const output = logs.join("\n");
+
+    assert.equal(exitCode, 0);
+    assert.match(output, /必须确认事项/);
+    assert.match(output, /归档当前任务文档/);
+    assert.match(output, /选择下一个活动任务/);
+  } finally {
+    console.log = originalLog;
+    await rm(root, { recursive: true, force: true });
+  }
+});

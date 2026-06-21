@@ -39,6 +39,7 @@ export interface CompletionReview {
   shouldAskMemoryUpdate: boolean;
   shouldAskArchive: boolean;
   shouldSelectNextTask: boolean;
+  requiredConfirmations: string[];
   recommendations: string[];
 }
 
@@ -93,6 +94,12 @@ export async function createCompletionReview(projectRoot: string, featureName: s
   const shouldAskMemoryUpdate = detectMemoryUpdateNeed(changedPaths, combinedContent);
   const shouldAskArchive = reviewStatus === "ready-to-archive";
   const shouldSelectNextTask = shouldAskArchive;
+  const requiredConfirmations = buildRequiredConfirmations({
+    reviewStatus,
+    shouldAskMemoryUpdate,
+    shouldAskArchive,
+    shouldSelectNextTask
+  });
 
   return {
     featureName: task.featureName,
@@ -111,6 +118,7 @@ export async function createCompletionReview(projectRoot: string, featureName: s
     shouldAskMemoryUpdate,
     shouldAskArchive,
     shouldSelectNextTask,
+    requiredConfirmations,
     recommendations: buildRecommendations({
       reviewStatus,
       shouldAskMemoryUpdate,
@@ -120,6 +128,37 @@ export async function createCompletionReview(projectRoot: string, featureName: s
       hasSubPlanQueue
     })
   };
+}
+
+/**
+ * 生成必须向用户确认的事项。
+ * 该列表用于 CLI 单独高亮，避免 agent 只读到普通建议后漏问归档、记忆更新或下一任务选择。
+ */
+function buildRequiredConfirmations(input: {
+  reviewStatus: CompletionReviewStatus;
+  shouldAskMemoryUpdate: boolean;
+  shouldAskArchive: boolean;
+  shouldSelectNextTask: boolean;
+}): string[] {
+  const confirmations: string[] = [];
+
+  if (input.reviewStatus === "needs-work" || input.reviewStatus === "blocked" || input.reviewStatus === "node-review" || input.reviewStatus === "missing-docs") {
+    confirmations.push("不得询问归档或切换新任务，必须继续当前任务或先补齐阻塞/缺失文档。");
+  }
+
+  if (input.shouldAskMemoryUpdate) {
+    confirmations.push("必须询问用户是否更新长期记忆；用户确认前不得写入长期规则。");
+  }
+
+  if (input.shouldAskArchive) {
+    confirmations.push("必须询问用户是否归档当前任务文档；用户确认前不得执行 archive。");
+  }
+
+  if (input.shouldSelectNextTask) {
+    confirmations.push("归档完成后必须查看任务列表，并询问用户是否选择下一个活动任务。");
+  }
+
+  return confirmations;
 }
 
 /**
