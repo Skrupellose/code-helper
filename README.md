@@ -68,7 +68,7 @@ npx @skrupellose/code-helper hooks list
 - 用户手动移动到 `archive/` 的任务会被识别为已结束任务。
 - init 不会自动安装 Git hook；Git hook 只在显式执行 `hooks install git` 时安装。执行 `hooks install` 时会直接应用到项目，执行 `hooks uninstall` 会取消 code-helper 管理的 hooks。
 
-## 项目能力应用
+## 功能管理
 
 ```bash
 npx @skrupellose/code-helper skills register
@@ -79,7 +79,7 @@ npx @skrupellose/code-helper hooks install git
 npx @skrupellose/code-helper hooks uninstall git
 ```
 
-交互菜单中的“项目能力应用”会直接应用或取消 Skills、Agent hooks、Git hook，也可以刷新规则和模板。`features` 命令仍保留为高级配置接口，普通使用不需要先切换功能开关。
+交互菜单中的“功能管理”会直接应用或取消 Skills、Agent hooks、Git hook，也可以刷新规则和模板。应用或取消项目级 Skills 时，可以选择 Codex、Claude Code、GitHub Copilot、全部，或使用当前项目识别到的默认 agent 工具；应用或取消 Agent hooks 时，只提供 Codex、Claude Code 和全部可用 Agent hooks，GitHub Copilot 不会安装 Agent hook。`features` 命令仍保留为高级配置接口，普通使用不需要先切换功能开关。
 
 ## Skills 管理
 

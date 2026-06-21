@@ -4,9 +4,36 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { runCli } from "../dist/cli.js";
+import {
+  parseAgentHookTargetMenuSelection,
+  parseSkillTargetMenuSelection,
+  runCli
+} from "../dist/cli.js";
 import { initializeProject } from "../dist/init.js";
 import { createPlanWorkbench } from "../dist/workflows.js";
+
+test("功能管理 Skills 目标菜单解析支持当前默认、单目标和全部", () => {
+  // 文本兜底菜单和 raw mode 菜单共用该解析规则，确保不支持方向键的终端仍可按 agent 目标选择。
+  assert.deepEqual(parseSkillTargetMenuSelection("0", ["codex"]), []);
+  assert.deepEqual(parseSkillTargetMenuSelection("default", ["codex", "claudecode"]), ["codex", "claudecode"]);
+  assert.deepEqual(parseSkillTargetMenuSelection("1"), ["codex"]);
+  assert.deepEqual(parseSkillTargetMenuSelection("2"), ["claudecode"]);
+  assert.deepEqual(parseSkillTargetMenuSelection("3"), ["githubcopilot"]);
+  assert.deepEqual(parseSkillTargetMenuSelection("copilot"), ["githubcopilot"]);
+  assert.deepEqual(parseSkillTargetMenuSelection("all"), ["codex", "claudecode", "githubcopilot"]);
+});
+
+test("功能管理 Agent hooks 目标菜单只允许 Codex 和 Claude Code", () => {
+  // Agent hooks 没有 GitHub Copilot 安装目标，解析层必须给出明确拒绝而不是静默安装其他 hook。
+  assert.deepEqual(parseAgentHookTargetMenuSelection("default", ["codex", "githubcopilot"]), ["codex"]);
+  assert.deepEqual(parseAgentHookTargetMenuSelection("1"), ["codex"]);
+  assert.deepEqual(parseAgentHookTargetMenuSelection("2"), ["claudecode"]);
+  assert.deepEqual(parseAgentHookTargetMenuSelection("all"), ["codex", "claudecode"]);
+  assert.throws(
+    () => parseAgentHookTargetMenuSelection("githubcopilot"),
+    /GitHub Copilot 不支持 Agent hook/
+  );
+});
 
 test("manual-test 缺少功能名时会提示当前可选任务", async () => {
   // 非 TTY 场景不能弹出选择菜单，应输出已有任务，帮助用户补齐命令参数。

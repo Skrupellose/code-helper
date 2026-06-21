@@ -6,7 +6,7 @@ import { archiveFeature, listTasks, type TaskRecord, type TaskStatus } from "./a
 import { createCompletionReview, type CompletionReview } from "./completion.js";
 import { loadConfig, setFeatureEnabled } from "./config.js";
 import { runChecks } from "./checks.js";
-import { installHook, listHookInstallations, parseHookTargets, uninstallHook } from "./hooks.js";
+import { installHook, listHookInstallations, parseHookTargets, uninstallHook, type HookInstallTarget } from "./hooks.js";
 import { initializeProject } from "./init.js";
 import { normalizeDroppedPath } from "./input-utils.js";
 import {
@@ -84,7 +84,7 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
     { value: "2", label: "项目记忆规则优化" },
     { value: "3", label: "项目计划优化" },
     { value: "4", label: "生成人工页面测试文档" },
-    { value: "5", label: "项目能力应用" },
+    { value: "5", label: "功能管理" },
     { value: "6", label: "项目规则检查" },
     { value: "7", label: "文档归档" },
     { value: "8", label: "查看任务状态" },
@@ -495,7 +495,7 @@ async function runHooksMenu(
 }
 
 /**
- * 项目能力应用菜单。
+ * 功能管理菜单。
  * 面向用户的一级入口应直接应用或取消能力，不要求用户理解内部 feature key。
  */
 async function runApplyMenu(
@@ -515,22 +515,58 @@ async function runApplyMenu(
     { value: "0", label: "返回" }
   ];
   const answer = useKeyMenu
-    ? await promptSelect(input, output, "项目能力应用", options)
+    ? await promptSelect(input, output, "功能管理", options)
     : await askTextApplyMenu(rl);
 
   switch (answer.trim()) {
-    case "1":
-      await runMenuAction("应用项目级 Skills", () => applyProjectSkills(projectRoot));
+    case "1": {
+      const selection = await selectSkillTargetsForMenu(projectRoot, rl, "选择要应用 Skills 的 agent 工具");
+      if (selection === undefined) {
+        console.log("已取消应用项目级 Skills，返回功能管理。");
+        return false;
+      }
+
+      await runMenuAction(`应用项目级 Skills（${formatTargetList(selection.targets)}）`, () =>
+        applyProjectSkills(projectRoot, selection.targets)
+      );
       return true;
-    case "2":
-      await runMenuAction("取消项目级 Skills", () => removeProjectSkills(projectRoot));
+    }
+    case "2": {
+      const selection = await selectSkillTargetsForMenu(projectRoot, rl, "选择要取消 Skills 的 agent 工具");
+      if (selection === undefined) {
+        console.log("已取消项目级 Skills 取消操作，返回功能管理。");
+        return false;
+      }
+
+      await runMenuAction(`取消项目级 Skills（${formatTargetList(selection.targets)}）`, () =>
+        removeProjectSkills(projectRoot, selection.targets, selection.shouldDisableFeatureAfterRemove)
+      );
       return true;
-    case "3":
-      await runMenuAction("应用 Agent hooks", () => applyAgentHooks(projectRoot));
+    }
+    case "3": {
+      const selection = await selectAgentHookTargetsForMenu(projectRoot, rl, "选择要应用 Agent hooks 的 agent 工具");
+      if (selection === undefined) {
+        console.log("已取消应用 Agent hooks，返回功能管理。");
+        return false;
+      }
+
+      await runMenuAction(`应用 Agent hooks（${formatAgentHookTargetList(selection.targets)}）`, () =>
+        applyAgentHooks(projectRoot, selection.targets)
+      );
       return true;
-    case "4":
-      await runMenuAction("取消 Agent hooks", () => removeAgentHooks(projectRoot));
+    }
+    case "4": {
+      const selection = await selectAgentHookTargetsForMenu(projectRoot, rl, "选择要取消 Agent hooks 的 agent 工具");
+      if (selection === undefined) {
+        console.log("已取消 Agent hooks 取消操作，返回功能管理。");
+        return false;
+      }
+
+      await runMenuAction(`取消 Agent hooks（${formatAgentHookTargetList(selection.targets)}）`, () =>
+        removeAgentHooks(projectRoot, selection.targets, selection.shouldDisableFeatureAfterRemove)
+      );
       return true;
+    }
     case "5":
       await runMenuAction("应用 Git hook", () => applyGitHook(projectRoot));
       return true;
@@ -550,6 +586,337 @@ async function runApplyMenu(
       console.log("无效选择，返回主菜单。");
       return false;
   }
+}
+
+/**
+ * 功能管理菜单中的目标选择结果。
+ * shouldDisableFeatureAfterRemove 用于保留现有命令语义：按当前项目或全部取消时，同步关闭后续自动应用能力。
+ */
+interface MenuTargetSelection<TTarget extends string> {
+  targets: TTarget[];
+  shouldDisableFeatureAfterRemove: boolean;
+}
+
+/**
+ * 选择 Skills 应用或取消的 agent 工具目标。
+ * 优先提供“按当前项目”默认项；用户也可以显式选择单个 agent 或全部 agent。
+ */
+async function selectSkillTargetsForMenu(
+  projectRoot: string,
+  rl: ReturnType<typeof createInterface>,
+  title: string
+): Promise<MenuTargetSelection<SkillRegistrationTarget> | undefined> {
+  const inferredTargets = await resolveSkillRegistrationTargets(projectRoot);
+  const useKeyMenu = canUseInteractiveKeys(input, output);
+
+  if (useKeyMenu) {
+    const answer = await promptSelect(input, output, title, buildSkillTargetSelectOptions(inferredTargets));
+    return resolveSkillTargetMenuAnswer(answer, inferredTargets);
+  }
+
+  const answer = await askTextSkillTargetMenu(rl, title, inferredTargets);
+  return resolveSkillTargetMenuAnswer(answer.trim(), inferredTargets);
+}
+
+/**
+ * 选择 Agent hooks 应用或取消的 agent 工具目标。
+ * GitHub Copilot 没有可安装的 Agent hook，因此只把 Codex 和 Claude Code 列为可选项。
+ */
+async function selectAgentHookTargetsForMenu(
+  projectRoot: string,
+  rl: ReturnType<typeof createInterface>,
+  title: string
+): Promise<MenuTargetSelection<Exclude<HookInstallTarget, "git">> | undefined> {
+  const inferredSkillTargets = await resolveSkillRegistrationTargets(projectRoot);
+  const inferredHookTargets = toAgentHookTargets(inferredSkillTargets);
+
+  if (inferredSkillTargets.length > 0 && inferredHookTargets.length === 0) {
+    console.log("当前项目只识别到 GitHub Copilot；GitHub Copilot 不支持 Agent hook，请选择 Codex 或 Claude Code。");
+  }
+
+  if (canUseInteractiveKeys(input, output)) {
+    const answer = await promptSelect(input, output, title, buildAgentHookTargetSelectOptions(inferredSkillTargets));
+    return resolveAgentHookTargetMenuAnswer(answer, inferredSkillTargets);
+  }
+
+  const answer = await askTextAgentHookTargetMenu(rl, title, inferredSkillTargets);
+  return resolveAgentHookTargetMenuAnswer(answer.trim(), inferredSkillTargets);
+}
+
+/**
+ * raw mode 菜单中的 Skills 目标选项。
+ * 默认项放在第一位，让已能识别 agent 工具的项目可以直接回车确认。
+ */
+function buildSkillTargetSelectOptions(
+  inferredTargets: SkillRegistrationTarget[]
+): Array<{ value: string; label: string }> {
+  const options: Array<{ value: string; label: string }> = [];
+
+  if (inferredTargets.length > 0) {
+    options.push({
+      value: "default",
+      label: `按当前项目（${formatTargetList(inferredTargets)}）`
+    });
+  }
+
+  options.push(
+    { value: "codex", label: "Codex" },
+    { value: "claudecode", label: "Claude Code" },
+    { value: "githubcopilot", label: "GitHub Copilot" },
+    { value: "all", label: "全部" },
+    { value: "0", label: "返回" }
+  );
+
+  return options;
+}
+
+/**
+ * raw mode 菜单中的 Agent hook 目标选项。
+ * 默认项只包含支持 Agent hook 的目标，自动忽略 GitHub Copilot。
+ */
+function buildAgentHookTargetSelectOptions(
+  inferredSkillTargets: SkillRegistrationTarget[]
+): Array<{ value: string; label: string }> {
+  const inferredHookTargets = toAgentHookTargets(inferredSkillTargets);
+  const options: Array<{ value: string; label: string }> = [];
+
+  if (inferredHookTargets.length > 0) {
+    options.push({
+      value: "default",
+      label: `按当前项目（${formatAgentHookTargetList(inferredHookTargets)}）`
+    });
+  }
+
+  options.push(
+    { value: "codex", label: "Codex" },
+    { value: "claudecode", label: "Claude Code" },
+    { value: "all", label: "全部可用 Agent hooks" },
+    { value: "0", label: "返回" }
+  );
+
+  return options;
+}
+
+/**
+ * 非 raw mode 终端中的 Skills 目标菜单。
+ * 除数字外也支持输入 codex、claudecode、githubcopilot、all 和 default。
+ */
+async function askTextSkillTargetMenu(
+  rl: ReturnType<typeof createInterface>,
+  title: string,
+  inferredTargets: SkillRegistrationTarget[]
+): Promise<string> {
+  console.log(`\n${title}`);
+  if (inferredTargets.length > 0) {
+    console.log(`D. 按当前项目（${formatTargetList(inferredTargets)}）`);
+  }
+  console.log("1. Codex");
+  console.log("2. Claude Code");
+  console.log("3. GitHub Copilot");
+  console.log("A. 全部");
+  console.log("0. 返回");
+  console.log("可输入编号或名称，例如：1、codex、githubcopilot、all。");
+
+  return askQuestionOrDefault(rl, "请选择 agent 工具：", "0");
+}
+
+/**
+ * 非 raw mode 终端中的 Agent hook 目标菜单。
+ * 菜单不列出 GitHub Copilot，避免用户误以为它支持 Agent hook。
+ */
+async function askTextAgentHookTargetMenu(
+  rl: ReturnType<typeof createInterface>,
+  title: string,
+  inferredSkillTargets: SkillRegistrationTarget[]
+): Promise<string> {
+  const inferredHookTargets = toAgentHookTargets(inferredSkillTargets);
+
+  console.log(`\n${title}`);
+  if (inferredHookTargets.length > 0) {
+    console.log(`D. 按当前项目（${formatAgentHookTargetList(inferredHookTargets)}）`);
+  }
+  console.log("1. Codex");
+  console.log("2. Claude Code");
+  console.log("A. 全部可用 Agent hooks");
+  console.log("0. 返回");
+  console.log("GitHub Copilot 不支持 Agent hook，因此不在这里安装或取消。");
+  console.log("可输入编号或名称，例如：1、codex、claudecode、all。");
+
+  return askQuestionOrDefault(rl, "请选择 agent 工具：", "0");
+}
+
+/**
+ * 把 Skills 菜单答案解析成目标列表。
+ * 返回 undefined 表示用户返回；抛错表示输入了不支持的目标。
+ */
+function resolveSkillTargetMenuAnswer(
+  answer: string,
+  inferredTargets: SkillRegistrationTarget[]
+): MenuTargetSelection<SkillRegistrationTarget> | undefined {
+  const targets = parseSkillTargetMenuSelection(answer, inferredTargets);
+
+  if (targets.length === 0) {
+    return undefined;
+  }
+
+  return {
+    targets,
+    shouldDisableFeatureAfterRemove: isDefaultOrAllTargetAnswer(answer)
+  };
+}
+
+/**
+ * 把 Agent hook 菜单答案解析成目标列表。
+ * 返回 undefined 表示用户返回；GitHub Copilot 输入会得到明确错误。
+ */
+function resolveAgentHookTargetMenuAnswer(
+  answer: string,
+  inferredSkillTargets: SkillRegistrationTarget[]
+): MenuTargetSelection<Exclude<HookInstallTarget, "git">> | undefined {
+  const targets = parseAgentHookTargetMenuSelection(answer, inferredSkillTargets);
+
+  if (targets.length === 0) {
+    return undefined;
+  }
+
+  return {
+    targets,
+    shouldDisableFeatureAfterRemove: isDefaultOrAllTargetAnswer(answer)
+  };
+}
+
+/**
+ * 解析功能管理中 Skills 目标文本。
+ * 该函数导出给单元测试使用，确保非 raw mode 菜单和 raw mode 菜单使用同一套目标规则。
+ */
+export function parseSkillTargetMenuSelection(
+  value: string,
+  inferredTargets: SkillRegistrationTarget[] = []
+): SkillRegistrationTarget[] {
+  const normalizedValue = value.trim().toLowerCase();
+
+  if (normalizedValue === "" || normalizedValue === "0") {
+    return [];
+  }
+
+  if (normalizedValue === "d" || normalizedValue === "default" || normalizedValue === "current") {
+    return [...inferredTargets];
+  }
+
+  const targets = new Set<SkillRegistrationTarget>();
+  const tokens = normalizedValue.split(/[,\s]+/u).filter(Boolean);
+
+  for (const token of tokens) {
+    if (token === "a" || token === "all") {
+      return listSupportedSkillRegistrationTargets();
+    }
+
+    if (token === "1") {
+      targets.add("codex");
+      continue;
+    }
+
+    if (token === "2") {
+      targets.add("claudecode");
+      continue;
+    }
+
+    if (token === "3") {
+      targets.add("githubcopilot");
+      continue;
+    }
+
+    for (const target of parseSkillRegistrationTargets(token)) {
+      targets.add(target);
+    }
+  }
+
+  return [...targets];
+}
+
+/**
+ * 解析功能管理中 Agent hook 目标文本。
+ * GitHub Copilot 没有 Agent hook 安装位置，因此输入相关别名时直接给出清晰错误。
+ */
+export function parseAgentHookTargetMenuSelection(
+  value: string,
+  inferredSkillTargets: SkillRegistrationTarget[] = []
+): Array<Exclude<HookInstallTarget, "git">> {
+  const normalizedValue = value.trim().toLowerCase();
+
+  if (normalizedValue === "" || normalizedValue === "0") {
+    return [];
+  }
+
+  if (normalizedValue === "d" || normalizedValue === "default" || normalizedValue === "current") {
+    return toAgentHookTargets(inferredSkillTargets);
+  }
+
+  const targets = new Set<Exclude<HookInstallTarget, "git">>();
+  const tokens = normalizedValue.split(/[,\s]+/u).filter(Boolean);
+
+  for (const token of tokens) {
+    if (token === "a" || token === "all" || token === "agent" || token === "agents") {
+      return ["codex", "claudecode"];
+    }
+
+    if (token === "1" || token === "codex") {
+      targets.add("codex");
+      continue;
+    }
+
+    if (token === "2" || token === "claudecode" || token === "claude-code" || token === "claude") {
+      targets.add("claudecode");
+      continue;
+    }
+
+    if (token === "3" || token === "githubcopilot" || token === "github-copilot" || token === "copilot" || token === "github") {
+      throw new Error("GitHub Copilot 不支持 Agent hook，请选择 Codex、Claude Code 或全部可用 Agent hooks。");
+    }
+
+    throw new Error(`不支持的 Agent hook 目标：${token}。当前支持 codex、claudecode 或 all。`);
+  }
+
+  return [...targets];
+}
+
+/**
+ * 从 Skills 目标中过滤出支持 Agent hook 的目标。
+ * GitHub Copilot 只支持项目级 Skills，不映射到任何 hook。
+ */
+function toAgentHookTargets(
+  targets: SkillRegistrationTarget[]
+): Array<Exclude<HookInstallTarget, "git">> {
+  return targets.filter((target): target is Exclude<HookInstallTarget, "git"> =>
+    target === "codex" || target === "claudecode"
+  );
+}
+
+/**
+ * 判断菜单答案是否代表“按当前项目”或“全部”。
+ * 这些范围取消后会同步关闭对应功能开关，保持原有菜单行为。
+ */
+function isDefaultOrAllTargetAnswer(answer: string): boolean {
+  const normalizedAnswer = answer.trim().toLowerCase();
+  return normalizedAnswer === "default"
+    || normalizedAnswer === "d"
+    || normalizedAnswer === "current"
+    || normalizedAnswer === "all"
+    || normalizedAnswer === "a";
+}
+
+/**
+ * 格式化 Skills 目标列表，用于菜单动作回显。
+ */
+function formatTargetList(targets: SkillRegistrationTarget[]): string {
+  return targets.map((target) => formatSkillRegistrationTargetName(target)).join("、");
+}
+
+/**
+ * 格式化 Agent hook 目标列表，用于菜单动作回显。
+ */
+function formatAgentHookTargetList(targets: Array<Exclude<HookInstallTarget, "git">>): string {
+  return targets.map((target) => target === "codex" ? "Codex" : "Claude Code").join("、");
 }
 
 /**
@@ -748,40 +1115,80 @@ async function runCheck(projectRoot: string): Promise<number> {
 
 /**
  * 应用项目级 Skills。
- * 先启用底层能力，再按当前项目入口文件注册，避免用户手动切换 feature key。
+ * 功能管理菜单已经完成目标选择，这里按显式目标写入对应 agent 的项目级 skills。
  */
-async function applyProjectSkills(projectRoot: string): Promise<number> {
-  return runSkills(projectRoot, ["register"]);
+async function applyProjectSkills(projectRoot: string, targets: SkillRegistrationTarget[]): Promise<number> {
+  await setFeatureEnabled(projectRoot, "skillRegistration", true);
+  const operations = (await Promise.all(targets.map((target) => registerProjectSkills(projectRoot, target)))).flat();
+  const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
+
+  printOperations(operations);
+  printSkillRegistrationStatus(statuses);
+  return 0;
 }
 
 /**
  * 取消项目级 Skills。
- * 先卸载 code-helper 管理的 skills，再关闭后续 init 自动注册。
+ * 只删除目标 agent 下 code-helper 管理的 skills；按当前项目或全部取消时同步关闭后续自动注册。
  */
-async function removeProjectSkills(projectRoot: string): Promise<number> {
-  const exitCode = await runSkills(projectRoot, ["unregister"]);
-  await setFeatureEnabled(projectRoot, "skillRegistration", false);
-  console.log("已关闭后续初始化时的项目级 Skills 自动注册。");
-  return exitCode;
+async function removeProjectSkills(
+  projectRoot: string,
+  targets: SkillRegistrationTarget[],
+  shouldDisableFeatureAfterRemove: boolean
+): Promise<number> {
+  const operations = (await Promise.all(targets.map((target) => unregisterProjectSkills(projectRoot, target)))).flat();
+  const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
+
+  if (shouldDisableFeatureAfterRemove) {
+    await setFeatureEnabled(projectRoot, "skillRegistration", false);
+    console.log("已关闭后续初始化时的项目级 Skills 自动注册。");
+  }
+
+  printOperations(operations);
+  printSkillRegistrationStatus(statuses);
+  return 0;
 }
 
 /**
  * 应用 Agent hooks。
  * Agent hooks 安装到 Codex / Claude Code 项目级配置，只运行 finish --check-only。
  */
-async function applyAgentHooks(projectRoot: string): Promise<number> {
-  return runHooks(projectRoot, ["install", "agent"]);
+async function applyAgentHooks(projectRoot: string, targets: Array<Exclude<HookInstallTarget, "git">>): Promise<number> {
+  const operations: OperationResult[] = [];
+
+  for (const target of targets) {
+    operations.push(await installHook(projectRoot, target));
+  }
+
+  await setFeatureEnabled(projectRoot, "agentHooks", true);
+  printOperations(operations);
+  printHookInstallationStatus(await listHookInstallations(projectRoot));
+  return 0;
 }
 
 /**
  * 取消 Agent hooks。
- * 卸载 code-helper 管理的 agent hooks，并关闭后续安装入口。
+ * 只卸载目标 agent 的 code-helper hook；按当前项目或全部取消时同步关闭后续安装入口。
  */
-async function removeAgentHooks(projectRoot: string): Promise<number> {
-  const exitCode = await runHooks(projectRoot, ["uninstall", "agent"]);
-  await setFeatureEnabled(projectRoot, "agentHooks", false);
-  console.log("已关闭 Agent hooks 应用能力。");
-  return exitCode;
+async function removeAgentHooks(
+  projectRoot: string,
+  targets: Array<Exclude<HookInstallTarget, "git">>,
+  shouldDisableFeatureAfterRemove: boolean
+): Promise<number> {
+  const operations: OperationResult[] = [];
+
+  for (const target of targets) {
+    operations.push(await uninstallHook(projectRoot, target));
+  }
+
+  if (shouldDisableFeatureAfterRemove) {
+    await setFeatureEnabled(projectRoot, "agentHooks", false);
+    console.log("已关闭 Agent hooks 应用能力。");
+  }
+
+  printOperations(operations);
+  printHookInstallationStatus(await listHookInstallations(projectRoot));
+  return 0;
 }
 
 /**
@@ -802,7 +1209,7 @@ async function removeGitHook(projectRoot: string): Promise<number> {
 }
 
 /**
- * 查看项目能力应用状态。
+ * 查看功能管理状态。
  */
 async function printApplyStatus(projectRoot: string): Promise<number> {
   console.log("Skills 状态：");
@@ -885,7 +1292,7 @@ async function askTextMenu(rl: ReturnType<typeof createInterface>): Promise<stri
   console.log("2. 项目记忆规则优化");
   console.log("3. 项目计划优化");
   console.log("4. 生成人工页面测试文档");
-  console.log("5. 项目能力应用");
+  console.log("5. 功能管理");
   console.log("6. 项目规则检查");
   console.log("7. 文档归档");
   console.log("8. 查看任务状态");
@@ -919,10 +1326,10 @@ async function askTextSkillMenu(rl: ReturnType<typeof createInterface>): Promise
 }
 
 /**
- * 非 TTY 环境下的项目能力应用菜单。
+ * 非 TTY 环境下的功能管理菜单。
  */
 async function askTextApplyMenu(rl: ReturnType<typeof createInterface>): Promise<string> {
-  console.log("\n项目能力应用");
+  console.log("\n功能管理");
   console.log("1. 应用项目级 Skills");
   console.log("2. 取消项目级 Skills");
   console.log("3. 应用 Agent hooks");

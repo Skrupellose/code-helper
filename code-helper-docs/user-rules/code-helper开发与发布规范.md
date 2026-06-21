@@ -31,7 +31,7 @@
 12. 旧英文任务文档只做兼容读取、检查提示和归档迁移，不作为新文档生成规则。
 13. 页面相关测试全部只生成严格手工测试文档，由用户执行；工具自己只执行纯逻辑测试，例如函数单元测试、数据转换测试或非浏览器集成测试。
 14. 功能完成后应支持将计划、结果和状态文档移动到 `archive/`；用户手动移动到 `archive/` 的任务也必须识别为已结束。
-15. 功能开关只作为底层配置和脚本接口，不作为主要交互入口；一级菜单必须优先提供“应用/取消”项目能力的直接动作。
+15. 功能开关只作为底层配置和脚本接口，不作为主要交互入口；一级菜单必须命名为“功能管理”，并优先提供“应用/取消”项目能力的直接动作。
 16. `.code-helper/skills/` 只是内置 skills 模板源，不默认被 Codex 或 Claude Code 识别。
 17. Skills 注册必须同时支持 Codex、Claude Code 和 GitHub Copilot：Codex 写入 `.agents/skills/code-helper-*`，Claude Code 写入 `.claude/skills/code-helper-*`，GitHub Copilot 写入 `.github/skills/code-helper-*`。
 18. `npx @skrupellose/code-helper init` 必须根据初始化前的入口文档决定注册目标：只有 `AGENTS.md` 时只注册 Codex，只有 `CLAUDE.md` 时只注册 Claude Code，存在 `.github/copilot-instructions.md` 或 `.github/skills/` 时注册 GitHub Copilot；确定目标后必须补齐对应入口文档，Codex 写 `AGENTS.md`，Claude Code 写 `CLAUDE.md`，GitHub Copilot 写 `.github/copilot-instructions.md`；完全无法判断的新项目不能默认注册全部三类目标，交互式 init 必须让用户选择目标，非交互 init 必须保守跳过并提示显式 target 或入口文件要求。
@@ -48,4 +48,6 @@
 29. Agent hooks 和 Git hooks 必须分开管理：Agent hooks 只用于 agent 生命周期中的完成检查提醒，Git hooks 只用于提交前兜底检查；init 只允许按选中的 agent 目标同步安装 Codex / Claude Code Agent hooks，不允许因为 init 自动安装 Git hook。
 30. 依赖任务状态的命令包括 `manual-test`、`archive`、`finish`，都必须优先从活动任务列表选择功能名，并保留手动输入作为兼容入口。
 31. `skills register/unregister` 和 `hooks install/uninstall` 是直接应用或取消能力的命令，应同步维护内部配置状态，不要求用户先进入功能开关管理。
-32. 涉及 agent 协作执行模型的规则变更，例如主会话与子代理职责边界、任务派发、审阅、降级执行或结果同步要求，必须同时更新 `src/templates.ts` 中的入口区块和 `Agent协作规范.md` 模板，并同步当前项目的 `code-helper-docs/user-rules/Agent协作规范.md`，避免新项目模板和本项目规则不一致。
+32. “功能管理”中的 Skills 应用和取消必须支持按 agent 目标选择 Codex、Claude Code、GitHub Copilot 或全部；可以根据当前项目入口给出默认目标，但不能退化为无选择的“按当前项目”或“一键 agent”。
+33. “功能管理”中的 Agent hooks 应用和取消必须支持按 Codex、Claude Code 或全部可用 Agent hooks 选择目标；GitHub Copilot 不支持 Agent hook，不能被安装 Agent hook，用户选择或输入 GitHub Copilot 时必须给出清晰提示。
+34. 涉及 agent 协作执行模型的规则变更，例如主会话与子代理职责边界、任务派发、审阅、降级执行或结果同步要求，必须同时更新 `src/templates.ts` 中的入口区块和 `Agent协作规范.md` 模板，并同步当前项目的 `code-helper-docs/user-rules/Agent协作规范.md`，避免新项目模板和本项目规则不一致。
