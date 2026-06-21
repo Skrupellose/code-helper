@@ -40,6 +40,8 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
     // 新增协作 skill 必须能被注册，并包含对子代理协作边界的明确说明。
     assert.match(collaborationSkill, /name: code-helper-agent-collaboration/);
     assert.match(collaborationSkill, /子代理/);
+    assert.match(collaborationSkill, /你现在是执行子代理/);
+    assert.match(collaborationSkill, /不再套用“主会话必须派发子代理”的职责/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
