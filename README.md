@@ -20,6 +20,7 @@ npx @skrupellose/code-helper init
 
 ```bash
 npx @skrupellose/code-helper init
+npx @skrupellose/code-helper@latest update
 npx @skrupellose/code-helper plan docs/订单管理需求.md 订单管理升级
 npx @skrupellose/code-helper manual-test 订单管理升级
 npx @skrupellose/code-helper finish 订单管理升级
@@ -32,11 +33,18 @@ npx @skrupellose/code-helper check
 
 不带功能名运行 `manual-test`、`finish` 或 `archive` 时，TTY 终端会优先展示当前活动任务列表；仍然支持直接传入中文功能名。
 
+交互菜单启动时会轻量检查 npm 上是否有新版本；发现更新时只给出提示，不会自动升级。要把当前项目中的入口、skills 和 hooks 刷新到最新版，运行：
+
+```bash
+npx @skrupellose/code-helper@latest update
+```
+
 ## 功能概览
 
 | 命令 | 作用 |
 | --- | --- |
 | `init` | 创建或更新协作入口、规则模板、项目级 skills 和可选 hooks |
+| `update` | 按当前项目已启用或已安装的能力刷新 code-helper 本地资产 |
 | `plan` | 根据需求文档生成计划文档、执行记录和状态记录 |
 | `manual-test` | 为页面、可视化或人工验收场景生成手工测试文档 |
 | `finish` | 检查当前任务是否满足完成条件，并提示后续动作 |

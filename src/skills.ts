@@ -99,6 +99,14 @@ export interface SkillAuditRecommendation {
 }
 
 /**
+ * 项目级 skills 注册选项。
+ * update 需要刷新已经存在的受控 skills，但不能因此重新开启用户关闭的功能开关。
+ */
+export interface RegisterProjectSkillsOptions {
+  respectFeatureToggle?: boolean;
+}
+
+/**
  * 返回当前支持的项目级 skills 注册目标。
  * 调用方拿到副本，避免外部修改模块内的稳定顺序。
  */
@@ -112,12 +120,15 @@ export function listSupportedSkillRegistrationTargets(): SkillRegistrationTarget
  */
 export async function registerProjectSkills(
   projectRoot: string,
-  target: SkillRegistrationTarget = "codex"
+  target: SkillRegistrationTarget = "codex",
+  options: RegisterProjectSkillsOptions = {}
 ): Promise<OperationResult[]> {
   assertSupportedTarget(target);
 
   const config = await loadConfig(projectRoot);
-  if (!config.features.skillRegistration.enabled) {
+  const shouldRespectFeatureToggle = options.respectFeatureToggle ?? true;
+
+  if (shouldRespectFeatureToggle && !config.features.skillRegistration.enabled) {
     throw new Error("管理项目 Skills 功能已关闭，请先执行 `code-helper features enable skillRegistration`。");
   }
 

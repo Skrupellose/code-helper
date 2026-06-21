@@ -14,10 +14,12 @@ import {
 } from "./fs-utils.js";
 import {
   installHook,
+  listHookInstallations,
   type HookInstallTarget
 } from "./hooks.js";
 import {
   listProjectSkillRegistrations,
+  listSupportedSkillRegistrationTargets,
   registerProjectSkills,
   resolveSkillRegistrationTargets,
   type SkillRegistrationTarget
@@ -43,6 +45,15 @@ export interface InitializeOptions {
  * CLI 根据该结构统一输出所有创建、更新和跳过项。
  */
 export interface InitializeResult {
+  config: CodeHelperConfig;
+  operations: OperationResult[];
+}
+
+/**
+ * 更新项目中已经使用的 code-helper 受控资产。
+ * update 不开启新能力，只刷新当前项目已有入口、已注册 skills 和已安装 hooks。
+ */
+export interface UpdateResult {
   config: CodeHelperConfig;
   operations: OperationResult[];
 }
@@ -81,6 +92,196 @@ export async function initializeProject(options: InitializeOptions): Promise<Ini
   operations.push(await writeStateFile(options.projectRoot, config));
 
   return { config, operations };
+}
+
+/**
+ * 升级当前项目中 code-helper 管理的本地资产。
+ * 与 init 不同，update 不根据默认配置创建新的 agent 入口，也不自动打开未启用的 skills 或 hooks。
+ */
+export async function updateProject(projectRoot: string): Promise<UpdateResult> {
+  const config = await loadConfig(projectRoot);
+  const operations: OperationResult[] = [];
+
+  await applyExistingEntryFiles(projectRoot, config);
+
+  operations.push(...(await migrateLegacyAgentWorkspace(projectRoot, config)));
+  await createDirectories(projectRoot, config, operations);
+  await saveConfig(projectRoot, config);
+  operations.push({
+    path: projectPath(projectRoot, `${config.directories.workspace}/config.json`),
+    action: "updated",
+    message: "已合并并刷新 code-helper 配置"
+  });
+
+  operations.push(...(await installEntryDocuments(projectRoot, config)));
+  operations.push(...(await installRuleTemplates(projectRoot, config)));
+  operations.push(...(await installSkillTemplates(projectRoot, config)));
+  operations.push(...(await installHookTemplates(projectRoot, config)));
+  operations.push(...(await updateExistingProjectSkillRegistrations(projectRoot, config)));
+  operations.push(...(await updateExistingHooks(projectRoot, config)));
+  operations.push(await writeStateFile(projectRoot, config));
+
+  return { config, operations };
+}
+
+/**
+ * update 只维护当前真实存在的入口文件。
+ * 这避免默认配置中的 AGENTS.md 开关在空目录里创建新的 agent 入口。
+ */
+async function applyExistingEntryFiles(projectRoot: string, config: CodeHelperConfig): Promise<void> {
+  config.entryFiles.agents = (await readTextIfExists(projectPath(projectRoot, "AGENTS.md"))) !== undefined;
+  config.entryFiles.claude = (await readTextIfExists(projectPath(projectRoot, "CLAUDE.md"))) !== undefined;
+  config.entryFiles.copilot =
+    (await readTextIfExists(projectPath(projectRoot, ".github/copilot-instructions.md"))) !== undefined;
+}
+
+/**
+ * 更新项目中已经注册或明确启用的 code-helper skills。
+ * 仅存在 `.github/skills` 目录不能视为需要注册，避免把用户自定义 Copilot skills 误判为 code-helper 能力。
+ */
+async function updateExistingProjectSkillRegistrations(
+  projectRoot: string,
+  config: CodeHelperConfig
+): Promise<OperationResult[]> {
+  const registeredTargets = await listTargetsWithRegisteredCodeHelperSkills(projectRoot);
+  const inferredTargets = getTargetsFromExistingEntryFiles(config);
+  const targets = new Set<SkillRegistrationTarget>(registeredTargets);
+  const operations: OperationResult[] = [];
+
+  if (config.features.skillRegistration.enabled) {
+    for (const target of inferredTargets) {
+      targets.add(target);
+    }
+  }
+
+  if (targets.size === 0) {
+    return [
+      {
+        path: projectPath(projectRoot, `${config.directories.workspace}/skills`),
+        action: "skipped",
+        message: "未发现已注册的 code-helper skills，且当前项目未识别到可刷新入口，已跳过项目级 skills 更新"
+      }
+    ];
+  }
+
+  for (const target of targets) {
+    operations.push(...(await registerProjectSkills(projectRoot, target, { respectFeatureToggle: false })));
+  }
+
+  return operations;
+}
+
+/**
+ * 更新项目中已经安装或明确启用的 hooks。
+ * update 不安装未使用的 agent hook，也不因为 Git hook 开关关闭而写入新的 pre-commit。
+ */
+async function updateExistingHooks(projectRoot: string, config: CodeHelperConfig): Promise<OperationResult[]> {
+  const statuses = await listHookInstallations(projectRoot);
+  const operations: OperationResult[] = [];
+  const entryTargets = getTargetsFromExistingEntryFiles(config);
+  const agentTargets = new Set<Exclude<HookInstallTarget, "git">>();
+
+  for (const status of statuses) {
+    if ((status.target === "codex" || status.target === "claudecode") && status.installed) {
+      agentTargets.add(status.target);
+    }
+  }
+
+  if (config.features.agentHooks.enabled) {
+    for (const target of resolveAgentHookTargets(entryTargets)) {
+      agentTargets.add(target);
+    }
+  }
+
+  for (const target of agentTargets) {
+    operations.push(await installHook(projectRoot, target));
+  }
+
+  const gitStatus = statuses.find((status) => status.target === "git");
+  if (gitStatus?.installed === true || config.features.gitHooks.enabled) {
+    operations.push(await installGitHookIfRepositoryExists(projectRoot, config));
+  }
+
+  if (operations.length === 0) {
+    operations.push({
+      path: projectPath(projectRoot, `${config.directories.workspace}/hooks`),
+      action: "skipped",
+      message: "未发现已安装的 code-helper hooks，且 hooks 能力未启用，已跳过 hooks 更新"
+    });
+  }
+
+  return operations;
+}
+
+/**
+ * Git hook 需要现有 Git 仓库；update 不负责把普通目录初始化为 Git 仓库。
+ */
+async function installGitHookIfRepositoryExists(
+  projectRoot: string,
+  config: CodeHelperConfig
+): Promise<OperationResult> {
+  const gitDirectory = await statIfExists(projectPath(projectRoot, ".git"));
+
+  if (gitDirectory === undefined || !gitDirectory.isDirectory()) {
+    return {
+      path: projectPath(projectRoot, ".git/hooks/pre-commit"),
+      action: "skipped",
+      message: "未发现 Git 仓库，已跳过 Git hook 更新"
+    };
+  }
+
+  if (!config.features.gitHooks.enabled) {
+    const statuses = await listHookInstallations(projectRoot);
+    const gitStatus = statuses.find((status) => status.target === "git");
+
+    if (gitStatus?.installed !== true) {
+      return {
+        path: projectPath(projectRoot, ".git/hooks/pre-commit"),
+        action: "skipped",
+        message: "Git hook 能力未启用且未安装 code-helper 管理的 Git hook，已跳过"
+      };
+    }
+  }
+
+  return installHook(projectRoot, "git");
+}
+
+/**
+ * 找出当前项目已经存在 code-helper 受控 skills 的目标。
+ */
+async function listTargetsWithRegisteredCodeHelperSkills(projectRoot: string): Promise<SkillRegistrationTarget[]> {
+  const targets: SkillRegistrationTarget[] = [];
+
+  for (const target of listSupportedSkillRegistrationTargets()) {
+    const statuses = await listProjectSkillRegistrations(projectRoot, target);
+
+    if (statuses.some((status) => status.registered)) {
+      targets.push(target);
+    }
+  }
+
+  return targets;
+}
+
+/**
+ * 根据当前真实存在的入口文件推断 agent 目标。
+ */
+function getTargetsFromExistingEntryFiles(config: CodeHelperConfig): SkillRegistrationTarget[] {
+  const targets: SkillRegistrationTarget[] = [];
+
+  if (config.entryFiles.agents) {
+    targets.push("codex");
+  }
+
+  if (config.entryFiles.claude) {
+    targets.push("claudecode");
+  }
+
+  if (config.entryFiles.copilot) {
+    targets.push("githubcopilot");
+  }
+
+  return targets;
 }
 
 /**

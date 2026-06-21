@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { initializeProject } from "../dist/init.js";
+import { initializeProject, updateProject } from "../dist/init.js";
 import { runChecks } from "../dist/checks.js";
 import { runCli } from "../dist/cli.js";
 
@@ -294,6 +294,102 @@ test("initializeProject 在只有 CLAUDE.md 的项目中只注册 Claude Code sk
       () => stat(join(root, ".github/skills/code-helper-memory-tuning/SKILL.md")),
       /ENOENT/
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("updateProject 刷新已有 Codex skills 且不创建未使用 agent 入口", async () => {
+  // update 用于升级已存在的 code-helper 资产，不能像 init 一样扩展新的 agent 目标。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-update-codex-"));
+
+  try {
+    await writeFile(join(root, "AGENTS.md"), "# Existing Rules\n\n用户已有规则。\n", "utf8");
+    await initializeProject({ projectRoot: root });
+    await writeFile(
+      join(root, ".agents/skills/code-helper-agent-collaboration/SKILL.md"),
+      "old skill",
+      "utf8"
+    );
+
+    const result = await updateProject(root);
+    const codexSkill = await readFile(join(root, ".agents/skills/code-helper-agent-collaboration/SKILL.md"), "utf8");
+
+    assert.ok(result.operations.some((operation) => operation.message.includes("已注册 Codex 项目级 skill")));
+    assert.match(codexSkill, /你现在是执行子代理/);
+    await assert.rejects(
+      () => stat(join(root, "CLAUDE.md")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, ".github/copilot-instructions.md")),
+      /ENOENT/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("updateProject 在无入口项目中不注册 skills 或安装 hooks", async () => {
+  // update 可以刷新工作区和模板，但不能在无法识别 agent 的目录中开启新能力。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-update-empty-"));
+
+  try {
+    const result = await updateProject(root);
+
+    assert.ok(result.operations.some((operation) => operation.message.includes("已跳过项目级 skills 更新")));
+    assert.ok(result.operations.some((operation) => operation.message.includes("已跳过 hooks 更新")));
+    await assert.rejects(
+      () => stat(join(root, "AGENTS.md")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, ".agents/skills/code-helper-agent-collaboration/SKILL.md")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, ".codex/hooks.json")),
+      /ENOENT/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("updateProject 会升级已安装的旧 Codex Stop hook", async () => {
+  // 旧版 hook 直接运行 finish --check-only；update 必须升级为包装脚本，避免 stdout 污染 Stop hook JSON。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-update-hook-"));
+
+  try {
+    await writeFile(join(root, "AGENTS.md"), "# Existing Rules\n", "utf8");
+    await mkdir(join(root, ".codex"), { recursive: true });
+    await writeFile(
+      join(root, ".codex/hooks.json"),
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command: "npx @skrupellose/code-helper finish --check-only"
+                }
+              ]
+            }
+          ]
+        }
+      }, null, 2),
+      "utf8"
+    );
+
+    await updateProject(root);
+
+    const codexHook = JSON.parse(await readFile(join(root, ".codex/hooks.json"), "utf8"));
+    const command = codexHook.hooks.Stop[0].hooks[0].command;
+    const wrapper = await readFile(join(root, ".code-helper/hooks/agent-finish-check.mjs"), "utf8");
+
+    assert.equal(command, "node .code-helper/hooks/agent-finish-check.mjs");
+    assert.match(wrapper, /process\.stdout\.write\("\{\}\\n"\)/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -7,7 +7,7 @@ import { createCompletionReview, type CompletionReview } from "./completion.js";
 import { loadConfig, setFeatureEnabled } from "./config.js";
 import { runChecks } from "./checks.js";
 import { installHook, listHookInstallations, parseHookTargets, uninstallHook, type HookInstallTarget } from "./hooks.js";
-import { initializeProject } from "./init.js";
+import { initializeProject, updateProject } from "./init.js";
 import { normalizeDroppedPath } from "./input-utils.js";
 import {
   formatSkillRegistrationTargetName,
@@ -22,6 +22,7 @@ import {
   unregisterProjectSkills
 } from "./skills.js";
 import { canUseInteractiveKeys, promptContinue, promptMultiSelect, promptSelect, type SelectOption } from "./terminal-ui.js";
+import { maybeNotifyVersionUpdate } from "./version-check.js";
 import { createManualTestDocument, createPlanWorkbench } from "./workflows.js";
 import type { FeatureKey, OperationResult } from "./types.js";
 
@@ -33,12 +34,16 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
   const [command, ...args] = argv;
 
   try {
+    await maybeNotifyVersionUpdate(projectRoot, command);
+
     switch (command) {
       case undefined:
       case "menu":
         return runInteractiveMenu(projectRoot);
       case "init":
         return runInit(projectRoot, args);
+      case "update":
+        return runUpdate(projectRoot, args);
       case "sync-local":
         return runSyncLocal(projectRoot, args);
       case "check":
@@ -106,6 +111,11 @@ const MAIN_MENU_GROUPS: MainMenuGroup[] = [
         value: "1",
         name: "初始化/刷新项目配置",
         description: "创建或更新工作区、入口索引、规则模板、Skills 和可用 hooks"
+      },
+      {
+        value: "11",
+        name: "更新 code-helper 本地资产",
+        description: "按当前项目已启用能力刷新入口、Skills 和 Hooks"
       }
     ]
   },
@@ -307,6 +317,10 @@ async function runInteractiveMenu(projectRoot: string): Promise<number> {
       switch (answer.trim()) {
         case "1":
           await runMenuAction(getMainMenuItemName(answer), () => runInit(projectRoot));
+          await pauseAfterMenuAction(useKeyMenu);
+          break;
+        case "11":
+          await runMenuAction(getMainMenuItemName(answer), () => runUpdate(projectRoot));
           await pauseAfterMenuAction(useKeyMenu);
           break;
         case "2": {
@@ -1199,6 +1213,21 @@ async function runInit(projectRoot: string, args: string[] = []): Promise<number
     ? await resolveInitSkillRegistrationTargets(projectRoot)
     : parseSkillRegistrationTargets(args[0]);
   const result = await initializeProject({ projectRoot, skillRegistrationTargets });
+  printOperations(result.operations);
+  return 0;
+}
+
+/**
+ * 更新当前项目中已经使用的 code-helper 受控资产。
+ * update 不自动开启未启用能力，适合发新版后同步入口、skills 和 hooks。
+ */
+async function runUpdate(projectRoot: string, args: string[] = []): Promise<number> {
+  if (args.length > 0) {
+    console.error("update 暂不接受参数。用法：code-helper update");
+    return 1;
+  }
+
+  const result = await updateProject(projectRoot);
   printOperations(result.operations);
   return 0;
 }
@@ -2142,6 +2171,7 @@ function printHelp(): void {
 用法：
   code-helper                         打开交互菜单
   code-helper init [target]           初始化项目规则和工作区，可指定 all|codex|claudecode|githubcopilot
+  code-helper update                  按当前项目已启用能力刷新 code-helper 本地资产
   code-helper sync-local              刷新本仓库本地模板并注册全部项目级 skills
   code-helper check [--write-report]  检查协作文档结构
   code-helper features list           查看高级功能配置
