@@ -99,9 +99,38 @@ test("help 会展示 sync-local 子命令", async () => {
 
     assert.equal(exitCode, 0);
     assert.match(logs.join("\n"), /code-helper update/);
+    assert.match(logs.join("\n"), /code-helper version/);
+    assert.match(logs.join("\n"), /code-helper npm-scripts install/);
     assert.match(logs.join("\n"), /code-helper sync-local/);
     assert.match(logs.join("\n"), /注册全部项目级 skills/);
   } finally {
+    console.log = originalLog;
+  }
+});
+
+test("version 输出当前包版本且测试环境不触发 latest 查询", async () => {
+  // version 命令必须稳定输出当前包版本；测试环境跳过网络查询，避免单测依赖 npm registry。
+  const logs = [];
+  const originalLog = console.log;
+  const originalSkip = process.env.CODE_HELPER_SKIP_VERSION_CHECK;
+  const packageJson = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8"));
+
+  try {
+    process.env.CODE_HELPER_SKIP_VERSION_CHECK = "1";
+    console.log = (...args) => {
+      logs.push(args.join(" "));
+    };
+
+    const exitCode = await runCli(["version"], process.cwd());
+
+    assert.equal(exitCode, 0);
+    assert.deepEqual(logs, [`code-helper ${packageJson.version}`]);
+  } finally {
+    if (originalSkip === undefined) {
+      delete process.env.CODE_HELPER_SKIP_VERSION_CHECK;
+    } else {
+      process.env.CODE_HELPER_SKIP_VERSION_CHECK = originalSkip;
+    }
     console.log = originalLog;
   }
 });

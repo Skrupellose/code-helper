@@ -7,7 +7,7 @@ import { createCompletionReview, type CompletionReview } from "./completion.js";
 import { loadConfig, setFeatureEnabled } from "./config.js";
 import { runChecks } from "./checks.js";
 import { installHook, listHookInstallations, parseHookTargets, uninstallHook, type HookInstallTarget } from "./hooks.js";
-import { initializeProject, updateProject } from "./init.js";
+import { initializeProject, installCodeHelperNpmScripts, updateProject } from "./init.js";
 import { normalizeDroppedPath } from "./input-utils.js";
 import {
   formatSkillRegistrationTargetName,
@@ -22,7 +22,12 @@ import {
   unregisterProjectSkills
 } from "./skills.js";
 import { canUseInteractiveKeys, promptContinue, promptMultiSelect, promptSelect, type SelectOption } from "./terminal-ui.js";
-import { maybeNotifyVersionUpdate } from "./version-check.js";
+import {
+  compareVersions,
+  fetchLatestPackageVersion,
+  getCurrentPackageVersion,
+  maybeNotifyVersionUpdate
+} from "./version-check.js";
 import { createManualTestDocument, createPlanWorkbench } from "./workflows.js";
 import type { FeatureKey, OperationResult } from "./types.js";
 
@@ -44,6 +49,12 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
         return runInit(projectRoot, args);
       case "update":
         return runUpdate(projectRoot, args);
+      case "version":
+      case "--version":
+      case "-v":
+        return runVersion(args);
+      case "npm-scripts":
+        return runNpmScripts(projectRoot, args);
       case "sync-local":
         return runSyncLocal(projectRoot, args);
       case "check":
@@ -1233,6 +1244,90 @@ async function runUpdate(projectRoot: string, args: string[] = []): Promise<numb
 }
 
 /**
+ * 输出当前 code-helper 版本。
+ * npm latest 查询是附加信息，失败或被测试/CI 环境跳过时不影响命令退出码。
+ */
+async function runVersion(args: string[] = []): Promise<number> {
+  if (args.length > 0) {
+    console.error("version 不接受参数。用法：code-helper version");
+    return 1;
+  }
+
+  const currentVersion = await getCurrentPackageVersion();
+  console.log(`code-helper ${currentVersion}`);
+
+  if (shouldSkipVersionCommandLatestLookup(process.env)) {
+    return 0;
+  }
+
+  try {
+    const latestVersion = await fetchLatestPackageVersion();
+    console.log(`npm latest ${latestVersion}`);
+
+    for (const line of formatVersionCommandUpdateHint(currentVersion, latestVersion)) {
+      console.log(line);
+    }
+  } catch {
+    // version 命令的 registry 查询只提供参考信息，离线或代理异常时仍应成功输出当前版本。
+  }
+
+  return 0;
+}
+
+/**
+ * 解析 npm-scripts 子命令。
+ * 当前只支持 install，后续若增加 list/remove 可以继续在这里扩展。
+ */
+async function runNpmScripts(projectRoot: string, args: string[] = []): Promise<number> {
+  const [action, ...rest] = args;
+
+  if (action !== "install" || rest.length > 0) {
+    console.error("npm-scripts 只支持 install。用法：code-helper npm-scripts install");
+    return 1;
+  }
+
+  try {
+    const operations = await installCodeHelperNpmScripts(projectRoot);
+    printOperations(operations);
+    return 0;
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    return 1;
+  }
+}
+
+/**
+ * version 命令在测试、CI 或用户显式禁用版本检查时不访问网络。
+ * 这条规则只影响 latest 附加信息，不影响当前版本输出。
+ */
+function shouldSkipVersionCommandLatestLookup(env: NodeJS.ProcessEnv): boolean {
+  return (
+    env.CODE_HELPER_SKIP_VERSION_CHECK === "1" ||
+    env.CI === "true" ||
+    env.GITHUB_ACTIONS === "true" ||
+    env.npm_lifecycle_event === "test" ||
+    env.npm_lifecycle_event === "check" ||
+    env.npm_lifecycle_event === "prepack"
+  );
+}
+
+/**
+ * 为 version 命令生成简短更新提示。
+ * 交互菜单的版本提醒走 stderr；version 命令本身是显式查询，因此可以把附加信息写到 stdout。
+ */
+function formatVersionCommandUpdateHint(currentVersion: string, latestVersion: string): string[] {
+  if (compareVersions(currentVersion, latestVersion) >= 0) {
+    return [];
+  }
+
+  return [
+    "可更新到 npm latest：",
+    "  npm i -D @skrupellose/code-helper@latest",
+    "  npx code-helper update"
+  ];
+}
+
+/**
  * 本仓库开发后的本地刷新命令。
  * 它先用空目标刷新受控入口、规则模板和 `.code-helper/skills`，避免顺带创建其他 agent 入口或安装 hooks；
  * 再显式注册全部项目级 skills，保持 Codex、Claude Code 和 GitHub Copilot 看到的 skill 内容一致。
@@ -2172,6 +2267,8 @@ function printHelp(): void {
   code-helper                         打开交互菜单
   code-helper init [target]           初始化项目规则和工作区，可指定 all|codex|claudecode|githubcopilot
   code-helper update                  按当前项目已启用能力刷新 code-helper 本地资产
+  code-helper version                 查看当前 code-helper 版本
+  code-helper npm-scripts install     写入常用 npm scripts（不覆盖同名脚本）
   code-helper sync-local              刷新本仓库本地模板并注册全部项目级 skills
   code-helper check [--write-report]  检查协作文档结构
   code-helper features list           查看高级功能配置

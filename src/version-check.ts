@@ -23,6 +23,12 @@ interface RegistryLatestResponse {
 }
 
 /**
+ * npm 包名在版本提醒、version 命令和安装提示中必须保持一致。
+ * 集中定义可以避免 CLI 文案和 registry 查询地址出现分叉。
+ */
+export const CODE_HELPER_PACKAGE_NAME = PACKAGE_NAME;
+
+/**
  * 交互式启动时提示 npm 上的新版本。
  * 版本检查是提示型能力，网络失败、缓存异常或 registry 异常都不能影响原命令执行。
  */
@@ -44,7 +50,7 @@ export async function maybeNotifyVersionUpdate(
       return;
     }
 
-    const latestVersion = await fetchLatestVersion();
+    const latestVersion = await fetchLatestPackageVersion();
     const status = compareVersions(currentVersion, latestVersion) < 0 ? "outdated" : "latest";
 
     await writeVersionCache(projectRoot, {
@@ -115,7 +121,7 @@ export function compareVersions(left: string, right: string): number {
 /**
  * 从当前安装包的 package.json 读取版本号。
  */
-async function getCurrentPackageVersion(): Promise<string> {
+export async function getCurrentPackageVersion(): Promise<string> {
   const distDirectory = dirname(fileURLToPath(import.meta.url));
   const packageJsonPath = join(distDirectory, "..", "package.json");
   const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as { version?: unknown };
@@ -130,7 +136,7 @@ async function getCurrentPackageVersion(): Promise<string> {
 /**
  * 请求 npm registry 的 latest 版本。
  */
-async function fetchLatestVersion(): Promise<string> {
+export async function fetchLatestPackageVersion(): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), VERSION_CHECK_TIMEOUT_MS);
 
@@ -215,14 +221,29 @@ function isCacheFresh(cache: VersionCache): boolean {
  * 使用 stderr 是为了不污染 stdout，避免破坏脚本或 hook 协议。
  */
 function printOutdatedMessageIfNeeded(currentVersion: string, latestVersion: string): void {
+  const messageLines = formatOutdatedVersionMessage(currentVersion, latestVersion);
+
+  for (const line of messageLines) {
+    console.error(line);
+  }
+}
+
+/**
+ * 生成版本落后时的升级提示文案。
+ * 调用方负责决定输出到 stderr 还是 stdout；交互提醒必须写 stderr，避免污染脚本和 hook 协议。
+ */
+export function formatOutdatedVersionMessage(currentVersion: string, latestVersion: string): string[] {
   if (compareVersions(currentVersion, latestVersion) >= 0) {
-    return;
+    return [];
   }
 
-  console.error(`发现 code-helper 新版本：${latestVersion}（当前 ${currentVersion}）`);
-  console.error("建议在当前项目执行：");
-  console.error("  npx @skrupellose/code-helper@latest update");
-  console.error("更新会刷新 code-helper 管理的入口、skills 和 hooks，不会自动开启未启用能力；也可以忽略本次提醒。");
+  return [
+    `发现 code-helper 新版本：${latestVersion}（当前 ${currentVersion}）`,
+    "建议在当前项目执行：",
+    "  npm i -D @skrupellose/code-helper@latest",
+    "  npx code-helper update",
+    "更新会刷新 code-helper 管理的入口、skills 和 hooks，不会自动开启未启用能力；也可以忽略本次提醒。"
+  ];
 }
 
 /**

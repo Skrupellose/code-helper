@@ -4,29 +4,40 @@
 
 ## 快速开始
 
+一次性运行最新版本：
+
 ```bash
-npx @skrupellose/code-helper
+npx @skrupellose/code-helper@latest
 ```
 
-首次在项目中使用时，建议先初始化：
+如果希望把 code-helper 固定到项目里，先安装为开发依赖：
 
 ```bash
-npx @skrupellose/code-helper init
+npm i -D @skrupellose/code-helper
+npx code-helper init
 ```
 
 初始化会根据当前项目已有的 `AGENTS.md`、`CLAUDE.md` 或 `.github/copilot-instructions.md` 判断要维护的 agent 工具。无法判断时，交互式初始化会让你选择目标；非交互环境会保守跳过项目级 skills 和 agent hooks。
 
+本地安装后，推荐使用 `npx code-helper <命令>`。需要把常用命令写入项目 `package.json` 时，可以执行：
+
+```bash
+npx code-helper npm-scripts install
+```
+
 ## 常用命令
 
 ```bash
-npx @skrupellose/code-helper init
-npx @skrupellose/code-helper@latest update
-npx @skrupellose/code-helper plan docs/订单管理需求.md 订单管理升级
-npx @skrupellose/code-helper manual-test 订单管理升级
-npx @skrupellose/code-helper finish 订单管理升级
-npx @skrupellose/code-helper archive 订单管理升级
-npx @skrupellose/code-helper tasks
-npx @skrupellose/code-helper check
+npx code-helper init
+npx code-helper update
+npx code-helper version
+npx code-helper npm-scripts install
+npx code-helper plan docs/订单管理需求.md 订单管理升级
+npx code-helper manual-test 订单管理升级
+npx code-helper finish 订单管理升级
+npx code-helper archive 订单管理升级
+npx code-helper tasks
+npx code-helper check
 ```
 
 交互菜单支持方向键移动，空格或回车确认。不支持按键交互的终端会回退为数字菜单。
@@ -34,6 +45,13 @@ npx @skrupellose/code-helper check
 不带功能名运行 `manual-test`、`finish` 或 `archive` 时，TTY 终端会优先展示当前活动任务列表；仍然支持直接传入中文功能名。
 
 交互菜单启动时会轻量检查 npm 上是否有新版本；发现更新时只给出提示，不会自动升级。要把当前项目中的入口、skills 和 hooks 刷新到最新版，运行：
+
+```bash
+npm i -D @skrupellose/code-helper@latest
+npx code-helper update
+```
+
+如果没有安装到项目，也可以临时执行：
 
 ```bash
 npx @skrupellose/code-helper@latest update
@@ -45,6 +63,8 @@ npx @skrupellose/code-helper@latest update
 | --- | --- |
 | `init` | 创建或更新协作入口、规则模板、项目级 skills 和可选 hooks |
 | `update` | 按当前项目已启用或已安装的能力刷新 code-helper 本地资产 |
+| `version` | 查看当前运行的 code-helper 版本，并在可用时查询 npm latest |
+| `npm-scripts install` | 写入常用 npm scripts，已存在的同名脚本不会被覆盖 |
 | `plan` | 根据需求文档生成计划文档、执行记录和状态记录 |
 | `manual-test` | 为页面、可视化或人工验收场景生成手工测试文档 |
 | `finish` | 检查当前任务是否满足完成条件，并提示后续动作 |

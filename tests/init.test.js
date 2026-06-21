@@ -395,6 +395,59 @@ test("updateProject 会升级已安装的旧 Codex Stop hook", async () => {
   }
 });
 
+test("installCodeHelperNpmScripts 写入常用脚本且不覆盖已有同名脚本", async () => {
+  // npm scripts 安装面向用户已有项目，必须保留同名脚本，避免覆盖用户自定义初始化流程。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-npm-scripts-"));
+
+  try {
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({
+        name: "demo",
+        scripts: {
+          "code-helper:init": "custom init"
+        }
+      }, null, 2),
+      "utf8"
+    );
+
+    const result = await runCliSilently(["npm-scripts", "install"], root);
+    const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(packageJson.scripts["code-helper:init"], "custom init");
+    assert.equal(packageJson.scripts["code-helper:update"], "code-helper update");
+    assert.equal(packageJson.scripts["code-helper:check"], "code-helper check");
+    assert.equal(packageJson.scripts["code-helper:finish"], "code-helper finish");
+    assert.match(result.logs.join("\n"), /\[skipped\].*code-helper:init/);
+    assert.match(result.logs.join("\n"), /\[updated\].*code-helper:update/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("code-helper npm-scripts install 缺少 package.json 时给出清晰错误", async () => {
+  // 没有 package.json 通常表示不在 Node 项目根目录，错误信息应直接说明该如何执行。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-npm-scripts-missing-"));
+  const errors = [];
+  const originalError = console.error;
+
+  try {
+    console.error = (...args) => {
+      errors.push(args.join(" "));
+    };
+
+    const exitCode = await runCli(["npm-scripts", "install"], root);
+
+    assert.equal(exitCode, 1);
+    assert.match(errors.join("\n"), /当前目录没有 package\.json/);
+    assert.match(errors.join("\n"), /code-helper npm-scripts install/);
+  } finally {
+    console.error = originalError;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("runChecks 在初始化后通过", async () => {
   // 该测试确保初始化产物满足自身检查规则。
   const root = await mkdtemp(join(tmpdir(), "code-helper-check-"));
