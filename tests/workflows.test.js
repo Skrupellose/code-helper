@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -17,12 +17,12 @@ test("normalizeFeatureName 会生成稳定路径片段", () => {
 
 test("normalizeDocumentName 会强制生成中文文档名", () => {
   // 该测试确保新生成的 docs 文档不会继续使用英文功能名。
-  assert.equal(normalizeDocumentName("订单 管理!", "功能计划"), "订单-管理");
-  assert.equal(normalizeDocumentName("demo-feature", "功能计划"), "功能计划");
+  assert.equal(normalizeDocumentName("订单 API!", "功能计划"), "订单-API");
+  assert.equal(normalizeDocumentName("demo-feature", "功能计划"), "功能计划-demo-feature");
   assert.equal(normalizeDocumentName("!!!", "功能计划"), "功能计划");
 });
 
-test("createPlanWorkbench 会生成计划、结果、状态和手工测试文档", async () => {
+test("createPlanWorkbench 会生成计划、结果和状态文档", async () => {
   // 该测试验证项目计划优化的核心产物齐全。
   const root = await mkdtemp(join(tmpdir(), "code-helper-plan-"));
 
@@ -39,9 +39,8 @@ test("createPlanWorkbench 会生成计划、结果、状态和手工测试文档
     const plan = await readFile(join(root, "code-helper-docs/plan-doc/订单管理升级.md"), "utf8");
     const result = await readFile(join(root, "code-helper-docs/result-doc/订单管理升级/实施记录.md"), "utf8");
     const status = await readFile(join(root, "code-helper-docs/status-doc/订单管理升级-状态.md"), "utf8");
-    const manual = await readFile(join(root, "code-helper-docs/result-doc/订单管理升级/手工测试.md"), "utf8");
 
-    assert.equal(operations.length, 4);
+    assert.equal(operations.length, 3);
     assert.match(plan, /下一步建议/);
     assert.match(plan, /核心实现/);
     assert.match(plan, /当前执行节点/);
@@ -50,7 +49,10 @@ test("createPlanWorkbench 会生成计划、结果、状态和手工测试文档
     assert.match(status, /当前执行节点/);
     assert.match(status, /子计划队列/);
     assert.match(status, /一次只推进“当前执行节点”/);
-    assert.match(manual, /不默认执行 Playwright/);
+    await assert.rejects(
+      () => stat(join(root, "code-helper-docs/result-doc/订单管理升级/手工测试.md")),
+      /ENOENT/
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -73,7 +75,7 @@ test("createPlanWorkbench 支持读取绝对路径需求文档", async () => {
     });
 
     const plan = await readFile(join(root, "code-helper-docs/plan-doc/外部订单需求.md"), "utf8");
-    assert.equal(operations.length, 4);
+    assert.equal(operations.length, 3);
     assert.match(plan, /从项目外部拖入/);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -122,6 +124,45 @@ test("archiveFeature 会把功能文档移动到归档目录并标记为 archive
     assert.equal(tasks[0].featureName, "待归档功能");
     assert.equal(tasks[0].status, "archived");
     assert.ok(tasks[0].archivedArtifacts.includes("code-helper-docs/plan-doc/archive/待归档功能.md"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("archiveFeature 遇到 mixed 冲突时需要显式 resolve", async () => {
+  // mixed 冲突默认只提示，不移动部分文档；显式 resolve 时清理活动副本并保留归档版本。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-archive-mixed-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await writeFile(join(root, "requirement.md"), "# 冲突归档\n\n验证 mixed 冲突恢复。", "utf8");
+    await createPlanWorkbench({
+      projectRoot: root,
+      requirementPath: "requirement.md",
+      featureName: "冲突归档"
+    });
+    await mkdir(join(root, "code-helper-docs/plan-doc/archive"), { recursive: true });
+    await copyFile(
+      join(root, "code-helper-docs/plan-doc/冲突归档.md"),
+      join(root, "code-helper-docs/plan-doc/archive/冲突归档.md")
+    );
+
+    await assert.rejects(
+      () => archiveFeature(root, "冲突归档"),
+      /--resolve-mixed/
+    );
+    await stat(join(root, "code-helper-docs/result-doc/冲突归档/实施记录.md"));
+
+    await archiveFeature(root, "冲突归档", { resolveMixed: true });
+    const tasks = await listTasks(root);
+
+    assert.equal(tasks.length, 1);
+    assert.equal(tasks[0].featureName, "冲突归档");
+    assert.equal(tasks[0].status, "archived");
+    await assert.rejects(
+      () => stat(join(root, "code-helper-docs/plan-doc/冲突归档.md")),
+      /ENOENT/
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

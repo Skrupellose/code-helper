@@ -15,6 +15,7 @@ export type CompletionReviewStatus =
   | "blocked"
   | "node-review"
   | "ready-to-archive"
+  | "archived"
   | "missing-docs";
 
 /**
@@ -68,13 +69,13 @@ export async function createCompletionReview(projectRoot: string, featureName: s
     throw new Error(`未找到任务文档：${featureName}。请先生成计划文档，或确认任务名称是否正确。`);
   }
 
-  const plan = await readDocument(projectRoot, portablePath(config.directories.planDoc, `${task.featureName}.md`));
+  const plan = await readDocument(projectRoot, getPlanDocumentPath(task, config.directories.planDoc));
   const result = await readDocument(
     projectRoot,
-    portablePath(config.directories.resultDoc, task.featureName, RESULT_RECORD_FILE_NAME)
+    getResultDocumentPath(task, config.directories.resultDoc)
   );
-  const status = await readDocument(projectRoot, portablePath(config.directories.statusDoc, `${task.featureName}-状态.md`));
-  const manualTest = await readDocument(projectRoot, portablePath(config.directories.resultDoc, task.featureName, "手工测试.md"));
+  const status = await readDocument(projectRoot, getStatusDocumentPath(task, config.directories.statusDoc));
+  const manualTest = await readDocument(projectRoot, getManualTestDocumentPath(task, config.directories.resultDoc));
   const combinedContent = [plan.content, result.content, status.content, manualTest.content].filter(Boolean).join("\n");
   const statusCounts = countStatusMarkers(combinedContent);
   const changedPaths = readGitChangedPaths(projectRoot);
@@ -119,6 +120,43 @@ export async function createCompletionReview(projectRoot: string, featureName: s
       hasSubPlanQueue
     })
   };
+}
+
+/**
+ * 根据任务状态返回计划文档读取路径。
+ * archived 任务已经结束，完成检查应读取 archive 中的文档而不是误判 active 文档缺失。
+ */
+function getPlanDocumentPath(task: TaskRecord, planDirectory: string): string {
+  const activePath = portablePath(planDirectory, `${task.featureName}.md`);
+  const archivedPath = portablePath(planDirectory, "archive", `${task.featureName}.md`);
+  return task.status === "archived" ? archivedPath : activePath;
+}
+
+/**
+ * 根据任务状态返回实施记录读取路径。
+ */
+function getResultDocumentPath(task: TaskRecord, resultDirectory: string): string {
+  const activePath = portablePath(resultDirectory, task.featureName, RESULT_RECORD_FILE_NAME);
+  const archivedPath = portablePath(resultDirectory, "archive", task.featureName, RESULT_RECORD_FILE_NAME);
+  return task.status === "archived" ? archivedPath : activePath;
+}
+
+/**
+ * 根据任务状态返回状态记录读取路径。
+ */
+function getStatusDocumentPath(task: TaskRecord, statusDirectory: string): string {
+  const activePath = portablePath(statusDirectory, `${task.featureName}-状态.md`);
+  const archivedPath = portablePath(statusDirectory, "archive", `${task.featureName}-状态.md`);
+  return task.status === "archived" ? archivedPath : activePath;
+}
+
+/**
+ * 根据任务状态返回手工测试文档读取路径。
+ */
+function getManualTestDocumentPath(task: TaskRecord, resultDirectory: string): string {
+  const activePath = portablePath(resultDirectory, task.featureName, "手工测试.md");
+  const archivedPath = portablePath(resultDirectory, "archive", task.featureName, "手工测试.md");
+  return task.status === "archived" ? archivedPath : activePath;
 }
 
 /**
@@ -190,12 +228,12 @@ function resolveReviewStatus(input: {
   hasCurrentExecutionNode: boolean;
   hasSubPlanQueue: boolean;
 }): CompletionReviewStatus {
-  if (!input.plan.exists || !input.result.exists || !input.status.exists) {
-    return "missing-docs";
+  if (input.task.status === "archived") {
+    return "archived";
   }
 
-  if (input.task.status === "archived") {
-    return "ready-to-archive";
+  if (!input.plan.exists || !input.result.exists || !input.status.exists) {
+    return "missing-docs";
   }
 
   if (input.statusCounts.blocked > 0) {
@@ -302,6 +340,10 @@ function buildRecommendations(input: {
 
   if (input.reviewStatus === "node-review") {
     recommendations.push("先把 status-doc 补成当前执行入口，明确当前执行节点和子计划队列。");
+  }
+
+  if (input.reviewStatus === "archived") {
+    recommendations.push("当前任务只存在于 archive 目录中，已视为结束任务；如需返工，请新建后续中文功能名或先明确恢复策略。");
   }
 
   if (!input.hasCurrentExecutionNode) {

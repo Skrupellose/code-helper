@@ -89,9 +89,10 @@ export async function uninstallHook(projectRoot: string, target: HookInstallTarg
 
 /**
  * 解析 hooks CLI 的目标参数。
+ * hooks 会真实写入 Git 或 agent 配置，因此不再把空目标解释成全部安装。
  */
-export function parseHookTargets(value: string | undefined): HookInstallTarget[] {
-  if (value === undefined || value === "" || value === "all") {
+export function parseHookTargets(value: string): HookInstallTarget[] {
+  if (value === "all") {
     return ["git", "codex", "claudecode"];
   }
 

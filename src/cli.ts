@@ -40,7 +40,7 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
       case "init":
         return runInit(projectRoot, args);
       case "check":
-        return runCheck(projectRoot);
+        return runCheck(projectRoot, args);
       case "features":
         return runFeatures(projectRoot, args);
       case "plan":
@@ -474,7 +474,7 @@ async function selectTaskFeatureNameForCommand(
     return undefined;
   }
 
-  if (!canUseInteractiveKeys(input, output)) {
+  if (!input.isTTY || !output.isTTY) {
     console.error("缺少功能名称。可用任务：");
     for (const task of tasks) {
       console.error(`- ${task.featureName}（${task.status}）`);
@@ -482,9 +482,42 @@ async function selectTaskFeatureNameForCommand(
     return undefined;
   }
 
-  const answer = await promptSelect(input, output, title, buildTaskSelectOptions(tasks, false));
+  if (!canUseInteractiveKeys(input, output)) {
+    const rl = createInterface({ input, output });
+
+    try {
+      const answer = await askTextTaskMenu(rl, title, tasks);
+      return resolveTaskSelectionForCommand(answer, tasks, rl);
+    } finally {
+      rl.close();
+    }
+  }
+
+  const answer = await promptSelect(input, output, title, buildTaskSelectOptions(tasks, true));
+  const rl = createInterface({ input, output });
+
+  try {
+    return await resolveTaskSelectionForCommand(answer, tasks, rl);
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * 将任务选择菜单结果解析为功能名。
+ * 直接命令也保留手动输入入口，兼容旧文档或尚未生成完整任务记录的场景。
+ */
+async function resolveTaskSelectionForCommand(
+  answer: string,
+  tasks: TaskRecord[],
+  rl: ReturnType<typeof createInterface>
+): Promise<string | undefined> {
 
   if (answer === "__return__" || answer === "__manual__") {
+    if (answer === "__manual__") {
+      return askRequiredMenuInput(rl, "请输入功能名称：");
+    }
+
     return undefined;
   }
 
@@ -1184,11 +1217,11 @@ async function resolveInitSkillRegistrationTargets(projectRoot: string): Promise
     const result = await promptMultiSelect(
       input,
       output,
-      "选择 init 要应用的 agent 工具",
+      "选择 init 要应用的 agent 工具（默认选中 Codex，可用空格调整）",
       listSupportedSkillRegistrationTargets().map((target) => ({
         value: target,
         label: formatSkillRegistrationTargetName(target),
-        checked: false
+        checked: target === "codex"
       }))
     );
     const selectedTargets = result.cancelled
@@ -1286,8 +1319,8 @@ function parseInitTargetSelection(value: string): SkillRegistrationTarget[] {
  * 检查命令实现。
  * 存在 error 时返回 1，方便 CI 或 hook 使用。
  */
-async function runCheck(projectRoot: string): Promise<number> {
-  const issues = await runChecks(projectRoot);
+async function runCheck(projectRoot: string, args: string[] = []): Promise<number> {
+  const issues = await runChecks(projectRoot, { writeReport: args.includes("--write-report") });
 
   if (issues.length === 0) {
     console.log("code-helper check 通过：未发现协作文档结构问题。");
@@ -1650,7 +1683,8 @@ async function runManualTest(projectRoot: string, args: string[]): Promise<numbe
  * 参数：archive <功能名称>。
  */
 async function runArchive(projectRoot: string, args: string[]): Promise<number> {
-  const [rawFeatureName] = args;
+  const flags = new Set(args.filter((arg) => arg.startsWith("--")));
+  const rawFeatureName = args.find((arg) => !arg.startsWith("--"));
   const featureName = rawFeatureName ?? await selectTaskFeatureNameForCommand(
     projectRoot,
     "选择要归档的任务",
@@ -1658,11 +1692,11 @@ async function runArchive(projectRoot: string, args: string[]): Promise<number> 
   );
 
   if (!featureName) {
-    console.error("缺少功能名称。用法：code-helper archive <中文功能名>");
+    console.error("缺少功能名称。用法：code-helper archive <中文功能名> [--resolve-mixed]");
     return 1;
   }
 
-  printOperations(await archiveFeature(projectRoot, featureName));
+  printOperations(await archiveFeature(projectRoot, featureName, { resolveMixed: flags.has("--resolve-mixed") }));
   await runTasks(projectRoot, []);
   return 0;
 }
@@ -1847,6 +1881,12 @@ async function runHooks(projectRoot: string, args: string[]): Promise<number> {
   }
 
   if (action === "install" || action === "uninstall") {
+    if (rawTarget === undefined) {
+      console.error(`缺少 hooks 目标。用法：code-helper hooks ${action} <git|codex|claudecode|agent|all>`);
+      printHooksHelp();
+      return 1;
+    }
+
     const targets = parseHookTargets(rawTarget);
     const operations: OperationResult[] = [];
 
@@ -1932,6 +1972,7 @@ function formatCompletionReviewStatus(status: CompletionReview["reviewStatus"]):
     blocked: "当前任务存在阻塞",
     "node-review": "需要先补齐当前执行节点",
     "ready-to-archive": "可在用户确认后归档",
+    archived: "任务已归档，视为已结束",
     "missing-docs": "缺少必要协作文档"
   };
 
@@ -2048,8 +2089,8 @@ function printSkillsHelp(): void {
 function printHooksHelp(): void {
   console.log("用法：");
   console.log("  code-helper hooks list");
-  console.log("  code-helper hooks install [git|codex|claudecode|agent|all]");
-  console.log("  code-helper hooks uninstall [git|codex|claudecode|agent|all]");
+  console.log("  code-helper hooks install <git|codex|claudecode|agent|all>");
+  console.log("  code-helper hooks uninstall <git|codex|claudecode|agent|all>");
   console.log("说明：hooks install 会直接应用对应 hook，并同步内部开关；init 只会安装选中 agent 对应的 Agent hooks，不会安装 Git hook。");
 }
 
@@ -2063,13 +2104,13 @@ function printHelp(): void {
 用法：
   code-helper                         打开交互菜单
   code-helper init [target]           初始化项目规则和工作区，可指定 all|codex|claudecode|githubcopilot
-  code-helper check                   检查协作文档结构
+  code-helper check [--write-report]  检查协作文档结构
   code-helper features list           查看高级功能配置
   code-helper features enable <key>   启用高级功能配置
   code-helper features disable <key>  关闭高级功能配置
   code-helper plan <需求文档> [中文功能名] 生成项目计划文档
   code-helper manual-test <中文功能名> [标题] 生成页面手工测试文档
-  code-helper archive <中文功能名>       将功能文档移动到 archive 并识别为已结束
+  code-helper archive <中文功能名> [--resolve-mixed] 将功能文档移动到 archive 并识别为已结束
   code-helper finish [中文功能名]        检查当前功能是否完成并提示后续动作
   code-helper tasks [--json]           查看 active / archived / mixed 任务
   code-helper skills list              查看项目级 skills 注册状态
@@ -2078,8 +2119,8 @@ function printHelp(): void {
   code-helper skills doctor            检查项目级 skills 结构和质量
   code-helper skills audit             根据项目状态给出 skills 建议
   code-helper hooks list               查看 Git / Agent hooks 安装状态
-  code-helper hooks install [target]   安装 Git / Agent hooks
-  code-helper hooks uninstall [target] 卸载 code-helper 管理的 hooks
+  code-helper hooks install <target>   安装 Git / Agent hooks
+  code-helper hooks uninstall <target> 卸载 code-helper 管理的 hooks
 `);
 }
 

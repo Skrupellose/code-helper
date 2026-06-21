@@ -2,15 +2,20 @@ import { readdir } from "node:fs/promises";
 
 import { ENTRY_BLOCK_END, ENTRY_BLOCK_START, FEATURE_KEYS } from "./constants.js";
 import { listTasks } from "./archive.js";
-import { loadConfig } from "./config.js";
+import { getConfigRelativePath, loadConfig } from "./config.js";
 import { portablePath, projectPath, readTextIfExists, writeText } from "./fs-utils.js";
 import type { CheckIssue, CodeHelperConfig } from "./types.js";
 
 /**
  * 运行项目协作规则检查。
- * 检查只读项目结构，并把结果写入 `.code-helper/checks/latest.json`。
+ * 默认只读项目结构；需要持久化报告时由调用方显式传入 writeReport。
  */
-export async function runChecks(projectRoot: string): Promise<CheckIssue[]> {
+export async function runChecks(projectRoot: string, options: { writeReport?: boolean } = {}): Promise<CheckIssue[]> {
+  const rawConfigIssues = await checkRawConfig(projectRoot);
+  if (rawConfigIssues.some((issue) => issue.code === "invalid-config-json" || issue.code === "invalid-config-shape")) {
+    return rawConfigIssues;
+  }
+
   const config = await loadConfig(projectRoot);
   const issues: CheckIssue[] = [];
 
@@ -18,6 +23,7 @@ export async function runChecks(projectRoot: string): Promise<CheckIssue[]> {
     return issues;
   }
 
+  issues.push(...rawConfigIssues);
   issues.push(...(await checkConfig(config)));
   issues.push(...(await checkEntryDocuments(projectRoot, config)));
   issues.push(...(await checkRuleDocuments(projectRoot, config)));
@@ -26,12 +32,77 @@ export async function runChecks(projectRoot: string): Promise<CheckIssue[]> {
   issues.push(...(await checkTestingPolicy(projectRoot, config)));
   issues.push(...(await checkArchiveState(projectRoot, config)));
 
-  await writeText(
-    projectPath(projectRoot, `${config.directories.workspace}/checks/latest.json`),
-    `${JSON.stringify({ checkedAt: new Date().toISOString(), issues }, null, 2)}\n`
-  );
+  if (options.writeReport === true) {
+    await writeText(
+      projectPath(projectRoot, `${config.directories.workspace}/checks/latest.json`),
+      `${JSON.stringify({ checkedAt: new Date().toISOString(), issues }, null, 2)}\n`
+    );
+  }
 
   return issues;
+}
+
+/**
+ * 检查原始配置文件结构。
+ * loadConfig 会自动补默认值，因此缺失字段必须在合并前检查，否则会被默认配置掩盖。
+ */
+async function checkRawConfig(projectRoot: string): Promise<CheckIssue[]> {
+  const configPath = getConfigRelativePath();
+  const raw = await readTextIfExists(projectPath(projectRoot, configPath));
+
+  if (raw === undefined) {
+    return [];
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [
+      {
+        level: "error",
+        code: "invalid-config-json",
+        message: "code-helper 配置不是合法 JSON",
+        path: configPath,
+        suggestion: "修复 JSON 语法，或运行 `npx @skrupellose/code-helper init` 重新生成配置。"
+      }
+    ];
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return [
+      {
+        level: "error",
+        code: "invalid-config-shape",
+        message: "code-helper 配置必须是 JSON 对象",
+        path: configPath,
+        suggestion: "运行 `npx @skrupellose/code-helper init` 重新生成配置。"
+      }
+    ];
+  }
+
+  const features = (parsed as { features?: unknown }).features;
+  if (typeof features !== "object" || features === null || Array.isArray(features)) {
+    return [
+      {
+        level: "error",
+        code: "missing-feature-toggles",
+        message: "配置缺少 features 功能开关对象",
+        path: configPath,
+        suggestion: "运行 `npx @skrupellose/code-helper init` 补齐默认功能开关。"
+      }
+    ];
+  }
+
+  return FEATURE_KEYS
+    .filter((feature) => !(feature in features))
+    .map((feature) => ({
+      level: "error" as const,
+      code: "missing-feature-toggle",
+      message: `配置缺少功能开关：${feature}`,
+      path: configPath,
+      suggestion: "运行 `npx @skrupellose/code-helper init`，让工具补齐默认配置。"
+    }));
 }
 
 /**

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { archiveFeature } from "../dist/archive.js";
 import { createCompletionReview } from "../dist/completion.js";
 import { initializeProject } from "../dist/init.js";
 import { createPlanWorkbench } from "../dist/workflows.js";
@@ -48,6 +49,32 @@ test("createCompletionReview 缺少任务文档时会报错", async () => {
       () => createCompletionReview(root, "不存在功能"),
       /未找到任务文档/
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 会把已归档任务识别为已结束", async () => {
+  // archived 任务应读取 archive 路径，不应误判 active 文档缺失。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-archived-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await writeFile(join(root, "requirement.md"), "# 已归档能力\n\n验证归档后的完成检查。", "utf8");
+    await createPlanWorkbench({
+      projectRoot: root,
+      requirementPath: "requirement.md",
+      featureName: "已归档能力"
+    });
+    await archiveFeature(root, "已归档能力");
+
+    const review = await createCompletionReview(root, "已归档能力");
+
+    assert.equal(review.taskStatus, "archived");
+    assert.equal(review.reviewStatus, "archived");
+    assert.equal(review.documents.plan.exists, true);
+    assert.match(review.documents.plan.relativePath, /archive/);
+    assert.equal(review.shouldAskArchive, false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

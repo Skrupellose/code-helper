@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { runCli } from "../dist/cli.js";
 import { setFeatureEnabled } from "../dist/config.js";
 import {
   installHook,
@@ -14,7 +15,6 @@ import {
 
 test("parseHookTargets 会解析 hooks 安装目标", () => {
   // 该测试锁定 CLI 支持的 hooks 目标别名。
-  assert.deepEqual(parseHookTargets(undefined), ["git", "codex", "claudecode"]);
   assert.deepEqual(parseHookTargets("all"), ["git", "codex", "claudecode"]);
   assert.deepEqual(parseHookTargets("agent"), ["codex", "claudecode"]);
   assert.deepEqual(parseHookTargets("git"), ["git"]);
@@ -35,6 +35,36 @@ test("installHook 不需要用户预先启用 hooks 开关", async () => {
     assert.equal(gitOperation.action, "created");
     assert.equal(codexOperation.action, "created");
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("hooks install 不带目标时不会默认安装全部 hooks", async () => {
+  // hooks 会写入真实配置，直接命令必须要求用户显式传入目标。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-hooks-no-target-"));
+  const errors = [];
+  const logs = [];
+  const originalError = console.error;
+  const originalLog = console.log;
+
+  try {
+    console.error = (...args) => {
+      errors.push(args.join(" "));
+    };
+    console.log = (...args) => {
+      logs.push(args.join(" "));
+    };
+    await mkdir(join(root, ".git/hooks"), { recursive: true });
+
+    const exitCode = await runCli(["hooks", "install"], root);
+    const statuses = await listHookInstallations(root);
+
+    assert.equal(exitCode, 1);
+    assert.match(errors.join("\n"), /缺少 hooks 目标/);
+    assert.equal(statuses.some((status) => status.installed), false);
+  } finally {
+    console.error = originalError;
+    console.log = originalLog;
     await rm(root, { recursive: true, force: true });
   }
 });

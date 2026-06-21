@@ -45,6 +45,7 @@ npx @skrupellose/code-helper plan docs/订单管理需求.md 订单管理升级
 npx @skrupellose/code-helper manual-test 订单管理升级
 npx @skrupellose/code-helper finish 订单管理升级
 npx @skrupellose/code-helper archive 订单管理升级
+npx @skrupellose/code-helper archive 订单管理升级 --resolve-mixed
 npx @skrupellose/code-helper tasks
 npx @skrupellose/code-helper init codex
 npx @skrupellose/code-helper skills register
@@ -54,7 +55,7 @@ npx @skrupellose/code-helper hooks list
 
 在交互式“生成任务计划”里，可以直接把需求文档拖到终端；工具会识别引号、`file://`、反斜杠转义空格和项目内绝对路径。
 
-生成项目计划时，`status-doc` 会同步生成当前执行入口，包含“当前执行节点”和“子计划队列”，用于让 agent 按计划逐步推进。
+生成项目计划时，会创建计划文档、实施记录和当前状态记录；`status-doc` 会同步生成当前执行入口，包含“当前执行节点”和“子计划队列”，用于让 agent 按计划逐步推进。手工测试文档由 `manual-test` 按需单独生成。
 
 完成小节点、识别到功能变更、准备最终回复或切换任务前，可以运行 `code-helper finish <中文功能名> --check-only`。它只输出完成判断和后续建议，不会自动更新长期记忆、归档或提交。
 
@@ -91,7 +92,8 @@ npx @skrupellose/code-helper hooks list
 - 功能完成后可以执行 `npx @skrupellose/code-helper archive <中文功能名>` 归档文档。
 - 不带功能名执行 `manual-test`、`finish` 或 `archive` 时，TTY 终端会优先展示当前活动任务选择列表。
 - 用户手动移动到 `archive/` 的任务会被识别为已结束任务。
-- init 不会自动安装 Git hook；Git hook 只在显式执行 `hooks install git` 时安装。执行 `hooks install` 时会直接应用到项目，执行 `hooks uninstall` 会取消 code-helper 管理的 hooks。
+- `check` 默认只输出检查结果；需要写入 `.code-helper/checks/latest.json` 时使用 `check --write-report`。
+- init 不会自动安装 Git hook；Git hook 只在显式执行 `hooks install git` 时安装。`hooks install` / `hooks uninstall` 必须显式传入 `git`、`codex`、`claudecode`、`agent` 或 `all`，避免误安装全部 hooks。
 
 ## 功能管理
 
@@ -131,3 +133,13 @@ npx @skrupellose/code-helper hooks uninstall agent
 - `hooks install` 会直接应用对应 hook，并同步内部状态。
 - Agent hooks 只运行 `finish --check-only`，不会自动更新长期记忆、归档或提交。
 - 卸载只移除 code-helper 管理的 hook，不删除用户自己的 hooks。
+
+## 本地验证与发布检查
+
+```bash
+npm test
+npm run check
+npm pack --dry-run
+```
+
+`npm pack` 前会自动执行构建，避免发布包依赖本地残留的 `dist/`。

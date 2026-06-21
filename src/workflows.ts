@@ -51,13 +51,11 @@ export async function createPlanWorkbench(options: PlanWorkbenchOptions): Promis
   const planPath = projectPath(options.projectRoot, join(config.directories.planDoc, `${featureName}.md`));
   const resultPath = projectPath(options.projectRoot, join(config.directories.resultDoc, featureName, RESULT_RECORD_FILE_NAME));
   const statusPath = projectPath(options.projectRoot, join(config.directories.statusDoc, `${featureName}-状态.md`));
-  const manualTestPath = projectPath(options.projectRoot, join(config.directories.resultDoc, featureName, MANUAL_TEST_FILE_NAME));
 
   return [
     await writeTextIfMissing(planPath, renderPlanDocument(featureName, options.requirementPath, requirement)),
     await writeTextIfMissing(resultPath, renderResultDocument(featureName)),
-    await writeTextIfMissing(statusPath, renderStatusDocument(featureName)),
-    await writeTextIfMissing(manualTestPath, renderManualTestDocument(featureName, `${featureName} 页面回归测试`))
+    await writeTextIfMissing(statusPath, renderStatusDocument(featureName))
   ];
 }
 
@@ -67,7 +65,7 @@ export async function createPlanWorkbench(options: PlanWorkbenchOptions): Promis
  */
 export async function createManualTestDocument(options: ManualTestOptions): Promise<OperationResult> {
   const config = await loadConfig(options.projectRoot);
-  const featureName = normalizeDocumentName(options.featureName, "页面功能");
+  const featureName = normalizeDocumentName(options.featureName, "人工验收");
   const targetPath = projectPath(options.projectRoot, join(config.directories.resultDoc, featureName, MANUAL_TEST_FILE_NAME));
 
   return writeTextIfMissing(
@@ -99,7 +97,7 @@ export function normalizeDocumentName(value: string, fallbackName: string): stri
   const normalized = value
     .trim()
     .replace(/\s+/gu, "-")
-    .replace(/[^\p{Script=Han}\p{N}_-]/gu, "")
+    .replace(/[^\p{Script=Han}\p{L}\p{N}_-]/gu, "")
     .replace(/-+/gu, "-")
     .replace(/^-|-$/gu, "");
 
@@ -107,7 +105,24 @@ export function normalizeDocumentName(value: string, fallbackName: string): stri
     return normalized;
   }
 
-  return fallbackName;
+  if (fallbackName.trim() === "") {
+    return "";
+  }
+
+  const normalizedFallback = fallbackName
+    .trim()
+    .replace(/\s+/gu, "-")
+    .replace(/[^\p{Script=Han}\p{L}\p{N}_-]/gu, "")
+    .replace(/-+/gu, "-")
+    .replace(/^-|-$/gu, "");
+  const fallback = normalizedFallback !== "" ? normalizedFallback : fallbackName;
+  const legacySuffix = normalizeFeatureName(value);
+
+  if (legacySuffix !== "feature") {
+    return `${fallback}-${legacySuffix}`;
+  }
+
+  return fallback;
 }
 
 /**
@@ -118,7 +133,7 @@ function inferChineseFeatureName(featureName: string | undefined, requirementPat
   const titleFallback = extractChineseMarkdownTitle(requirement) ?? normalizeDocumentName(basename(requirementPath, ".md"), "功能计划");
 
   if (featureName !== undefined && featureName.trim() !== "") {
-    return normalizeDocumentName(featureName, titleFallback);
+    return containsChinese(featureName) ? normalizeDocumentName(featureName, titleFallback) : titleFallback;
   }
 
   return titleFallback;
@@ -214,7 +229,7 @@ ${excerpt}
 
 - 当前状态文件：\`code-helper-docs/status-doc/${featureName}-状态.md\`
 - 执行记录目录：\`code-helper-docs/result-doc/${featureName}/\`
-- 手工测试文档：\`code-helper-docs/result-doc/${featureName}/${MANUAL_TEST_FILE_NAME}\`
+- 按需手工测试文档：\`code-helper-docs/result-doc/${featureName}/${MANUAL_TEST_FILE_NAME}\`
 - 推进要求：每个子计划开始前先更新状态记录的“当前执行节点”，完成后再写入下一节点。
 `;
 }

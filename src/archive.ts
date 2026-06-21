@@ -1,4 +1,4 @@
-import { mkdir, readdir, rename, stat } from "node:fs/promises";
+import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { loadConfig } from "./config.js";
@@ -24,10 +24,22 @@ export interface TaskRecord {
 }
 
 /**
+ * 归档命令选项。
+ * resolveMixed 只在用户显式要求时清理 active/archive 同名冲突，避免默认删除活动文档。
+ */
+export interface ArchiveFeatureOptions {
+  resolveMixed?: boolean;
+}
+
+/**
  * 执行任务文档归档。
  * 归档目标固定为各文档目录下的 archive 子目录，避免已结束任务继续影响当前任务判断。
  */
-export async function archiveFeature(projectRoot: string, rawFeatureName: string): Promise<OperationResult[]> {
+export async function archiveFeature(
+  projectRoot: string,
+  rawFeatureName: string,
+  options: ArchiveFeatureOptions = {}
+): Promise<OperationResult[]> {
   const config = await loadConfig(projectRoot);
 
   if (!config.features.documentArchive.enabled) {
@@ -38,9 +50,18 @@ export async function archiveFeature(projectRoot: string, rawFeatureName: string
   const recordFeatureName = featureNames[0];
   const operations: OperationResult[] = [];
   const moves = featureNames.flatMap((featureName) => getArchiveMoves(config, featureName));
+  const conflicts = options.resolveMixed ? [] : await findArchiveConflicts(projectRoot, moves);
+
+  if (conflicts.length > 0) {
+    throw new Error([
+      `任务存在 active/archive 同名冲突：${rawFeatureName}`,
+      "如果确认归档目录中的版本应保留，请运行 `code-helper archive <中文功能名> --resolve-mixed` 清理活动副本。",
+      ...conflicts.map((conflict) => `冲突路径：${conflict}`)
+    ].join("\n"));
+  }
 
   for (const move of moves) {
-    operations.push(await movePathIfExists(projectRoot, move.from, move.to));
+    operations.push(await movePathIfExists(projectRoot, move.from, move.to, options));
   }
 
   if (!operations.some((operation) => isKnownArchivedOperation(operation))) {
@@ -50,6 +71,28 @@ export async function archiveFeature(projectRoot: string, rawFeatureName: string
   operations.push(await writeArchiveRecord(projectRoot, config, recordFeatureName, operations));
 
   return operations;
+}
+
+/**
+ * 归档前预检查 active/archive 同名冲突。
+ * 这样默认模式下不会先移动部分文档再报错，保持归档动作可预期。
+ */
+async function findArchiveConflicts(
+  projectRoot: string,
+  moves: Array<{ from: string; to: string }>
+): Promise<string[]> {
+  const conflicts: string[] = [];
+
+  for (const move of moves) {
+    const sourceExists = await pathExists(projectPath(projectRoot, move.from));
+    const targetExists = await pathExists(projectPath(projectRoot, move.to));
+
+    if (sourceExists && targetExists) {
+      conflicts.push(move.to);
+    }
+  }
+
+  return conflicts;
 }
 
 /**
@@ -126,7 +169,12 @@ function getArchiveMoves(config: CodeHelperConfig, featureName: string): Array<{
  * 文件或目录存在时移动到 archive。
  * 目标已存在时不覆盖，避免破坏用户手动归档后的内容。
  */
-async function movePathIfExists(projectRoot: string, fromRelativePath: string, toRelativePath: string): Promise<OperationResult> {
+async function movePathIfExists(
+  projectRoot: string,
+  fromRelativePath: string,
+  toRelativePath: string,
+  options: ArchiveFeatureOptions
+): Promise<OperationResult> {
   const fromPath = projectPath(projectRoot, fromRelativePath);
   const toPath = projectPath(projectRoot, toRelativePath);
   const sourceExists = await pathExists(fromPath);
@@ -149,10 +197,19 @@ async function movePathIfExists(projectRoot: string, fromRelativePath: string, t
   }
 
   if (targetExists) {
+    if (options.resolveMixed) {
+      await rm(fromPath, { recursive: true, force: true });
+      return {
+        path: fromPath,
+        action: "updated",
+        message: "已清理活动副本，保留归档目录中的已结束任务"
+      };
+    }
+
     return {
       path: toPath,
       action: "skipped",
-      message: "归档目标已存在，为避免覆盖已跳过"
+      message: "活动文档和归档文档同时存在，请人工确认后再处理"
     };
   }
 
@@ -209,7 +266,9 @@ async function writeArchiveRecord(
  * 源文档不存在不算已归档，避免生成空归档记录。
  */
 function isKnownArchivedOperation(operation: OperationResult): boolean {
-  return operation.message === "已移动到归档目录" || operation.message === "已在归档目录中，识别为已结束任务";
+  return operation.message === "已移动到归档目录"
+    || operation.message === "已在归档目录中，识别为已结束任务"
+    || operation.message === "已清理活动副本，保留归档目录中的已结束任务";
 }
 
 /**
