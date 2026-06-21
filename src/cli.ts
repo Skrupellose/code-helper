@@ -12,6 +12,8 @@ import {
   parseSkillRegistrationTargets,
   registerProjectSkills,
   resolveSkillRegistrationTargets,
+  runSkillsAudit,
+  runSkillsDoctor,
   unregisterProjectSkills
 } from "./skills.js";
 import { canUseInteractiveKeys, promptContinue, promptMultiSelect, promptSelect } from "./terminal-ui.js";
@@ -203,8 +205,11 @@ async function runSkillMenu(
     { value: "3", label: "按当前项目取消注册 Skills" },
     { value: "4", label: "仅注册 Codex" },
     { value: "5", label: "仅注册 Claude Code" },
-    { value: "6", label: "注册全部" },
-    { value: "7", label: "取消注册全部" },
+    { value: "6", label: "仅注册 GitHub Copilot" },
+    { value: "7", label: "注册全部" },
+    { value: "8", label: "取消注册全部" },
+    { value: "9", label: "Skills 质量检查" },
+    { value: "10", label: "Skills 建议分析" },
     { value: "0", label: "返回" }
   ];
   const answer = useKeyMenu
@@ -228,10 +233,19 @@ async function runSkillMenu(
       await runMenuAction("注册 Claude Code 项目级 skills", () => runSkills(projectRoot, ["register", "claudecode"]));
       return true;
     case "6":
-      await runMenuAction("注册全部项目级 skills", () => runSkills(projectRoot, ["register", "all"]));
+      await runMenuAction("注册 GitHub Copilot 项目级 skills", () => runSkills(projectRoot, ["register", "githubcopilot"]));
       return true;
     case "7":
+      await runMenuAction("注册全部项目级 skills", () => runSkills(projectRoot, ["register", "all"]));
+      return true;
+    case "8":
       await runMenuAction("取消注册全部项目级 skills", () => runSkills(projectRoot, ["unregister", "all"]));
+      return true;
+    case "9":
+      await runMenuAction("Skills 质量检查", () => runSkills(projectRoot, ["doctor"]));
+      return true;
+    case "10":
+      await runMenuAction("Skills 建议分析", () => runSkills(projectRoot, ["audit"]));
       return true;
     case "0":
       console.log("已返回主菜单。");
@@ -495,8 +509,11 @@ async function askTextSkillMenu(rl: ReturnType<typeof createInterface>): Promise
   console.log("3. 按当前项目取消注册 Skills");
   console.log("4. 仅注册 Codex");
   console.log("5. 仅注册 Claude Code");
-  console.log("6. 注册全部");
-  console.log("7. 取消注册全部");
+  console.log("6. 仅注册 GitHub Copilot");
+  console.log("7. 注册全部");
+  console.log("8. 取消注册全部");
+  console.log("9. Skills 质量检查");
+  console.log("10. Skills 建议分析");
   console.log("0. 返回");
 
   return askQuestionOrDefault(rl, "请选择操作：", "0");
@@ -636,20 +653,26 @@ async function runTasks(projectRoot: string, args: string[]): Promise<number> {
 
 /**
  * 项目级 skills 注册命令。
- * 支持：skills list、skills register [all|codex|claudecode]、skills unregister [all|codex|claudecode]。
- * register/unregister 不带 target 时按当前项目入口文件推断目标，只有显式 all 才处理两套 agent。
+ * 支持：skills list、skills register [target]、skills unregister [target]、skills doctor、skills audit。
+ * register/unregister 不带 target 时按当前项目入口文件推断目标，只有显式 all 才处理全部 agent。
  */
 async function runSkills(projectRoot: string, args: string[]): Promise<number> {
   const [action = "list", rawTarget] = args;
-  const targets = await resolveTargetsForSkillAction(projectRoot, action, rawTarget);
+
+  if (action === "help" || action === "--help" || action === "-h") {
+    printSkillsHelp();
+    return 0;
+  }
 
   if (action === "list") {
+    const targets = await resolveTargetsForSkillAction(projectRoot, action, rawTarget);
     const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
     printSkillRegistrationStatus(statuses);
     return 0;
   }
 
   if (action === "register") {
+    const targets = await resolveTargetsForSkillAction(projectRoot, action, rawTarget);
     const operations = (await Promise.all(targets.map((target) => registerProjectSkills(projectRoot, target)))).flat();
     const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
     printOperations(operations);
@@ -658,10 +681,22 @@ async function runSkills(projectRoot: string, args: string[]): Promise<number> {
   }
 
   if (action === "unregister") {
+    const targets = await resolveTargetsForSkillAction(projectRoot, action, rawTarget);
     const operations = (await Promise.all(targets.map((target) => unregisterProjectSkills(projectRoot, target)))).flat();
     const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
     printOperations(operations);
     printSkillRegistrationStatus(statuses);
+    return 0;
+  }
+
+  if (action === "doctor") {
+    const issues = await runSkillsDoctor(projectRoot);
+    printSkillDoctorIssues(issues);
+    return issues.some((issue) => issue.level === "error") ? 1 : 0;
+  }
+
+  if (action === "audit") {
+    printSkillAuditRecommendations(await runSkillsAudit(projectRoot));
     return 0;
   }
 
@@ -704,6 +739,34 @@ function printSkillRegistrationStatus(
 }
 
 /**
+ * 打印 skills doctor 检查结果。
+ * 没有问题时输出明确结论，避免用户误以为空命令失败。
+ */
+function printSkillDoctorIssues(issues: Awaited<ReturnType<typeof runSkillsDoctor>>): void {
+  if (issues.length === 0) {
+    console.log("skills doctor 通过：未发现项目级 skills 结构问题。");
+    return;
+  }
+
+  for (const issue of issues) {
+    console.log(`[${issue.level}] ${issue.code}: ${issue.message}`);
+    console.log(`  路径：${issue.path}`);
+    console.log(`  建议：${issue.suggestion}`);
+  }
+}
+
+/**
+ * 打印 skills audit 推荐项。
+ * audit 是建议型命令，始终返回 0。
+ */
+function printSkillAuditRecommendations(recommendations: Awaited<ReturnType<typeof runSkillsAudit>>): void {
+  for (const recommendation of recommendations) {
+    console.log(`[${recommendation.priority}] ${recommendation.code}: ${recommendation.message}`);
+    console.log(`  建议：${recommendation.suggestion}`);
+  }
+}
+
+/**
  * 判断字符串是否是合法 FeatureKey。
  * 运行时 CLI 参数需要显式校验，不能只依赖 TypeScript 类型。
  */
@@ -728,9 +791,11 @@ function printFeatureHelp(): void {
 function printSkillsHelp(): void {
   console.log("用法：");
   console.log("  code-helper skills list");
-  console.log("  code-helper skills register [all|codex|claudecode]");
-  console.log("  code-helper skills unregister [all|codex|claudecode]");
-  console.log("说明：register/unregister 不带 target 时按当前项目已有 AGENTS.md / CLAUDE.md 自动选择目标。");
+  console.log("  code-helper skills register [all|codex|claudecode|githubcopilot]");
+  console.log("  code-helper skills unregister [all|codex|claudecode|githubcopilot]");
+  console.log("  code-helper skills doctor");
+  console.log("  code-helper skills audit");
+  console.log("说明：register/unregister 不带 target 时按当前项目已有 AGENTS.md / CLAUDE.md / GitHub Copilot 入口自动选择目标。");
 }
 
 /**
@@ -754,6 +819,8 @@ function printHelp(): void {
   code-helper skills list              查看项目级 skills 注册状态
   code-helper skills register [target] 按项目入口或指定 target 注册项目级 skills
   code-helper skills unregister [target] 按项目入口或指定 target 取消注册项目级 skills
+  code-helper skills doctor            检查项目级 skills 结构和质量
+  code-helper skills audit             根据项目状态给出 skills 建议
 `);
 }
 

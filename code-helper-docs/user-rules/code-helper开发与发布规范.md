@@ -32,14 +32,14 @@
 13. 功能完成后应支持将计划、结果和状态文档移动到 `archive/`；用户手动移动到 `archive/` 的任务也必须识别为已结束。
 14. 功能开关必须支持选择性关闭；关闭后菜单、检查或初始化行为应尊重配置。
 15. `.code-helper/skills/` 只是内置 skills 模板源，不默认被 Codex 或 Claude Code 识别。
-16. Skills 注册必须同时支持 Codex 和 Claude Code：Codex 写入 `.agents/skills/code-helper-*`，Claude Code 写入 `.claude/skills/code-helper-*`。
-17. `npx @skrupellose/code-helper init` 必须根据初始化前的入口文档决定注册目标：只有 `AGENTS.md` 时只注册 Codex，只有 `CLAUDE.md` 时只注册 Claude Code，两者都存在时注册两套；两个入口文档都不存在的新项目默认注册两套。
-18. 用户执行 `npx @skrupellose/code-helper skills register` 或在菜单中选择“按当前项目注册 Skills”时，必须根据当前项目已有 `AGENTS.md` / `CLAUDE.md` 自动选择目标。
-19. 用户可以用 `npx @skrupellose/code-helper skills register all` 强制注册两套，也可以用 `npx @skrupellose/code-helper skills register codex` 或 `npx @skrupellose/code-helper skills register claudecode` 只注册单个 agent 工具。
-20. 取消注册只删除 `.agents/skills/code-helper-*` 和 `.claude/skills/code-helper-*` 受控目录，不触碰用户自己的 `.agents/skills` 或 `.claude/skills` 内容。
+16. Skills 注册必须同时支持 Codex、Claude Code 和 GitHub Copilot：Codex 写入 `.agents/skills/code-helper-*`，Claude Code 写入 `.claude/skills/code-helper-*`，GitHub Copilot 写入 `.github/skills/code-helper-*`。
+17. `npx @skrupellose/code-helper init` 必须根据初始化前的入口文档决定注册目标：只有 `AGENTS.md` 时只注册 Codex，只有 `CLAUDE.md` 时只注册 Claude Code，存在 `.github/copilot-instructions.md` 或 `.github/skills/` 时注册 GitHub Copilot；完全无法判断的新项目默认注册全部三类目标。
+18. 用户执行 `npx @skrupellose/code-helper skills register` 或在菜单中选择“按当前项目注册 Skills”时，必须根据当前项目已有 `AGENTS.md` / `CLAUDE.md` / GitHub Copilot 入口自动选择目标。
+19. 用户可以用 `npx @skrupellose/code-helper skills register all` 强制注册全部三类目标，也可以用 `npx @skrupellose/code-helper skills register codex`、`npx @skrupellose/code-helper skills register claudecode` 或 `npx @skrupellose/code-helper skills register githubcopilot` 只注册单个 agent 工具。
+20. 取消注册只删除 `.agents/skills/code-helper-*`、`.claude/skills/code-helper-*` 和 `.github/skills/code-helper-*` 受控目录，不触碰用户自己的 skills 内容。
 21. 本地验证优先运行 `npm test`、`npm run check`、`npm pack --dry-run`，必要时再用同级 demo 项目验证真实 CLI 流程。
 22. 所有用户可见文案、README、规则文档和 skill 内容必须符合中文产品语境，避免“状态驾驶舱”“计划工作台”“执行工作台”“阶段收口”“当前推进建议”“阻塞回归入口”等生硬表达；优先使用“状态记录”“计划文档”“执行计划”“阶段结束”“下一步建议”“后续检查点”等自然表述。
 23. `code-helper-plan-workbench` 的内容必须保持通用，不应默认任务是前端页面或组件；计划描述要覆盖 CLI、后端服务、数据任务、平台能力、跨模块协作和页面等多种项目类型。
-24. 修改 `src/templates.ts` 中的内置 skill 或规则模板后，必须同步刷新 `.code-helper/skills/`，并在本项目同时刷新 `.agents/skills/code-helper-*` 与 `.claude/skills/code-helper-*`，保证 Codex 和 Claude Code 看到的项目级 skills 内容一致。
+24. 修改 `src/templates.ts` 中的内置 skill 或规则模板后，必须同步刷新 `.code-helper/skills/`，并在本项目同时刷新 `.agents/skills/code-helper-*`、`.claude/skills/code-helper-*` 与 `.github/skills/code-helper-*`，保证 Codex、Claude Code 和 GitHub Copilot 看到的项目级 skills 内容一致。
 25. 新增或修改 TypeScript 代码时，公共函数、复杂分支和跨平台兼容逻辑应保留清晰中文注释；简单自解释代码不添加空泛注释。
 26. 工具必须同时兼容 macOS 和 Windows。新增路径、文件移动、归档、拖拽输入、CLI 参数解析、skills 注册和文档生成逻辑时，必须使用跨平台路径 API，避免硬编码 `/`、反斜杠、盘符假设或仅适用于单一系统的 shell 行为；涉及路径的改动必须补充或更新 Windows 与 macOS 兼容用例。

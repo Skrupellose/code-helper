@@ -8,7 +8,7 @@ import { initializeProject } from "../dist/init.js";
 import { runChecks } from "../dist/checks.js";
 
 test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", async () => {
-  // 该测试覆盖老项目兼容：只有 AGENTS.md 时只注册 Codex，不误注册 Claude Code。
+  // 该测试覆盖老项目兼容：只有 AGENTS.md 时只注册 Codex，不误注册其他 agent 工具。
   const root = await mkdtemp(join(tmpdir(), "code-helper-init-"));
 
   try {
@@ -28,13 +28,17 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
       () => stat(join(root, ".claude/skills/code-helper-memory-tuning/SKILL.md")),
       /ENOENT/
     );
+    await assert.rejects(
+      () => stat(join(root, ".github/skills/code-helper-memory-tuning/SKILL.md")),
+      /ENOENT/
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
 test("initializeProject 在没有入口文档的新项目中注册全部 agent skills", async () => {
-  // 该测试覆盖新项目初始化：无法判断实际使用工具时，默认同时准备 Codex 和 Claude Code 项目级 skills。
+  // 该测试覆盖新项目初始化：无法判断实际使用工具时，默认准备所有支持的项目级 skills。
   const root = await mkdtemp(join(tmpdir(), "code-helper-init-new-"));
 
   try {
@@ -42,16 +46,18 @@ test("initializeProject 在没有入口文档的新项目中注册全部 agent s
 
     const codexSkill = await readFile(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
     const claudeCodeSkill = await readFile(join(root, ".claude/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
+    const githubCopilotSkill = await readFile(join(root, ".github/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
 
     assert.match(codexSkill, /name: code-helper-memory-tuning/);
     assert.match(claudeCodeSkill, /name: code-helper-memory-tuning/);
+    assert.match(githubCopilotSkill, /name: code-helper-memory-tuning/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
 test("initializeProject 在只有 CLAUDE.md 的项目中只注册 Claude Code skills", async () => {
-  // 该测试覆盖 Claude Code 单工具项目：不能因为默认配置创建 AGENTS.md 或注册 Codex skills。
+  // 该测试覆盖 Claude Code 单工具项目：不能因为默认配置创建 AGENTS.md 或注册其他 agent 工具。
   const root = await mkdtemp(join(tmpdir(), "code-helper-init-claude-only-"));
 
   try {
@@ -74,6 +80,10 @@ test("initializeProject 在只有 CLAUDE.md 的项目中只注册 Claude Code sk
     );
     await assert.rejects(
       () => stat(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, ".github/skills/code-helper-memory-tuning/SKILL.md")),
       /ENOENT/
     );
   } finally {
