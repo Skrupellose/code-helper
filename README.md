@@ -39,6 +39,7 @@ npx @skrupellose/code-helper
 
 ```bash
 npx @skrupellose/code-helper init
+npx @skrupellose/code-helper sync-local
 npx @skrupellose/code-helper check
 npx @skrupellose/code-helper features list
 npx @skrupellose/code-helper plan docs/订单管理需求.md 订单管理升级
@@ -137,10 +138,13 @@ npx @skrupellose/code-helper hooks uninstall agent
 ## 本地验证与发布检查
 
 ```bash
+npm run sync:local
 npm test
 npm run check
 npm pack --dry-run
 ```
+
+开发 code-helper 本仓库时，修改 `src/templates.ts`、入口规则、内置 skills 或项目级 skills 相关逻辑后，先运行 `npm run sync:local`。它会构建当前代码，刷新 `AGENTS.md` 的 code-helper 受控区块、`.code-helper/skills/` 内置模板，并注册 Codex、Claude Code、GitHub Copilot 三类项目级 skills；不会额外创建 `CLAUDE.md`、`.github/copilot-instructions.md` 或安装 hooks。
 
 `npm pack` 前会自动执行构建，避免发布包依赖本地残留的 `dist/`。
 

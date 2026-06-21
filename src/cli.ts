@@ -39,6 +39,8 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
         return runInteractiveMenu(projectRoot);
       case "init":
         return runInit(projectRoot, args);
+      case "sync-local":
+        return runSyncLocal(projectRoot, args);
       case "check":
         return runCheck(projectRoot, args);
       case "features":
@@ -1202,6 +1204,33 @@ async function runInit(projectRoot: string, args: string[] = []): Promise<number
 }
 
 /**
+ * 本仓库开发后的本地刷新命令。
+ * 它先用空目标刷新受控入口、规则模板和 `.code-helper/skills`，避免顺带创建其他 agent 入口或安装 hooks；
+ * 再显式注册全部项目级 skills，保持 Codex、Claude Code 和 GitHub Copilot 看到的 skill 内容一致。
+ */
+async function runSyncLocal(projectRoot: string, args: string[] = []): Promise<number> {
+  if (args.length > 0) {
+    console.error("sync-local 不接受参数。用法：code-helper sync-local");
+    return 1;
+  }
+
+  const initializeResult = await initializeProject({ projectRoot, skillRegistrationTargets: [] });
+  await setFeatureEnabled(projectRoot, "skillRegistration", true);
+
+  const targets = listSupportedSkillRegistrationTargets();
+  const skillOperations = (await Promise.all(targets.map((target) => registerProjectSkills(projectRoot, target)))).flat();
+  const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
+  const initializeOperations = initializeResult.operations.filter((operation) =>
+    !operation.message.includes("已跳过项目级 skills 注册")
+    && !operation.message.includes("已跳过 Agent hooks 安装")
+  );
+
+  printOperations([...initializeOperations, ...skillOperations]);
+  printSkillRegistrationStatus(statuses);
+  return 0;
+}
+
+/**
  * 为 init 解析要应用的 agent 工具目标。
  * 已有入口文件可以直接推断；完全无法判断时，交互终端让用户选择，非交互场景保守跳过。
  */
@@ -2113,6 +2142,7 @@ function printHelp(): void {
 用法：
   code-helper                         打开交互菜单
   code-helper init [target]           初始化项目规则和工作区，可指定 all|codex|claudecode|githubcopilot
+  code-helper sync-local              刷新本仓库本地模板并注册全部项目级 skills
   code-helper check [--write-report]  检查协作文档结构
   code-helper features list           查看高级功能配置
   code-helper features enable <key>   启用高级功能配置

@@ -23,6 +23,11 @@ const ALL_SKILL_REGISTRATION_TARGETS: SkillRegistrationTarget[] = ["codex", "cla
  * directoryName 使用 skill frontmatter 中的 name，便于不同 agent 工具直接识别。
  */
 const CODE_HELPER_SKILL_REGISTRATIONS = [
+  // Agent 协作 skill 先注册，确保新会话能优先读取协作分工边界。
+  {
+    templateFileName: "agent-collaboration.SKILL.md",
+    directoryName: "code-helper-agent-collaboration"
+  },
   {
     templateFileName: "memory-tuning.SKILL.md",
     directoryName: "code-helper-memory-tuning"

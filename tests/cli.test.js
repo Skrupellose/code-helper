@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -83,6 +83,114 @@ test("功能管理 Agent hooks 目标菜单只允许 Codex 和 Claude Code", () 
     () => parseAgentHookTargetMenuSelection("githubcopilot"),
     /GitHub Copilot 不支持 Agent hook/
   );
+});
+
+test("help 会展示 sync-local 子命令", async () => {
+  // help 是用户发现非交互命令的入口，新增子命令必须在总帮助中可见。
+  const logs = [];
+  const originalLog = console.log;
+
+  try {
+    console.log = (...args) => {
+      logs.push(args.join(" "));
+    };
+
+    const exitCode = await runCli(["help"], process.cwd());
+
+    assert.equal(exitCode, 0);
+    assert.match(logs.join("\n"), /code-helper sync-local/);
+    assert.match(logs.join("\n"), /注册全部项目级 skills/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test("sync-local 刷新 AGENTS 和三类项目级 skills 且不创建其他入口或 hooks", async () => {
+  // sync-local 面向 code-helper 本仓库开发后刷新本地资产，不能借初始化顺带安装 Agent/Git hooks。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-cli-sync-local-"));
+  const logs = [];
+  const originalLog = console.log;
+  const oldAgents = `# Agent 协作规则
+
+<!-- code-helper:start -->
+## code-helper 协作入口
+
+### 核心规则
+
+1. 开始新需求、迁移、重构或反馈修复前，先读取本区块索引到的专题规则。
+2. 长期规则写入 \`code-helper-docs/user-rules/\`，短期过程写入 \`code-helper-docs/result-doc/\`，当前状态记录写入 \`code-helper-docs/status-doc/\`。
+3. 不把一次性调试过程、临时失败细节或大段实现流水写进入口文档。
+
+### 专题规则索引
+
+- Skills 管理：需要让 Codex 或 Claude Code 在当前项目自动发现 code-helper skills 时，执行 \`npx @skrupellose/code-helper skills register\`。
+
+### 文档维护规则
+
+- 入口文档只保留轻量索引和核心约束。
+<!-- code-helper:end -->
+
+## 用户规则
+
+保留用户原有内容。
+`;
+
+  try {
+    console.log = (...args) => {
+      logs.push(args.join(" "));
+    };
+
+    await writeFile(join(root, "AGENTS.md"), oldAgents, "utf8");
+
+    const result = await runCli(["sync-local"], root);
+    const agents = await readFile(join(root, "AGENTS.md"), "utf8");
+    const codexSkill = await readFile(join(root, ".agents/skills/code-helper-completion-review/SKILL.md"), "utf8");
+    const codexCollaborationSkill = await readFile(join(root, ".agents/skills/code-helper-agent-collaboration/SKILL.md"), "utf8");
+    const claudeSkill = await readFile(join(root, ".claude/skills/code-helper-completion-review/SKILL.md"), "utf8");
+    const claudeCollaborationSkill = await readFile(join(root, ".claude/skills/code-helper-agent-collaboration/SKILL.md"), "utf8");
+    const copilotSkill = await readFile(join(root, ".github/skills/code-helper-completion-review/SKILL.md"), "utf8");
+    const copilotCollaborationSkill = await readFile(join(root, ".github/skills/code-helper-agent-collaboration/SKILL.md"), "utf8");
+    const localSkillTemplate = await readFile(join(root, ".code-helper/skills/completion-review.SKILL.md"), "utf8");
+    const localCollaborationTemplate = await readFile(join(root, ".code-helper/skills/agent-collaboration.SKILL.md"), "utf8");
+
+    assert.equal(result, 0);
+    assert.match(agents, /主会话只做管理、分配、审阅和结果同步；具体执行任务必须交给子代理/);
+    assert.match(agents, /Agent 协作规范/);
+    assert.match(agents, /保留用户原有内容/);
+    assert.match(agents, /Codex、Claude Code 或 GitHub Copilot/);
+    assert.match(codexSkill, /name: code-helper-completion-review/);
+    assert.match(codexCollaborationSkill, /name: code-helper-agent-collaboration/);
+    assert.match(codexCollaborationSkill, /子代理/);
+    assert.match(claudeSkill, /name: code-helper-completion-review/);
+    assert.match(claudeCollaborationSkill, /name: code-helper-agent-collaboration/);
+    assert.match(copilotSkill, /name: code-helper-completion-review/);
+    assert.match(copilotCollaborationSkill, /name: code-helper-agent-collaboration/);
+    assert.match(localSkillTemplate, /name: code-helper-completion-review/);
+    assert.match(localCollaborationTemplate, /name: code-helper-agent-collaboration/);
+    await assert.rejects(
+      () => stat(join(root, "CLAUDE.md")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, ".github/copilot-instructions.md")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, ".codex/hooks.json")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, ".claude/settings.json")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(root, ".git/hooks/pre-commit")),
+      /ENOENT/
+    );
+  } finally {
+    console.log = originalLog;
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("manual-test 缺少功能名时会提示当前可选任务", async () => {
