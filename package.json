@@ -3,6 +3,10 @@
   "version": "0.1.2",
   "description": "通用 agent 协作流程 CLI，用于初始化项目规则、维护记忆、生成计划文档并检查协作规范。",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Skrupellose/code-helper.git"
+  },
   "bin": {
     "code-helper": "dist/index.js"
   },
