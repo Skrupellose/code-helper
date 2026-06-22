@@ -168,6 +168,7 @@ function replaceMarkdownSection(content: string, sectionTitle: string, replaceme
 /**
  * 在 Markdown 入口文件中追加或更新 code-helper 管理区块。
  * 这个函数只触碰受控区块，保护用户在区块外维护的项目规则。
+ * 已有文件没有受控区块时，原文会作为新内容前缀逐字保留，只在末尾追加受控区块。
  */
 export async function upsertManagedMarkdownBlock(path: string, blockContent: string): Promise<OperationResult> {
   const normalizedBlock = `${ENTRY_BLOCK_START}\n${blockContent.trim()}\n${ENTRY_BLOCK_END}`;
@@ -195,7 +196,7 @@ export async function upsertManagedMarkdownBlock(path: string, blockContent: str
       };
     }
 
-    await writeText(path, ensureTrailingNewline(nextContent));
+    await writeText(path, nextContent);
 
     return {
       path,
@@ -204,13 +205,27 @@ export async function upsertManagedMarkdownBlock(path: string, blockContent: str
     };
   }
 
-  await writeText(path, `${ensureTrailingNewline(existing)}\n${normalizedBlock}\n`);
+  await writeText(path, appendManagedMarkdownBlock(existing, normalizedBlock));
 
   return {
     path,
     action: "updated",
     message: "已追加 code-helper 受控区块"
   };
+}
+
+/**
+ * 在已有入口文档末尾追加受控区块，同时保证已有内容是新内容的逐字前缀。
+ * 这里不能复用 ensureTrailingNewline，因为它会修剪用户文档末尾空白，破坏非侵入式 init 语义。
+ */
+function appendManagedMarkdownBlock(existing: string, normalizedBlock: string): string {
+  const separator = existing.length === 0
+    ? ""
+    : existing.endsWith("\n")
+      ? "\n"
+      : "\n\n";
+
+  return `${existing}${separator}${normalizedBlock}\n`;
 }
 
 /**

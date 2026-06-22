@@ -29,7 +29,7 @@ export const FEATURE_KEYS: FeatureKey[] = [
  */
 export const FEATURE_LABELS: Record<FeatureKey, string> = {
   memoryTuning: "规则记忆维护",
-  planWorkbench: "生成任务计划",
+  planWorkbench: "生成任务计划模板",
   resultSummary: "执行结果总结",
   testingPolicy: "测试策略约束",
   documentArchive: "归档已完成任务",

@@ -135,13 +135,13 @@ const MAIN_MENU_GROUPS: MainMenuGroup[] = [
     items: [
       {
         value: "2",
-        name: "生成任务计划",
-        description: "根据需求文档生成计划、状态记录和执行记录入口"
+        name: "生成任务计划模板",
+        description: "根据需求文档创建计划、状态记录和执行记录模板，供 agent 继续完善"
       },
       {
         value: "3",
-        name: "生成手工测试文档",
-        description: "为页面或交互验收生成需要人工执行的测试文档"
+        name: "生成手工测试模板",
+        description: "创建人工验收测试模板，供 agent 根据页面和流程补充步骤"
       },
       {
         value: "4",
@@ -400,16 +400,16 @@ async function runInteractiveMenu(projectRoot: string, versionUpdate?: VersionUp
           await pauseAfterMenuAction(useKeyMenu);
           break;
         case "2": {
-          printInputHint("生成任务计划需要需求文档路径，支持直接把文件拖到终端。输入 0 或直接回车返回。");
+          printInputHint("生成任务计划模板需要需求文档路径，支持直接把文件拖到终端。输入 0 或直接回车返回。");
           const requirementPath = await askRequiredMenuInput(rl, "请输入或拖拽需求文档路径：");
           if (requirementPath === undefined) {
-            console.log("已取消生成任务计划，返回主菜单。");
+            console.log("已取消生成任务计划模板，返回主菜单。");
             break;
           }
 
           const featureName = await askOptionalMenuInput(rl, "请输入中文功能名称（可留空，默认取需求标题或中文文件名；输入 0 返回）：");
           if (featureName === undefined) {
-            console.log("已取消生成任务计划，返回主菜单。");
+            console.log("已取消生成任务计划模板，返回主菜单。");
             break;
           }
 
@@ -421,19 +421,19 @@ async function runInteractiveMenu(projectRoot: string, versionUpdate?: VersionUp
         }
         case "3": {
           const featureName = await selectTaskFeatureNameForMenu(projectRoot, rl, {
-            title: "选择要生成手工测试文档的任务",
+            title: "选择要生成手工测试模板的任务",
             statuses: ["active", "mixed"],
             manualHint: "未找到合适任务或需要新建文档时，可手动输入功能名称。输入 0 或直接回车返回。",
             manualQuestion: "请输入功能名称："
           });
           if (featureName === undefined) {
-            console.log("已取消生成手工测试文档，返回主菜单。");
+            console.log("已取消生成手工测试模板，返回主菜单。");
             break;
           }
 
           const title = await askOptionalMenuInput(rl, "请输入测试文档标题（可留空；输入 0 返回）：");
           if (title === undefined) {
-            console.log("已取消生成手工测试文档，返回主菜单。");
+            console.log("已取消生成手工测试模板，返回主菜单。");
             break;
           }
 
@@ -2072,7 +2072,7 @@ async function runManualTest(projectRoot: string, args: string[]): Promise<numbe
   const [rawFeatureName, title] = args;
   const featureName = rawFeatureName ?? await selectTaskFeatureNameForCommand(
     projectRoot,
-    "选择要生成手工测试文档的任务",
+    "选择要生成手工测试模板的任务",
     ["active", "mixed"]
   );
 
@@ -2528,8 +2528,8 @@ function printHelp(): void {
   code-helper features list           查看高级功能配置
   code-helper features enable <key>   启用高级功能配置
   code-helper features disable <key>  关闭高级功能配置
-  code-helper plan <需求文档> [中文功能名] 生成项目计划文档
-  code-helper manual-test <中文功能名> [标题] 生成页面手工测试文档
+  code-helper plan <需求文档> [中文功能名] 生成项目计划模板
+  code-helper manual-test <中文功能名> [标题] 生成手工测试模板
   code-helper archive <中文功能名> [--resolve-mixed] 将功能文档移动到 archive 并识别为已结束
   code-helper finish [中文功能名]        检查当前功能是否完成并提示后续动作
   code-helper tasks [--json]           查看 active / archived / mixed 任务

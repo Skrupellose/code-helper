@@ -1,6 +1,6 @@
 # code-helper
 
-`code-helper` 是一个面向 agent 协作项目的 CLI，用于初始化协作规则、生成计划文档、记录执行状态，并在任务结束前检查是否还有未处理事项。
+`code-helper` 是一个面向 agent 协作项目的 CLI，用于初始化协作规则、生成计划和验收模板、记录执行状态，并在任务结束前检查是否还有未处理事项。
 
 ## 快速开始
 
@@ -65,8 +65,8 @@ npx @skrupellose/code-helper@latest update
 | `update` | 按当前项目已启用或已安装的能力刷新 code-helper 本地资产 |
 | `version` | 查看当前运行的 code-helper 版本，并在可用时查询 npm latest |
 | `npm-scripts install` | 写入常用 npm scripts，已存在的同名脚本不会被覆盖 |
-| `plan` | 根据需求文档生成计划文档、执行记录和状态记录 |
-| `manual-test` | 为页面、可视化或人工验收场景生成手工测试文档 |
+| `plan` | 根据需求文档创建计划、状态记录和执行记录模板，供 agent 继续完善 |
+| `manual-test` | 创建人工验收测试模板，供 agent 根据页面和流程补充步骤 |
 | `finish` | 检查当前任务是否满足完成条件，并提示后续动作 |
 | `archive` | 将已结束任务的计划、结果和状态文档移动到 archive |
 | `tasks` | 查看 active、archived 和 mixed 状态的任务文档 |
@@ -93,13 +93,13 @@ npx @skrupellose/code-helper@latest update
 
 ## 任务文档
 
-`plan` 默认生成三类文档：
+`plan` 默认创建三类模板文档：
 
 - `code-helper-docs/plan-doc/<中文功能名>.md`
 - `code-helper-docs/result-doc/<中文功能名>/实施记录.md`
 - `code-helper-docs/status-doc/<中文功能名>-状态.md`
 
-页面、可视化、浏览器链路或人工业务验收场景，可以用 `manual-test` 单独生成：
+页面、可视化、浏览器链路或人工业务验收场景，可以用 `manual-test` 单独创建手工测试模板：
 
 - `code-helper-docs/result-doc/<中文功能名>/手工测试.md`
 

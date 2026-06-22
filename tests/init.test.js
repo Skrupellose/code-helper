@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { ENTRY_BLOCK_END, ENTRY_BLOCK_START } from "../dist/constants.js";
 import { initializeProject, updateProject } from "../dist/init.js";
 import { runChecks } from "../dist/checks.js";
 import { runCli } from "../dist/cli.js";
@@ -27,6 +28,17 @@ async function runCliSilently(args, projectRoot) {
   }
 }
 
+function extractManagedBlock(content) {
+  // 只截取 code-helper 受控区块，避免区块外用户规则影响模板提示断言。
+  const blockStart = content.indexOf(ENTRY_BLOCK_START);
+  const blockEnd = content.indexOf(ENTRY_BLOCK_END);
+
+  assert.notEqual(blockStart, -1);
+  assert.notEqual(blockEnd, -1);
+
+  return content.slice(blockStart, blockEnd + ENTRY_BLOCK_END.length);
+}
+
 test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", async () => {
   // 该测试覆盖老项目兼容：只有 AGENTS.md 时只注册 Codex，并同步安装 Codex Agent hook。
   const root = await mkdtemp(join(tmpdir(), "code-helper-init-"));
@@ -39,10 +51,14 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
     const config = await readFile(join(root, ".code-helper/config.json"), "utf8");
     const codexSkill = await readFile(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
     const codexHook = await readFile(join(root, ".codex/hooks.json"), "utf8");
+    const managedBlock = extractManagedBlock(agents);
 
     assert.ok(result.operations.some((operation) => operation.path.endsWith("项目记忆规则优化.md")));
     assert.match(agents, /用户已有规则/);
     assert.match(agents, /code-helper:start/);
+    assert.match(managedBlock, /自动维护/);
+    assert.match(managedBlock, /不要手工编辑/);
+    assert.match(managedBlock, /自定义规则应写在本区块外/);
     assert.match(config, /"gitHooks":/);
     assert.match(config, /"agentHooks": \{\n      "enabled": true\n    \}/);
     assert.match(codexSkill, /name: code-helper-memory-tuning/);
@@ -294,6 +310,69 @@ test("initializeProject 在只有 CLAUDE.md 的项目中只注册 Claude Code sk
       () => stat(join(root, ".github/skills/code-helper-memory-tuning/SKILL.md")),
       /ENOENT/
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("initializeProject 追加 CLAUDE 受控区块时逐字保留 Nuxt 项目原规则", async () => {
+  // 该测试复现用户反馈：已有 CLAUDE.md 没有 code-helper 区块时，init 只能追加受控区块，不能整理或摘要用户原文。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-init-claude-nuxt-"));
+  const originalClaude = [
+    "# CLAUDE.md",
+    "",
+    "## 项目开发规则",
+    "",
+    "- 基于当前 Nuxt 项目继续开发新功能、持续优化既有页面与功能。",
+    "- 页面样式和功能要与原站保持一致。",
+    "- 后续开发优先解决 Nuxt / TypeScript / 运行时兼容问题。",
+    "",
+    "## 交付要求",
+    "",
+    "不要重排这些规则，也不要把它们总结成其他说法。  "
+  ].join("\n");
+
+  try {
+    await writeFile(join(root, "CLAUDE.md"), originalClaude, "utf8");
+
+    await initializeProject({ projectRoot: root });
+
+    const claude = await readFile(join(root, "CLAUDE.md"), "utf8");
+
+    assert.ok(claude.startsWith(originalClaude));
+    assert.equal(claude.slice(0, originalClaude.length), originalClaude);
+    assert.match(claude, /基于当前 Nuxt 项目继续开发新功能、持续优化既有页面与功能/);
+    assert.match(claude, /页面样式和功能要与原站保持一致/);
+    assert.match(claude, /后续开发优先解决 Nuxt \/ TypeScript \/ 运行时兼容问题/);
+    assert.match(claude, /code-helper:start/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("initializeProject 替换 CLAUDE 受控区块时逐字保留区块外用户内容", async () => {
+  // 该测试覆盖已有 code-helper 区块的升级路径：只能替换标记之间的内容，前后用户规则必须逐字保留。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-init-claude-managed-"));
+  const beforeBlock = "# Claude 项目规则\n\n用户前置规则：保持原站交互和视觉节奏。\n\n";
+  const oldManagedBlock = `${ENTRY_BLOCK_START}\n旧版受控内容，应该被替换。\n${ENTRY_BLOCK_END}`;
+  const afterBlock = "\n\n## 用户后置规则\n\n后续开发优先解决 Nuxt / TypeScript / 运行时兼容问题。  \n保留这个文件结尾的原始形态";
+  const originalClaude = `${beforeBlock}${oldManagedBlock}${afterBlock}`;
+
+  try {
+    await writeFile(join(root, "CLAUDE.md"), originalClaude, "utf8");
+
+    await initializeProject({ projectRoot: root });
+
+    const claude = await readFile(join(root, "CLAUDE.md"), "utf8");
+    const blockStart = claude.indexOf(ENTRY_BLOCK_START);
+    const blockEnd = claude.indexOf(ENTRY_BLOCK_END) + ENTRY_BLOCK_END.length;
+
+    assert.notEqual(blockStart, -1);
+    assert.notEqual(blockEnd, ENTRY_BLOCK_END.length - 1);
+    assert.equal(claude.slice(0, blockStart), beforeBlock);
+    assert.equal(claude.slice(blockEnd), afterBlock);
+    assert.notEqual(claude.slice(blockStart, blockEnd), oldManagedBlock);
+    assert.match(claude.slice(blockStart, blockEnd), /code-helper 协作入口/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
