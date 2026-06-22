@@ -19,6 +19,8 @@ npx code-helper init
 
 初始化会根据当前项目已有的 `AGENTS.md`、`CLAUDE.md` 或 `.github/copilot-instructions.md` 判断要维护的 agent 工具。无法判断时，交互式初始化会让你选择目标；非交互环境会保守跳过项目级 skills 和 agent hooks。
 
+需要从安装、一级功能到 Skills 开发工作流完整理解使用方式，可以阅读 [最佳实践指南](docs/最佳实践指南.md)。
+
 本地安装后，推荐使用 `npx code-helper <命令>`。需要把常用命令写入项目 `package.json` 时，可以执行：
 
 ```bash
