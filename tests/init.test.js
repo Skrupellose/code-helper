@@ -59,6 +59,8 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
     assert.match(managedBlock, /自动维护/);
     assert.match(managedBlock, /不要手工编辑/);
     assert.match(managedBlock, /自定义规则应写在本区块外/);
+    assert.match(managedBlock, /手工测试生成/);
+    assert.match(managedBlock, /code-helper-manual-test-workbench/);
     assert.match(config, /"gitHooks":/);
     assert.match(config, /"agentHooks": \{\n      "enabled": true\n    \}/);
     assert.match(codexSkill, /name: code-helper-memory-tuning/);

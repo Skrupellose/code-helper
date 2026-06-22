@@ -31,8 +31,12 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
       join(root, ".agents/skills/code-helper-agent-collaboration/SKILL.md"),
       "utf8"
     );
+    const manualTestSkill = await readFile(
+      join(root, ".agents/skills/code-helper-manual-test-workbench/SKILL.md"),
+      "utf8"
+    );
 
-    assert.equal(firstOperations.length, 5);
+    assert.equal(firstOperations.length, 6);
     assert.ok(firstOperations.every((operation) => operation.action === "created"));
     assert.ok(secondOperations.every((operation) => operation.action === "skipped"));
     assert.ok(statuses.every((status) => status.registered));
@@ -42,6 +46,9 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
     assert.match(collaborationSkill, /子代理/);
     assert.match(collaborationSkill, /你现在是执行子代理/);
     assert.match(collaborationSkill, /不再套用“主会话必须派发子代理”的职责/);
+    assert.match(manualTestSkill, /name: code-helper-manual-test-workbench/);
+    assert.match(manualTestSkill, /manual-test.*只负责生成结构化模板/s);
+    assert.match(manualTestSkill, /测试环境、前置数据、操作步骤、预期结果、回归范围和阻塞记录/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -59,7 +66,7 @@ test("registerProjectSkills 支持 Claude Code 项目级 skills", async () => {
       "utf8"
     );
 
-    assert.equal(operations.length, 5);
+    assert.equal(operations.length, 6);
     assert.ok(operations.every((operation) => operation.action === "created"));
     assert.ok(statuses.every((status) => status.target === "claudecode" && status.registered));
     assert.match(memorySkill, /name: code-helper-memory-tuning/);
@@ -80,7 +87,7 @@ test("registerProjectSkills 支持 GitHub Copilot 项目级 skills", async () =>
       "utf8"
     );
 
-    assert.equal(operations.length, 5);
+    assert.equal(operations.length, 6);
     assert.ok(operations.every((operation) => operation.action === "created"));
     assert.ok(statuses.every((status) => status.target === "githubcopilot" && status.registered));
     assert.match(memorySkill, /name: code-helper-memory-tuning/);
@@ -118,7 +125,7 @@ test("unregisterProjectSkills 只删除 code-helper 管理的项目级 skills", 
     const statuses = await listProjectSkillRegistrations(root);
     const userSkill = await readFile(join(root, ".agents/skills/user-skill/SKILL.md"), "utf8");
 
-    assert.equal(operations.length, 5);
+    assert.equal(operations.length, 6);
     assert.ok(operations.every((operation) => operation.action === "updated"));
     assert.ok(statuses.every((status) => !status.registered));
     assert.match(userSkill, /name: user-skill/);
@@ -140,7 +147,7 @@ test("unregisterProjectSkills 不会删除用户自己的 Claude Code skills", a
     const statuses = await listProjectSkillRegistrations(root, "claudecode");
     const userSkill = await readFile(join(root, ".claude/skills/user-skill/SKILL.md"), "utf8");
 
-    assert.equal(operations.length, 5);
+    assert.equal(operations.length, 6);
     assert.ok(operations.every((operation) => operation.action === "updated"));
     assert.ok(statuses.every((status) => !status.registered));
     assert.match(userSkill, /name: user-skill/);
@@ -251,11 +258,14 @@ test("runSkillsAudit 会根据项目入口推荐缺失注册", async () => {
   try {
     await writeFile(join(root, "AGENTS.md"), "# Agents\n", "utf8");
     await mkdir(join(root, "code-helper-docs/user-rules"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/result-doc/页面验收能力"), { recursive: true });
+    await writeFile(join(root, "code-helper-docs/result-doc/页面验收能力/手工测试.md"), "# 页面验收能力手工测试\n", "utf8");
 
     const recommendations = await runSkillsAudit(root);
 
     assert.ok(recommendations.some((item) => item.code === "missing-inferred-registration"));
     assert.ok(recommendations.some((item) => item.code === "missing-memory-skill"));
+    assert.ok(recommendations.some((item) => item.code === "missing-manual-test-skill"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
