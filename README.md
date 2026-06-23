@@ -1,10 +1,11 @@
 # code-helper
 
-`code-helper` 是一个面向 agent 协作项目的 CLI，用于初始化协作规则、生成计划和验收模板、记录执行状态，并在任务结束前检查是否还有未处理事项。
+`code-helper` 是一个面向 agent 协作项目的 CLI，用于初始化协作规则、生成计划和验收模板、记录执行状态，并在任务结束前检查是否还有未处理事项。且工具具有通用性，支持绝大部分编程语言项目。它管理的是项目里的协作文档、入口文件、项目级 Skills 和 Hooks。
 
 ## 运行环境
 
-`code-helper` 运行环境需要 Node.js `>=18.18.0`。它通过 npm/npx 分发，但目标项目不必是 Node 项目。
+`code-helper` 运行环境需要 Node.js `>=18.18.0`。\
+code-helper 通过 npm 分发，所以本机需要能运行 Node 和 `npx`；
 
 ## 快速开始
 
@@ -14,7 +15,7 @@
 npx @skrupellose/code-helper@latest
 ```
 
-code-helper 通过 npm 分发，所以本机需要能运行 Node 和 `npx`；但它管理的是项目里的协作文档、入口文件、项目级 Skills 和 Hooks，不要求目标项目本身是 Node 项目。Go、Java、Python 等项目可以优先用 `npx @skrupellose/code-helper@latest` 打开菜单，或用 `npx @skrupellose/code-helper@latest <命令>` 临时运行。
+Go、Java、Python 等项目可以优先用 `npx @skrupellose/code-helper@latest` 打开菜单，或用 `npx @skrupellose/code-helper@latest <命令>` 临时运行。
 
 如果希望把 code-helper 固定到 Node 项目里，先安装为开发依赖：
 
