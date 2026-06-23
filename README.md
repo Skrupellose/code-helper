@@ -2,6 +2,10 @@
 
 `code-helper` 是一个面向 agent 协作项目的 CLI，用于初始化协作规则、生成计划和验收模板、记录执行状态，并在任务结束前检查是否还有未处理事项。
 
+## 运行环境
+
+`code-helper` 运行环境需要 Node.js `>=18.18.0`。它通过 npm/npx 分发，但目标项目不必是 Node 项目。
+
 ## 快速开始
 
 一次性运行最新版本：
@@ -10,7 +14,9 @@
 npx @skrupellose/code-helper@latest
 ```
 
-如果希望把 code-helper 固定到项目里，先安装为开发依赖：
+code-helper 通过 npm 分发，所以本机需要能运行 Node 和 `npx`；但它管理的是项目里的协作文档、入口文件、项目级 Skills 和 Hooks，不要求目标项目本身是 Node 项目。Go、Java、Python 等项目可以优先用 `npx @skrupellose/code-helper@latest` 打开菜单，或用 `npx @skrupellose/code-helper@latest <命令>` 临时运行。
+
+如果希望把 code-helper 固定到 Node 项目里，先安装为开发依赖：
 
 ```bash
 npm i -D @skrupellose/code-helper
@@ -21,7 +27,7 @@ npx code-helper init
 
 需要从安装、一级功能到 Skills 开发工作流完整理解使用方式，可以阅读 [最佳实践指南](docs/最佳实践指南.md)。
 
-本地安装后，推荐使用 `npx code-helper <命令>`。需要把常用命令写入项目 `package.json` 时，可以执行：
+本地安装后，推荐使用 `npx code-helper <命令>`。非 Node 项目如果不想引入 `package.json`，不需要执行 `npm i -D` 或 `npm-scripts install`。需要把常用命令写入 Node 项目的 `package.json` 时，可以执行：
 
 ```bash
 npx code-helper npm-scripts install
@@ -61,34 +67,34 @@ npx @skrupellose/code-helper@latest update
 
 ## 功能概览
 
-| 命令 | 作用 |
-| --- | --- |
-| `init` | 创建或更新协作入口、规则模板、项目级 skills 和可选 hooks |
-| `update` | 按当前项目已启用或已安装的能力刷新 code-helper 本地资产 |
-| `version` | 查看当前运行的 code-helper 版本，并在可用时查询 npm latest |
-| `npm-scripts install` | 写入常用 npm scripts，已存在的同名脚本不会被覆盖 |
-| `plan` | 根据需求文档创建计划、状态记录和执行记录模板，供 agent 继续完善 |
-| `manual-test` | 创建人工验收测试模板，供 agent 根据页面和流程补充步骤 |
-| `finish` | 检查当前任务是否满足完成条件，并提示后续动作 |
-| `archive` | 将已结束任务的计划、结果和状态文档移动到 archive |
-| `tasks` | 查看 active、archived 和 mixed 状态的任务文档 |
-| `check` | 检查协作文档结构是否完整 |
-| `skills` | 查看、注册、取消注册或检查项目级 skills |
-| `hooks` | 查看、安装或卸载 code-helper 管理的 Git / Agent hooks |
+| 命令                    | 作用                                                  |
+| --------------------- | --------------------------------------------------- |
+| `init`                | 创建或更新协作入口、规则模板、项目级 skills 和可选 hooks                 |
+| `update`              | 按当前项目已启用或已安装的能力刷新 code-helper 本地资产                  |
+| `version`             | 查看当前运行的 code-helper 版本，并在可用时查询 npm latest           |
+| `npm-scripts install` | 写入常用 npm scripts，仅适合已有 `package.json` 的 Node/npm 项目 |
+| `plan`                | 根据需求文档创建计划、状态记录和执行记录模板，供 agent 继续完善                 |
+| `manual-test`         | 创建人工验收测试模板，供 agent 根据页面和流程补充步骤                      |
+| `finish`              | 检查当前任务是否满足完成条件，并提示后续动作                              |
+| `archive`             | 将已结束任务的计划、结果和状态文档移动到 archive                        |
+| `tasks`               | 查看 active、archived 和 mixed 状态的任务文档                  |
+| `check`               | 检查协作文档结构是否完整                                        |
+| `skills`              | 查看、注册、取消注册或检查项目级 skills                             |
+| `hooks`               | 查看、安装或卸载 code-helper 管理的 Git / Agent hooks          |
 
 ## 会创建或更新的文件
 
 初始化后，工具可能会创建或更新以下受控内容：
 
-| 路径 | 用途 |
-| --- | --- |
-| `.code-helper/` | 工具配置、受控模板和可选检查输出 |
-| `code-helper-docs/user-rules/` | 长期协作规则 |
-| `code-helper-docs/plan-doc/` | 任务计划文档 |
-| `code-helper-docs/result-doc/` | 执行记录和手工测试文档 |
-| `code-helper-docs/status-doc/` | 当前任务状态记录 |
-| `AGENTS.md` | Codex 项目入口文档 |
-| `CLAUDE.md` | Claude Code 项目入口文档 |
+| 路径                                | 用途                    |
+| --------------------------------- | --------------------- |
+| `.code-helper/`                   | 工具配置、受控模板和可选检查输出      |
+| `code-helper-docs/user-rules/`    | 长期协作规则                |
+| `code-helper-docs/plan-doc/`      | 任务计划文档                |
+| `code-helper-docs/result-doc/`    | 执行记录和手工测试文档           |
+| `code-helper-docs/status-doc/`    | 当前任务状态记录              |
+| `AGENTS.md`                       | Codex 项目入口文档          |
+| `CLAUDE.md`                       | Claude Code 项目入口文档    |
 | `.github/copilot-instructions.md` | GitHub Copilot 项目入口文档 |
 
 入口文档只更新 `<!-- code-helper:start -->` 和 `<!-- code-helper:end -->` 之间的受控区块，不会覆盖用户已有内容。
