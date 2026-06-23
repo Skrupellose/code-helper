@@ -2,15 +2,28 @@ import { isAbsolute, relative, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
+ * 路径输入规范化选项。
+ * inputBasePath 表示用户输入相对路径时的原始 cwd，projectRoot 仍表示文档输出项目根。
+ */
+export interface NormalizeDroppedPathOptions {
+  inputBasePath?: string;
+}
+
+/**
  * 解析用户输入或终端拖拽产生的文件路径。
  * 终端拖拽通常会粘贴引号、反斜杠转义空格或 file:// URL，这里统一归一化。
  */
-export function normalizeDroppedPath(input: string, projectRoot: string): string {
+export function normalizeDroppedPath(
+  input: string,
+  projectRoot: string,
+  options: NormalizeDroppedPathOptions = {}
+): string {
   const cleanedInput = stripWrappingQuotes(input.trim());
   const decodedPath = cleanedInput.startsWith("file://")
     ? decodeFileUrlPath(cleanedInput)
     : decodePlainPath(cleanedInput);
   const normalizedPath = decodedPath.trim();
+  const inputBasePath = options.inputBasePath ?? projectRoot;
 
   if (isWindowsAbsolutePath(normalizedPath)) {
     const relativePath = win32.relative(win32.resolve(projectRoot), win32.normalize(normalizedPath));
@@ -22,12 +35,28 @@ export function normalizeDroppedPath(input: string, projectRoot: string): string
     return normalizedPath;
   }
 
-  if (isWindowsAbsolutePath(projectRoot) && isWindowsPathLike(normalizedPath)) {
-    return normalizedPath;
+  if (isWindowsAbsolutePath(projectRoot) && !isAbsolute(normalizedPath)) {
+    const relativePath = normalizeWindowsRelativePath(normalizedPath, projectRoot, inputBasePath);
+
+    if (relativePath !== undefined) {
+      return relativePath;
+    }
+
+    if (isWindowsPathLike(normalizedPath)) {
+      return normalizedPath;
+    }
   }
 
   if (isAbsolute(normalizedPath)) {
     const relativePath = relative(resolve(projectRoot), normalizedPath);
+
+    if (isProjectRelativePath(relativePath, "/")) {
+      return relativePath;
+    }
+  }
+
+  if (inputBasePath !== projectRoot && !isWindowsPathLike(normalizedPath)) {
+    const relativePath = relative(resolve(projectRoot), resolve(inputBasePath, normalizedPath));
 
     if (isProjectRelativePath(relativePath, "/")) {
       return relativePath;
@@ -112,4 +141,26 @@ function isWindowsPathLike(value: string): boolean {
  */
 function isProjectRelativePath(value: string, separator: "\\" | "/"): boolean {
   return value !== "" && value !== ".." && !value.startsWith(`..${separator}`);
+}
+
+/**
+ * Windows 项目中从子目录执行 plan 时，用户可能输入当前目录下的相对文件名。
+ * 这里先按原始 cwd 解析，再转成项目根相对路径，保证输出根目录不受需求文档目录影响。
+ */
+function normalizeWindowsRelativePath(
+  value: string,
+  projectRoot: string,
+  inputBasePath: string
+): string | undefined {
+  if (isAbsolute(value) || isWindowsAbsolutePath(value)) {
+    return undefined;
+  }
+
+  const absolutePath = win32.resolve(
+    isWindowsAbsolutePath(inputBasePath) ? inputBasePath : projectRoot,
+    win32.normalize(value)
+  );
+  const relativePath = win32.relative(win32.resolve(projectRoot), absolutePath);
+
+  return isProjectRelativePath(relativePath, "\\") ? relativePath : undefined;
 }

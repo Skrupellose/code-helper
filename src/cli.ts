@@ -62,6 +62,7 @@ import {
   runSkills
 } from "./cli/commands/tools.js";
 import { printHelp } from "./cli/help.js";
+import { resolveInitializedProjectRoot } from "./project-root.js";
 
 export {
   buildMainMenuSelectOptions,
@@ -96,12 +97,13 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
   const [command, ...args] = argv;
 
   try {
-    const versionUpdateState = await maybeNotifyVersionUpdate(projectRoot, command);
+    const commandProjectRoot = await resolveProjectRootForCommand(command, projectRoot);
+    const versionUpdateState = await maybeNotifyVersionUpdate(commandProjectRoot, command);
 
     switch (command) {
       case undefined:
       case "menu":
-        return runInteractiveMenu(projectRoot, versionUpdateState);
+        return runInteractiveMenu(commandProjectRoot, versionUpdateState, projectRoot);
       case "init":
         return runInit(projectRoot, args);
       case "update":
@@ -119,7 +121,7 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
       case "features":
         return runFeatures(projectRoot, args);
       case "plan":
-        return runPlan(projectRoot, args);
+        return runPlan(commandProjectRoot, args, { inputBasePath: projectRoot });
       case "manual-test":
         return runManualTest(projectRoot, args);
       case "archive":
@@ -152,7 +154,11 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
  * 无参数时展示交互菜单。
  * 使用 Node 内置 readline，减少首版运行依赖和安装体积。
  */
-async function runInteractiveMenu(projectRoot: string, versionUpdate?: VersionUpdateState): Promise<number> {
+async function runInteractiveMenu(
+  projectRoot: string,
+  versionUpdate?: VersionUpdateState,
+  inputBasePath = projectRoot
+): Promise<number> {
   const rl = createInterface({ input, output });
   const menuOptions = buildMainMenuSelectOptions(versionUpdate);
 
@@ -190,7 +196,11 @@ async function runInteractiveMenu(projectRoot: string, versionUpdate?: VersionUp
           }
 
           await runMenuAction(getMainMenuItemName(menuAnswer), () =>
-            runPlan(projectRoot, [normalizeDroppedPath(requirementPath, projectRoot), featureName].filter(Boolean))
+            runPlan(
+              projectRoot,
+              [normalizeDroppedPath(requirementPath, projectRoot, { inputBasePath }), featureName].filter(Boolean),
+              { inputBasePath }
+            )
           );
           await pauseAfterMenuAction(useKeyMenu);
           break;
@@ -288,6 +298,18 @@ async function runInteractiveMenu(projectRoot: string, versionUpdate?: VersionUp
   } finally {
     rl.close();
   }
+}
+
+/**
+ * plan 和交互菜单需要复用已初始化项目根。
+ * 这样从 docs/ 等子目录触发时不会把需求文档目录误当成 projectRoot。
+ */
+async function resolveProjectRootForCommand(command: string | undefined, projectRoot: string): Promise<string> {
+  if (command === undefined || command === "menu" || command === "plan") {
+    return resolveInitializedProjectRoot(projectRoot);
+  }
+
+  return projectRoot;
 }
 
 /**

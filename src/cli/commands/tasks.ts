@@ -12,10 +12,19 @@ import {
 } from "../task-selection.js";
 
 /**
- * 计划文档命令。
- * 参数：plan <需求文档相对路径> [功能名称]。
+ * plan 命令运行选项。
+ * inputBasePath 表示命令原始 cwd，用于把相对需求路径转成项目根相对路径。
  */
-export async function runPlan(projectRoot: string, args: string[]): Promise<number> {
+export interface RunPlanOptions {
+  inputBasePath?: string;
+}
+
+/**
+ * 执行计划文档生成命令。
+ * 参数：plan <需求文档相对路径> [功能名称]。
+ * projectRoot 必须是输出根目录，不能被需求文档所在目录覆盖。
+ */
+export async function runPlan(projectRoot: string, args: string[], options: RunPlanOptions = {}): Promise<number> {
   const [requirementPath, featureName] = args;
 
   if (!requirementPath) {
@@ -23,7 +32,9 @@ export async function runPlan(projectRoot: string, args: string[]): Promise<numb
     return 1;
   }
 
-  const normalizedRequirementPath = normalizeDroppedPath(requirementPath, projectRoot);
+  const normalizedRequirementPath = normalizeDroppedPath(requirementPath, projectRoot, {
+    inputBasePath: options.inputBasePath ?? projectRoot
+  });
   const operations = await createPlanWorkbench({ projectRoot, requirementPath: normalizedRequirementPath, featureName });
   printOperations(operations);
   return 0;

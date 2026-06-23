@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -218,6 +218,39 @@ test("version 输出当前包版本且测试环境不触发 latest 查询", asyn
       process.env.CODE_HELPER_SKIP_VERSION_CHECK = originalSkip;
     }
     console.log = originalLog;
+  }
+});
+
+test("plan 从需求文档子目录执行时仍写入已初始化项目根", async () => {
+  // 该测试复现 Windows 拖拽或封装命令把 cwd 切到 docs/ 后，曾误生成 docs/code-helper-docs 的问题。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-cli-plan-root-"));
+  const docsRoot = join(root, "docs");
+  const logs = [];
+  const originalLog = console.log;
+
+  try {
+    console.log = (...args) => {
+      logs.push(args.join(" "));
+    };
+
+    await initializeProject({ projectRoot: root });
+    await mkdir(docsRoot, { recursive: true });
+    await writeFile(join(docsRoot, "需求.md"), "# 子目录需求\n\n从 docs 目录执行 plan。", "utf8");
+
+    const exitCode = await runCli(["plan", "需求.md"], docsRoot);
+    const plan = await readFile(join(root, "code-helper-docs/plan-doc/子目录需求.md"), "utf8");
+
+    assert.equal(exitCode, 0);
+    assert.match(plan, /从 docs 目录执行 plan/);
+    assert.match(plan, /原始需求文档：`docs\/需求\.md`/);
+    assert.match(logs.join("\n"), /code-helper-docs\/plan-doc\/子目录需求\.md/);
+    await assert.rejects(
+      () => stat(join(docsRoot, "code-helper-docs")),
+      /ENOENT/
+    );
+  } finally {
+    console.log = originalLog;
+    await rm(root, { recursive: true, force: true });
   }
 });
 

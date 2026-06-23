@@ -31,6 +31,10 @@ test("normalizeDroppedPath 会解析终端拖拽产生的路径格式", () => {
     normalizeDroppedPath("docs/my\\ requirement.md", projectRoot),
     "docs/my requirement.md"
   );
+  assert.equal(
+    normalizeDroppedPath("my\\ requirement.md", projectRoot, { inputBasePath: "/tmp/code-helper-demo/docs" }),
+    "docs/my requirement.md"
+  );
 });
 
 test("normalizeDroppedPath 会保留 Windows 路径分隔符", () => {
@@ -51,6 +55,12 @@ test("normalizeDroppedPath 会保留 Windows 路径分隔符", () => {
   );
   assert.equal(
     normalizeDroppedPath("docs\\my requirement.md", projectRoot),
+    "docs\\my requirement.md"
+  );
+  assert.equal(
+    normalizeDroppedPath("my requirement.md", projectRoot, {
+      inputBasePath: "C:\\Users\\qingchen\\code\\code-helper-demo\\docs"
+    }),
     "docs\\my requirement.md"
   );
   assert.equal(

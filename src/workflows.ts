@@ -1,4 +1,4 @@
-import { basename, isAbsolute, join } from "node:path";
+import { basename, isAbsolute, join, win32 } from "node:path";
 
 import { loadConfig } from "./config.js";
 import { projectPath, readTextIfExists, writeTextIfMissing } from "./fs-utils.js";
@@ -38,9 +38,7 @@ export interface ManualTestOptions {
  */
 export async function createPlanWorkbench(options: PlanWorkbenchOptions): Promise<OperationResult[]> {
   const config = await loadConfig(options.projectRoot);
-  const requirementAbsolutePath = isAbsolute(options.requirementPath)
-    ? options.requirementPath
-    : projectPath(options.projectRoot, options.requirementPath);
+  const requirementAbsolutePath = resolveRequirementPath(options.projectRoot, options.requirementPath);
   const requirement = await readTextIfExists(requirementAbsolutePath);
 
   if (requirement === undefined) {
@@ -130,13 +128,40 @@ export function normalizeDocumentName(value: string, fallbackName: string): stri
  * 优先使用用户输入的中文功能名，其次使用需求文档中的中文一级标题，最后用中文兜底名。
  */
 function inferChineseFeatureName(featureName: string | undefined, requirementPath: string, requirement: string): string {
-  const titleFallback = extractChineseMarkdownTitle(requirement) ?? normalizeDocumentName(basename(requirementPath, ".md"), "功能计划");
+  const titleFallback = extractChineseMarkdownTitle(requirement) ?? normalizeDocumentName(getPathBaseName(requirementPath, ".md"), "功能计划");
 
   if (featureName !== undefined && featureName.trim() !== "") {
     return containsChinese(featureName) ? normalizeDocumentName(featureName, titleFallback) : titleFallback;
   }
 
   return titleFallback;
+}
+
+/**
+ * 解析需求文档读取路径。
+ * Node 在非 Windows 平台不会把 C:\foo 识别为绝对路径；显式识别 Windows 绝对路径可避免被拼到 projectRoot 后面。
+ */
+function resolveRequirementPath(projectRoot: string, requirementPath: string): string {
+  if (isAbsolute(requirementPath) || win32.isAbsolute(requirementPath)) {
+    return requirementPath;
+  }
+
+  return projectPath(projectRoot, requirementPath);
+}
+
+/**
+ * 获取路径文件名。
+ * 测试和部分 agent 环境可能在 macOS/Linux 上处理 Windows 风格路径，因此同时兼容反斜杠分隔符。
+ */
+function getPathBaseName(path: string, suffix: string): string {
+  return isWindowsPathLike(path) ? win32.basename(path, suffix) : basename(path, suffix);
+}
+
+/**
+ * 判断路径是否带有 Windows 风格分隔符或盘符。
+ */
+function isWindowsPathLike(path: string): boolean {
+  return /^[A-Za-z]:[\\/]/u.test(path) || /^\\\\/u.test(path) || path.includes("\\");
 }
 
 /**
