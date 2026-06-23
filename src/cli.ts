@@ -178,7 +178,9 @@ async function runInteractiveMenu(
           await pauseAfterMenuAction(useKeyMenu);
           break;
         case "1":
-          await runMenuAction(getMainMenuItemName(menuAnswer), () => runInit(projectRoot));
+          await runMenuAction(getMainMenuItemName(menuAnswer), () =>
+            runInit(projectRoot, [], { showInteractiveCompletionHint: false })
+          );
           await pauseAfterMenuAction(useKeyMenu);
           break;
         case "2": {
@@ -520,7 +522,9 @@ async function runApplyMenu(
       await runMenuAction("取消 Git hook", () => removeGitHook(projectRoot));
       return true;
     case "7":
-      await runMenuAction("刷新规则和模板", () => runInit(projectRoot));
+      await runMenuAction("刷新规则和模板", () =>
+        runInit(projectRoot, [], { showInteractiveCompletionHint: false })
+      );
       return true;
     case "8":
       await runMenuAction("查看应用状态", () => printApplyStatus(projectRoot));

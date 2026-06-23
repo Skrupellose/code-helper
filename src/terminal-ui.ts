@@ -285,5 +285,7 @@ async function withRawMode<T>(
   } finally {
     output.write("\x1B[?25h");
     input.setRawMode(wasRaw);
+    // raw mode 交互结束后释放 stdin 对事件循环的引用；后续菜单或提示会在进入下一次交互时重新 resume。
+    input.pause();
   }
 }

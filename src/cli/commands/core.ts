@@ -32,11 +32,15 @@ type InitTargetPromptResolution =
 
 const INIT_TARGET_TEXT_MENU_CLOSED = "__code_helper_init_target_text_menu_closed__";
 
+interface RunInitOptions {
+  showInteractiveCompletionHint?: boolean;
+}
+
 /**
  * 初始化命令实现。
  * 输出所有操作结果，便于用户看清哪些文件被创建、更新或跳过。
  */
-export async function runInit(projectRoot: string, args: string[] = []): Promise<number> {
+export async function runInit(projectRoot: string, args: string[] = [], options: RunInitOptions = {}): Promise<number> {
   if (args.length > 1) {
     console.error("init 只接受一个可选 agent 目标。用法：code-helper init [all|codex|claudecode|githubcopilot]");
     return 1;
@@ -47,6 +51,11 @@ export async function runInit(projectRoot: string, args: string[] = []): Promise
     : parseSkillRegistrationTargets(args[0]);
   const result = await initializeProject({ projectRoot, skillRegistrationTargets });
   printOperations(result.operations);
+
+  if (options.showInteractiveCompletionHint !== false && input.isTTY && output.isTTY) {
+    console.log("init 已完成。可以直接关闭终端，或运行 `code-helper` 打开操作菜单。");
+  }
+
   return 0;
 }
 

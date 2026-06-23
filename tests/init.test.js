@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { test } from "node:test";
 
 import { ENTRY_BLOCK_END, ENTRY_BLOCK_START } from "../dist/constants.js";
@@ -13,6 +14,7 @@ import {
   resolveInitMultiSelectTargetPromptResult,
   resolveInitTextTargetPromptAnswer
 } from "../dist/cli/commands/core.js";
+import { promptMultiSelect } from "../dist/terminal-ui.js";
 
 async function runCliSilently(args, projectRoot) {
   // CLI 测试只关心文件结果和退出码，捕获日志避免测试输出被初始化摘要刷屏。
@@ -78,6 +80,55 @@ test("init raw mode 目标多选空确认要求重试，Esc 才取消", () => {
     resolveInitMultiSelectTargetPromptResult({ options: selectedOptions, cancelled: false }),
     { action: "select", targets: ["claudecode"] }
   );
+});
+
+test("init raw mode 目标多选结束后恢复 stdin 暂停状态", async () => {
+  // 直接 init 会在新项目中进入 raw mode 多选；结束后必须恢复暂停，否则 TTY stdin 会继续引用事件循环导致进程不退出。
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const rawModeChanges = [];
+  let pauseCount = 0;
+  let resumeCount = 0;
+
+  input.isTTY = true;
+  input.isRaw = false;
+  input.setRawMode = (enabled) => {
+    rawModeChanges.push(enabled);
+    input.isRaw = enabled;
+    return input;
+  };
+  const originalPause = input.pause.bind(input);
+  const originalResume = input.resume.bind(input);
+  input.pause = () => {
+    pauseCount += 1;
+    return originalPause();
+  };
+  input.resume = () => {
+    resumeCount += 1;
+    return originalResume();
+  };
+  output.isTTY = true;
+  input.pause();
+
+  const prompt = promptMultiSelect(
+    input,
+    output,
+    "选择 init 要应用的 agent 工具",
+    buildInitTargetMultiSelectOptions()
+  );
+
+  input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", "", { name: "space" });
+  input.emit("keypress", "", { name: "return" });
+
+  const result = await prompt;
+
+  assert.deepEqual(result.options.filter((option) => option.checked).map((option) => option.value), ["claudecode"]);
+  assert.deepEqual(rawModeChanges, [true, false]);
+  assert.equal(input.isRaw, false);
+  assert.equal(input.isPaused(), true);
+  assert.ok(resumeCount >= 1);
+  assert.ok(pauseCount >= 2);
 });
 
 test("init 文本兜底菜单空输入重试，0 才显式取消", () => {
@@ -230,6 +281,38 @@ test("code-helper init claudecode 会补齐 CLAUDE.md 且不创建 AGENTS.md", a
       /ENOENT/
     );
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("TTY 下直接 code-helper init claudecode 会输出完成提示", async () => {
+  // 直接命令没有主菜单的完成包装和回车暂停，因此 TTY 场景需要自己给出明确完成提示；非 TTY 由既有测试覆盖不额外污染脚本输出。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-init-claudecode-tty-"));
+  const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+  const stdoutDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+
+  try {
+    Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true });
+    Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
+
+    const result = await runCliSilently(["init", "claudecode"], root);
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.logs.join("\n"), /init 已完成/);
+    assert.match(result.logs.join("\n"), /code-helper` 打开操作菜单/);
+  } finally {
+    if (stdinDescriptor === undefined) {
+      delete process.stdin.isTTY;
+    } else {
+      Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
+    }
+
+    if (stdoutDescriptor === undefined) {
+      delete process.stdout.isTTY;
+    } else {
+      Object.defineProperty(process.stdout, "isTTY", stdoutDescriptor);
+    }
+
     await rm(root, { recursive: true, force: true });
   }
 });
