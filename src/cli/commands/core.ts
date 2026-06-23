@@ -25,6 +25,13 @@ import { printFeatureHelp } from "../help.js";
 import { askQuestionOrDefault } from "../menu-input.js";
 import { printOperations, printSkillRegistrationStatus } from "../output.js";
 
+type InitTargetPromptResolution =
+  | { action: "select"; targets: SkillRegistrationTarget[] }
+  | { action: "retry"; targets: [] }
+  | { action: "cancel"; targets: [] };
+
+const INIT_TARGET_TEXT_MENU_CLOSED = "__code_helper_init_target_text_menu_closed__";
+
 /**
  * 初始化命令实现。
  * 输出所有操作结果，便于用户看清哪些文件被创建、更新或跳过。
@@ -233,25 +240,26 @@ async function resolveInitSkillRegistrationTargets(projectRoot: string): Promise
   }
 
   if (canUseInteractiveKeys(input, output)) {
-    const result = await promptMultiSelect(
-      input,
-      output,
-      "选择 init 要应用的 agent 工具（默认选中 Codex，可用空格调整）",
-      listSupportedSkillRegistrationTargets().map((target) => ({
-        value: target,
-        label: formatSkillRegistrationTargetName(target),
-        checked: target === "codex"
-      }))
-    );
-    const selectedTargets = result.cancelled
-      ? []
-      : result.options.filter((option) => option.checked).map((option) => option.value);
+    while (true) {
+      const result = await promptMultiSelect(
+        input,
+        output,
+        "选择 init 要应用的 agent 工具（空格选择，至少选择一个，Esc 取消）",
+        buildInitTargetMultiSelectOptions()
+      );
+      const resolution = resolveInitMultiSelectTargetPromptResult(result);
 
-    if (selectedTargets.length === 0) {
-      console.log("未选择 agent 工具，init 将只刷新 code-helper 工作区和规则模板，跳过项目级 skills 与 Agent hooks。");
+      if (resolution.action === "select") {
+        return resolution.targets;
+      }
+
+      if (resolution.action === "cancel") {
+        console.log("已取消 agent 工具选择，init 将只刷新 code-helper 工作区和规则模板，跳过项目级 skills 与 Agent hooks。");
+        return [];
+      }
+
+      console.log("请至少选择一个 agent 工具，或按 Esc 取消。");
     }
-
-    return selectedTargets;
   }
 
   if (canUseTextMenu) {
@@ -271,34 +279,116 @@ async function resolveInitSkillRegistrationTargets(projectRoot: string): Promise
 
 /**
  * raw mode 不可用但仍是 TTY 时，使用数字输入选择 init 目标。
- * 空回车或 0 表示跳过，避免用户误入流程后无法退出。
+ * 空回车会提示继续选择；0 才表示显式取消，避免误初始化成无 agent 目标。
  */
 async function askTextInitTargetMenu(
   rl: ReturnType<typeof createInterface>
 ): Promise<SkillRegistrationTarget[]> {
-  console.log("\n选择 init 要应用的 agent 工具");
-  console.log("1. Codex");
-  console.log("2. Claude Code");
-  console.log("3. GitHub Copilot");
-  console.log("A. 全部");
-  console.log("0. 跳过项目级 skills 与 Agent hooks");
-  console.log("可输入多个编号或名称，例如：1,2 或 codex,claudecode。");
+  while (true) {
+    console.log("\n选择 init 要应用的 agent 工具");
+    console.log("1. Codex");
+    console.log("2. Claude Code");
+    console.log("3. GitHub Copilot");
+    console.log("A. 全部");
+    console.log("0. 取消选择并跳过项目级 skills 与 Agent hooks");
+    console.log("可输入多个编号或名称，例如：1,2 或 codex,claudecode。");
 
-  const answer = (await askQuestionOrDefault(rl, "请选择 agent 工具：", "0")).trim();
-  const targets = parseInitTargetSelection(answer);
+    const answer = await askQuestionOrDefault(rl, "请选择 agent 工具：", INIT_TARGET_TEXT_MENU_CLOSED);
 
-  if (targets.length === 0) {
-    console.log("未选择 agent 工具，init 将只刷新 code-helper 工作区和规则模板，跳过项目级 skills 与 Agent hooks。");
+    // stdin 异常关闭时按显式取消处理，避免在无法继续读取输入的终端里无限重试。
+    if (answer === INIT_TARGET_TEXT_MENU_CLOSED) {
+      console.log("已取消 agent 工具选择，init 将只刷新 code-helper 工作区和规则模板，跳过项目级 skills 与 Agent hooks。");
+      return [];
+    }
+
+    const resolution = resolveInitTextTargetPromptAnswer(answer);
+
+    if (resolution.action === "select") {
+      return resolution.targets;
+    }
+
+    if (resolution.action === "cancel") {
+      console.log("已取消 agent 工具选择，init 将只刷新 code-helper 工作区和规则模板，跳过项目级 skills 与 Agent hooks。");
+      return [];
+    }
+
+    console.log("请至少选择一个 agent 工具，或输入 0 取消。");
+  }
+}
+
+/**
+ * 构造 init raw mode 多选菜单项。
+ * 新项目无法知道用户实际使用哪个 agent，因此所有目标都默认不勾选。
+ */
+export function buildInitTargetMultiSelectOptions(): Array<{
+  value: SkillRegistrationTarget;
+  label: string;
+  checked: boolean;
+}> {
+  return listSupportedSkillRegistrationTargets().map((target) => ({
+    value: target,
+    label: formatSkillRegistrationTargetName(target),
+    checked: false
+  }));
+}
+
+/**
+ * 解析 init raw mode 多选结果。
+ * 空确认必须回到选择流程；只有 Esc 这类显式取消才允许跳过 agent 目标。
+ */
+export function resolveInitMultiSelectTargetPromptResult(result: {
+  options: Array<{ value: SkillRegistrationTarget; checked: boolean }>;
+  cancelled: boolean;
+}): InitTargetPromptResolution {
+  if (result.cancelled) {
+    return { action: "cancel", targets: [] };
   }
 
-  return targets;
+  const targets = result.options.filter((option) => option.checked).map((option) => option.value);
+
+  if (targets.length === 0) {
+    return { action: "retry", targets: [] };
+  }
+
+  return { action: "select", targets };
+}
+
+/**
+ * 解析 init 文本兜底菜单输入。
+ * 空回车不再等同取消，避免用户在新项目里直接确认后得到无 agent 目标的初始化结果。
+ */
+export function resolveInitTextTargetPromptAnswer(answer: string): InitTargetPromptResolution {
+  const trimmedAnswer = answer.trim();
+
+  if (trimmedAnswer === "0") {
+    return { action: "cancel", targets: [] };
+  }
+
+  if (trimmedAnswer === "") {
+    return { action: "retry", targets: [] };
+  }
+
+  let targets: SkillRegistrationTarget[];
+
+  try {
+    targets = parseInitTargetSelection(trimmedAnswer);
+  } catch {
+    // 文本兜底菜单允许用户重新输入，不能因为一次输错就退出整个 init 流程。
+    return { action: "retry", targets: [] };
+  }
+
+  if (targets.length === 0) {
+    return { action: "retry", targets: [] };
+  }
+
+  return { action: "select", targets };
 }
 
 /**
  * 解析 init 文本兜底菜单的多目标输入。
  * 同时支持数字、英文目标名和 all，方便 macOS / Windows 终端复制粘贴。
  */
-function parseInitTargetSelection(value: string): SkillRegistrationTarget[] {
+export function parseInitTargetSelection(value: string): SkillRegistrationTarget[] {
   if (value === "" || value === "0") {
     return [];
   }

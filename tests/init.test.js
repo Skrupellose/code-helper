@@ -8,6 +8,11 @@ import { ENTRY_BLOCK_END, ENTRY_BLOCK_START } from "../dist/constants.js";
 import { initializeProject, updateProject } from "../dist/init.js";
 import { runChecks } from "../dist/checks.js";
 import { runCli } from "../dist/cli.js";
+import {
+  buildInitTargetMultiSelectOptions,
+  resolveInitMultiSelectTargetPromptResult,
+  resolveInitTextTargetPromptAnswer
+} from "../dist/cli/commands/core.js";
 
 async function runCliSilently(args, projectRoot) {
   // CLI 测试只关心文件结果和退出码，捕获日志避免测试输出被初始化摘要刷屏。
@@ -38,6 +43,58 @@ function extractManagedBlock(content) {
 
   return content.slice(blockStart, blockEnd + ENTRY_BLOCK_END.length);
 }
+
+test("init raw mode 目标多选默认不勾选任何 agent", () => {
+  // 新项目无法推断用户实际使用的 agent 工具，菜单默认值必须保持完全未选择。
+  const options = buildInitTargetMultiSelectOptions();
+
+  assert.deepEqual(
+    options.map((option) => [option.value, option.checked]),
+    [
+      ["codex", false],
+      ["claudecode", false],
+      ["githubcopilot", false]
+    ]
+  );
+});
+
+test("init raw mode 目标多选空确认要求重试，Esc 才取消", () => {
+  // 回车保存空选择不能继续初始化 agent 目标；只有 Esc 这类显式取消才允许跳过。
+  const emptyOptions = buildInitTargetMultiSelectOptions();
+  const selectedOptions = emptyOptions.map((option) => ({
+    ...option,
+    checked: option.value === "claudecode"
+  }));
+
+  assert.deepEqual(
+    resolveInitMultiSelectTargetPromptResult({ options: emptyOptions, cancelled: false }),
+    { action: "retry", targets: [] }
+  );
+  assert.deepEqual(
+    resolveInitMultiSelectTargetPromptResult({ options: emptyOptions, cancelled: true }),
+    { action: "cancel", targets: [] }
+  );
+  assert.deepEqual(
+    resolveInitMultiSelectTargetPromptResult({ options: selectedOptions, cancelled: false }),
+    { action: "select", targets: ["claudecode"] }
+  );
+});
+
+test("init 文本兜底菜单空输入重试，0 才显式取消", () => {
+  // 文本菜单中直接回车常见于误触，必须继续提示；输入 0 才表示用户明确跳过 agent 目标。
+  assert.deepEqual(resolveInitTextTargetPromptAnswer(""), { action: "retry", targets: [] });
+  assert.deepEqual(resolveInitTextTargetPromptAnswer("   "), { action: "retry", targets: [] });
+  assert.deepEqual(resolveInitTextTargetPromptAnswer("0"), { action: "cancel", targets: [] });
+  assert.deepEqual(resolveInitTextTargetPromptAnswer("1,3"), {
+    action: "select",
+    targets: ["codex", "githubcopilot"]
+  });
+  assert.deepEqual(resolveInitTextTargetPromptAnswer("all"), {
+    action: "select",
+    targets: ["codex", "claudecode", "githubcopilot"]
+  });
+  assert.deepEqual(resolveInitTextTargetPromptAnswer("unknown"), { action: "retry", targets: [] });
+});
 
 test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", async () => {
   // 该测试覆盖老项目兼容：只有 AGENTS.md 时只注册 Codex，并同步安装 Codex Agent hook。
