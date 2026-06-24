@@ -24,14 +24,14 @@ export function containsChinese(value: string): boolean {
 
 /**
  * 构造中文命名违规问题。
- * 集中创建可保持 code、message 和修复建议完全一致。
+ * 旧项目可能已经存在英文或非中文文档名，检查端只做兼容提醒，不阻塞当前检查。
  */
 export function createChineseNameIssue(path: string, suggestion: string): CheckIssue {
   return {
-    level: "error",
+    level: "warning",
     code: "non-chinese-document-name",
-    message: `文档未使用中文命名：${path}`,
+    message: `旧文档命名兼容提醒：${path} 未使用中文命名。`,
     path,
-    suggestion
+    suggestion: `${suggestion} 这是旧文档兼容提醒，不阻塞当前检查；建议后续迁移为中文命名。`
   };
 }

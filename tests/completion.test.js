@@ -129,6 +129,146 @@ test("createCompletionReview 会把已归档任务识别为已结束", async () 
   }
 });
 
+test("createCompletionReview 兼容读取活动旧英文任务文档", async () => {
+  // 旧项目可能只存在 implementation.md、manual-test.md 和 -status.md，完成检查需要 fallback 读取。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-legacy-active-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/result-doc/legacy-feature"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/status-doc"), { recursive: true });
+    await writeFile(
+      join(root, "code-helper-docs/plan-doc/legacy-feature.md"),
+      "# legacy feature\n\n状态：已完成\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/result-doc/legacy-feature/implementation.md"),
+      "# legacy implementation\n\n状态：已完成\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/result-doc/legacy-feature/manual-test.md"),
+      "# legacy manual test\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/legacy-feature-status.md"),
+      "# legacy status\n\n## 当前执行节点\n\n状态：已完成\n\n## 子计划队列\n\n状态：已完成\n",
+      "utf8"
+    );
+
+    const review = await createCompletionReview(root, "legacy-feature");
+
+    assert.equal(review.reviewStatus, "ready-to-archive");
+    assert.equal(review.documents.result.exists, true);
+    assert.equal(review.documents.result.relativePath, "code-helper-docs/result-doc/legacy-feature/implementation.md");
+    assert.equal(review.documents.status.exists, true);
+    assert.equal(review.documents.status.relativePath, "code-helper-docs/status-doc/legacy-feature-status.md");
+    assert.equal(review.documents.manualTest.exists, true);
+    assert.equal(review.documents.manualTest.relativePath, "code-helper-docs/result-doc/legacy-feature/manual-test.md");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 读取旧英文任务时优先使用中文新文档", async () => {
+  // 同一任务同时存在新旧命名时，中文新文件优先，旧英文只作为兼容 fallback。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-legacy-priority-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/result-doc/legacy-priority"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/status-doc"), { recursive: true });
+    await writeFile(join(root, "code-helper-docs/plan-doc/legacy-priority.md"), "# legacy priority\n", "utf8");
+    await writeFile(
+      join(root, "code-helper-docs/result-doc/legacy-priority/implementation.md"),
+      "# legacy implementation\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/result-doc/legacy-priority/实施记录.md"),
+      "# 中文实施记录\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/result-doc/legacy-priority/manual-test.md"),
+      "# legacy manual test\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/result-doc/legacy-priority/手工测试.md"),
+      "# 中文手工测试\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/legacy-priority-status.md"),
+      "# legacy status\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/legacy-priority-状态.md"),
+      "# 中文状态\n",
+      "utf8"
+    );
+
+    const review = await createCompletionReview(root, "legacy-priority");
+
+    assert.equal(review.documents.result.relativePath, "code-helper-docs/result-doc/legacy-priority/实施记录.md");
+    assert.equal(review.documents.status.relativePath, "code-helper-docs/status-doc/legacy-priority-状态.md");
+    assert.equal(review.documents.manualTest.relativePath, "code-helper-docs/result-doc/legacy-priority/手工测试.md");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 兼容读取归档旧英文任务文档", async () => {
+  // 用户手动归档旧英文任务后，finish 应读取 archive 下的英文 fallback 文件。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-legacy-archived-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await mkdir(join(root, "code-helper-docs/plan-doc/archive"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/result-doc/archive/legacy-archived"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/status-doc/archive"), { recursive: true });
+    await writeFile(
+      join(root, "code-helper-docs/plan-doc/archive/legacy-archived.md"),
+      "# legacy archived\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/result-doc/archive/legacy-archived/implementation.md"),
+      "# legacy implementation\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/result-doc/archive/legacy-archived/manual-test.md"),
+      "# legacy manual test\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/archive/legacy-archived-status.md"),
+      "# legacy status\n",
+      "utf8"
+    );
+
+    const review = await createCompletionReview(root, "legacy-archived");
+
+    assert.equal(review.taskStatus, "archived");
+    assert.equal(review.reviewStatus, "archived");
+    assert.equal(review.documents.result.exists, true);
+    assert.equal(review.documents.result.relativePath, "code-helper-docs/result-doc/archive/legacy-archived/implementation.md");
+    assert.equal(review.documents.status.exists, true);
+    assert.equal(review.documents.status.relativePath, "code-helper-docs/status-doc/archive/legacy-archived-status.md");
+    assert.equal(review.documents.manualTest.exists, true);
+    assert.equal(review.documents.manualTest.relativePath, "code-helper-docs/result-doc/archive/legacy-archived/manual-test.md");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("createCompletionReview 会保留 git 当前变更路径的首字符和中文路径", async (t) => {
   // 完成检查会把当前变更展示给用户，路径不能因为 git porcelain 解析丢首字符或把中文转成转义片段。
   try {

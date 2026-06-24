@@ -1,10 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
 
 import { listTasks, type TaskRecord } from "./archive.js";
 import { loadConfig } from "./config.js";
 import { portablePath, projectPath, readTextIfExists } from "./fs-utils.js";
-import { RESULT_RECORD_FILE_NAME } from "./workflows.js";
+import { MANUAL_TEST_FILE_NAME, RESULT_RECORD_FILE_NAME } from "./workflows.js";
+
+const LEGACY_RESULT_RECORD_FILE_NAME = "implementation.md";
+const LEGACY_MANUAL_TEST_FILE_NAME = "manual-test.md";
 
 /**
  * 完成检查的判断结果。
@@ -71,12 +73,18 @@ export async function createCompletionReview(projectRoot: string, featureName: s
   }
 
   const plan = await readDocument(projectRoot, getPlanDocumentPath(task, config.directories.planDoc));
-  const result = await readDocument(
+  const result = await readDocumentCandidates(
     projectRoot,
-    getResultDocumentPath(task, config.directories.resultDoc)
+    getResultDocumentPathCandidates(task, config.directories.resultDoc)
   );
-  const status = await readDocument(projectRoot, getStatusDocumentPath(task, config.directories.statusDoc));
-  const manualTest = await readDocument(projectRoot, getManualTestDocumentPath(task, config.directories.resultDoc));
+  const status = await readDocumentCandidates(
+    projectRoot,
+    getStatusDocumentPathCandidates(task, config.directories.statusDoc)
+  );
+  const manualTest = await readDocumentCandidates(
+    projectRoot,
+    getManualTestDocumentPathCandidates(task, config.directories.resultDoc)
+  );
   const combinedContent = [plan.content, result.content, status.content, manualTest.content].filter(Boolean).join("\n");
   const statusCounts = countStatusMarkers(combinedContent);
   const changedPaths = readGitChangedPaths(projectRoot);
@@ -172,30 +180,48 @@ function getPlanDocumentPath(task: TaskRecord, planDirectory: string): string {
 }
 
 /**
- * 根据任务状态返回实施记录读取路径。
+ * 根据任务状态返回实施记录读取候选路径。
+ * 新项目固定生成中文文件；旧项目可能仍保留 implementation.md，因此作为兼容 fallback。
  */
-function getResultDocumentPath(task: TaskRecord, resultDirectory: string): string {
+function getResultDocumentPathCandidates(task: TaskRecord, resultDirectory: string): string[] {
   const activePath = portablePath(resultDirectory, task.featureName, RESULT_RECORD_FILE_NAME);
+  const legacyActivePath = portablePath(resultDirectory, task.featureName, LEGACY_RESULT_RECORD_FILE_NAME);
   const archivedPath = portablePath(resultDirectory, "archive", task.featureName, RESULT_RECORD_FILE_NAME);
-  return task.status === "archived" ? archivedPath : activePath;
+  const legacyArchivedPath = portablePath(resultDirectory, "archive", task.featureName, LEGACY_RESULT_RECORD_FILE_NAME);
+
+  return task.status === "archived"
+    ? [archivedPath, legacyArchivedPath]
+    : [activePath, legacyActivePath];
 }
 
 /**
- * 根据任务状态返回状态记录读取路径。
+ * 根据任务状态返回状态记录读取候选路径。
+ * 新版状态记录优先使用 `-状态.md`，旧项目的 `-status.md` 仅作为 fallback 读取。
  */
-function getStatusDocumentPath(task: TaskRecord, statusDirectory: string): string {
+function getStatusDocumentPathCandidates(task: TaskRecord, statusDirectory: string): string[] {
   const activePath = portablePath(statusDirectory, `${task.featureName}-状态.md`);
+  const legacyActivePath = portablePath(statusDirectory, `${task.featureName}-status.md`);
   const archivedPath = portablePath(statusDirectory, "archive", `${task.featureName}-状态.md`);
-  return task.status === "archived" ? archivedPath : activePath;
+  const legacyArchivedPath = portablePath(statusDirectory, "archive", `${task.featureName}-status.md`);
+
+  return task.status === "archived"
+    ? [archivedPath, legacyArchivedPath]
+    : [activePath, legacyActivePath];
 }
 
 /**
- * 根据任务状态返回手工测试文档读取路径。
+ * 根据任务状态返回手工测试文档读取候选路径。
+ * 手工测试文档仍按中文生成，manual-test.md 仅用于旧项目完成检查兼容。
  */
-function getManualTestDocumentPath(task: TaskRecord, resultDirectory: string): string {
-  const activePath = portablePath(resultDirectory, task.featureName, "手工测试.md");
-  const archivedPath = portablePath(resultDirectory, "archive", task.featureName, "手工测试.md");
-  return task.status === "archived" ? archivedPath : activePath;
+function getManualTestDocumentPathCandidates(task: TaskRecord, resultDirectory: string): string[] {
+  const activePath = portablePath(resultDirectory, task.featureName, MANUAL_TEST_FILE_NAME);
+  const legacyActivePath = portablePath(resultDirectory, task.featureName, LEGACY_MANUAL_TEST_FILE_NAME);
+  const archivedPath = portablePath(resultDirectory, "archive", task.featureName, MANUAL_TEST_FILE_NAME);
+  const legacyArchivedPath = portablePath(resultDirectory, "archive", task.featureName, LEGACY_MANUAL_TEST_FILE_NAME);
+
+  return task.status === "archived"
+    ? [archivedPath, legacyArchivedPath]
+    : [activePath, legacyActivePath];
 }
 
 /**
@@ -220,6 +246,33 @@ async function readDocument(
     relativePath,
     exists: content !== undefined,
     content
+  };
+}
+
+/**
+ * 按优先级读取文档候选路径。
+ * 中文新文件始终排在第一位；旧英文文件仅在中文文件不存在时兼容读取。
+ */
+async function readDocumentCandidates(
+  projectRoot: string,
+  relativePaths: string[]
+): Promise<DocumentPresence & { content: string | undefined }> {
+  for (const relativePath of relativePaths) {
+    const content = await readTextIfExists(projectPath(projectRoot, relativePath));
+
+    if (content !== undefined) {
+      return {
+        relativePath,
+        exists: true,
+        content
+      };
+    }
+  }
+
+  return {
+    relativePath: relativePaths[0],
+    exists: false,
+    content: undefined
   };
 }
 

@@ -46,6 +46,18 @@ function extractManagedBlock(content) {
   return content.slice(blockStart, blockEnd + ENTRY_BLOCK_END.length);
 }
 
+async function writeLegacyEnglishWorkbenchDocs(root) {
+  // 旧项目可能已经存在英文计划、结果和状态文档；测试统一复用这组兼容样本。
+  await mkdir(join(root, "code-helper-docs/result-doc/seo-docs"), { recursive: true });
+  await writeFile(join(root, "code-helper-docs/plan-doc/seo-plan.md"), "# legacy seo plan\n", "utf8");
+  await writeFile(
+    join(root, "code-helper-docs/result-doc/seo-docs/implementation.md"),
+    "# legacy implementation\n",
+    "utf8"
+  );
+  await writeFile(join(root, "code-helper-docs/status-doc/seo-docs-status.md"), "# legacy status\n", "utf8");
+}
+
 test("init raw mode 目标多选默认不勾选任何 agent", () => {
   // 新项目无法推断用户实际使用的 agent 工具，菜单默认值必须保持完全未选择。
   const options = buildInitTargetMultiSelectOptions();
@@ -677,6 +689,50 @@ test("runChecks 在初始化后通过", async () => {
     await initializeProject({ projectRoot: root });
     const issues = await runChecks(root);
     assert.deepEqual(issues, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("runChecks 对旧英文工作文档只提示 warning", async () => {
+  // 英文旧文档命名需要兼容读取和提示迁移，但不能让 check 失败。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-check-legacy-names-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await writeLegacyEnglishWorkbenchDocs(root);
+
+    const issues = await runChecks(root);
+    const legacyIssues = issues.filter((issue) => issue.code === "non-chinese-document-name");
+
+    assert.equal(issues.some((issue) => issue.level === "error"), false);
+    assert.equal(legacyIssues.every((issue) => issue.level === "warning"), true);
+    assert.ok(legacyIssues.some((issue) => issue.path === "code-helper-docs/plan-doc/seo-plan.md"));
+    assert.ok(legacyIssues.some((issue) => issue.path === "code-helper-docs/result-doc/seo-docs"));
+    assert.ok(legacyIssues.some((issue) => issue.path === "code-helper-docs/result-doc/seo-docs/implementation.md"));
+    assert.ok(legacyIssues.some((issue) => issue.path === "code-helper-docs/status-doc/seo-docs-status.md"));
+    assert.ok(legacyIssues.every((issue) => issue.message.includes("旧文档命名兼容提醒")));
+    assert.ok(legacyIssues.every((issue) => issue.suggestion.includes("不阻塞当前检查")));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI check 对旧英文工作文档 warning 返回 0", async () => {
+  // CLI 退出码只应由 error 决定，旧英文命名 warning 不能阻塞脚本继续执行。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-cli-check-legacy-names-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await writeLegacyEnglishWorkbenchDocs(root);
+
+    const result = await runCliSilently(["check"], root);
+    const output = result.logs.join("\n");
+
+    assert.equal(result.exitCode, 0);
+    assert.match(output, /\[warning\] non-chinese-document-name/);
+    assert.match(output, /旧文档命名兼容提醒/);
+    assert.match(output, /不阻塞当前检查/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
