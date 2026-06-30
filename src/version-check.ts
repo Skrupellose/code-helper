@@ -55,7 +55,7 @@ export async function maybeNotifyVersionUpdate(
     const currentVersion = await getCurrentPackageVersion();
     const cache = await readVersionCache(projectRoot);
 
-    if (cache !== undefined && isCacheFresh(cache)) {
+    if (cache !== undefined && canReuseVersionCache(cache, currentVersion)) {
       const cachedState = createVersionUpdateState(currentVersion, cache.latestVersion);
       printOutdatedMessageIfNeeded(cachedState);
       return cachedState.outdated ? cachedState : undefined;
@@ -216,7 +216,15 @@ async function writeVersionCache(projectRoot: string, cache: VersionCache): Prom
 }
 
 /**
- * 缓存未过期时直接使用。
+ * 只有缓存未过期且记录的当前版本仍一致时才能复用。
+ * 包升级后即使 TTL 未过期，也必须重新查询 registry 并写入新版本，避免菜单继续展示旧 currentVersion。
+ */
+function canReuseVersionCache(cache: VersionCache, currentVersion: string): boolean {
+  return cache.currentVersion === currentVersion && isCacheFresh(cache);
+}
+
+/**
+ * 判断缓存是否仍在有效期内。
  */
 function isCacheFresh(cache: VersionCache): boolean {
   const checkedAt = Date.parse(cache.checkedAt);
