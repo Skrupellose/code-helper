@@ -103,11 +103,13 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
     switch (command) {
       case undefined:
       case "menu":
+        // inputBasePath 保留原始 cwd，便于菜单内拖拽相对路径仍相对用户当前目录解析
         return runInteractiveMenu(commandProjectRoot, versionUpdateState, projectRoot);
       case "init":
+        // init 始终使用调用方传入的目录（通常为 cwd），以便在尚未初始化的新目录创建工作区
         return runInit(projectRoot, args);
       case "update":
-        return runUpdate(projectRoot, args);
+        return runUpdate(commandProjectRoot, args);
       case "version":
       case "--version":
       case "-v":
@@ -115,25 +117,26 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
       case "npm-scripts":
         return runNpmScripts(projectRoot, args);
       case "sync-local":
+        // 本仓开发刷新：在当前目录执行，不向上解析其它已初始化项目
         return runSyncLocal(projectRoot, args);
       case "check":
-        return runCheck(projectRoot, args);
+        return runCheck(commandProjectRoot, args);
       case "features":
-        return runFeatures(projectRoot, args);
+        return runFeatures(commandProjectRoot, args);
       case "plan":
         return runPlan(commandProjectRoot, args, { inputBasePath: projectRoot });
       case "manual-test":
-        return runManualTest(projectRoot, args);
+        return runManualTest(commandProjectRoot, args);
       case "archive":
-        return runArchive(projectRoot, args);
+        return runArchive(commandProjectRoot, args);
       case "finish":
-        return runFinish(projectRoot, args);
+        return runFinish(commandProjectRoot, args);
       case "tasks":
-        return runTasks(projectRoot, args);
+        return runTasks(commandProjectRoot, args);
       case "skills":
-        return runSkills(projectRoot, args);
+        return runSkills(commandProjectRoot, args);
       case "hooks":
-        return runHooks(projectRoot, args);
+        return runHooks(commandProjectRoot, args);
       case "help":
       case "--help":
       case "-h":
@@ -153,6 +156,7 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
 /**
  * 无参数时展示交互菜单。
  * 使用 Node 内置 readline，减少首版运行依赖和安装体积。
+ * 菜单循环内业务错误只提示并继续，避免一次动作失败就结束整个会话。
  */
 async function runInteractiveMenu(
   projectRoot: string,
@@ -166,133 +170,25 @@ async function runInteractiveMenu(
     let shouldExit = false;
 
     while (!shouldExit) {
-      const useKeyMenu = canUseInteractiveKeys(input, output);
-      const answer = useKeyMenu
-        ? await promptSelect(input, output, "code-helper 操作菜单", menuOptions)
-        : await askTextMenu(rl, versionUpdate);
-      const menuAnswer = normalizeMainMenuAnswer(answer, versionUpdate);
-
-      switch (menuAnswer) {
-        case QUICK_UPGRADE_MENU_VALUE:
-          await runMenuAction("更新到最新版本", () => runCodeHelperQuickUpgrade(projectRoot));
-          await pauseAfterMenuAction(useKeyMenu);
-          break;
-        case "1":
-          await runMenuAction(getMainMenuItemName(menuAnswer), () =>
-            runInit(projectRoot, [], { showInteractiveCompletionHint: false })
-          );
-          await pauseAfterMenuAction(useKeyMenu);
-          break;
-        case "2": {
-          printInputHint("生成任务计划模板需要需求文档路径，支持直接把文件拖到终端。输入 0 或直接回车返回。");
-          const requirementPath = await askRequiredMenuInput(rl, "请输入或拖拽需求文档路径：");
-          if (requirementPath === undefined) {
-            console.log("已取消生成任务计划模板，返回主菜单。");
-            break;
+      try {
+        await runInteractiveMenuIteration({
+          projectRoot,
+          inputBasePath,
+          versionUpdate,
+          menuOptions,
+          rl,
+          onExit: () => {
+            shouldExit = true;
           }
-
-          const featureName = await askOptionalMenuInput(rl, "请输入中文功能名称（可留空，默认取需求标题或中文文件名；输入 0 返回）：");
-          if (featureName === undefined) {
-            console.log("已取消生成任务计划模板，返回主菜单。");
-            break;
-          }
-
-          await runMenuAction(getMainMenuItemName(menuAnswer), () =>
-            runPlan(
-              projectRoot,
-              [normalizeDroppedPath(requirementPath, projectRoot, { inputBasePath }), featureName].filter(Boolean),
-              { inputBasePath }
-            )
-          );
-          await pauseAfterMenuAction(useKeyMenu);
-          break;
+        });
+      } catch (error) {
+        // stdin 关闭或 readline 已关闭：会话无法继续，向上抛出让 runCli 退出
+        if (isFatalInteractiveMenuError(error)) {
+          throw error;
         }
-        case "3": {
-          const featureName = await selectTaskFeatureNameForMenu(projectRoot, rl, {
-            title: "选择要生成手工测试模板的任务",
-            statuses: ["active", "mixed"],
-            manualHint: "未找到合适任务或需要新建文档时，可手动输入功能名称。输入 0 或直接回车返回。",
-            manualQuestion: "请输入功能名称："
-          });
-          if (featureName === undefined) {
-            console.log("已取消生成手工测试模板，返回主菜单。");
-            break;
-          }
 
-          const title = await askOptionalMenuInput(rl, "请输入测试文档标题（可留空；输入 0 返回）：");
-          if (title === undefined) {
-            console.log("已取消生成手工测试模板，返回主菜单。");
-            break;
-          }
-
-          await runMenuAction(getMainMenuItemName(menuAnswer), () =>
-            runManualTest(projectRoot, [featureName, title].filter(Boolean))
-          );
-          await pauseAfterMenuAction(useKeyMenu);
-          break;
-        }
-        case "4":
-          {
-            const featureName = await selectTaskFeatureNameForMenu(projectRoot, rl, {
-              title: "选择要检查完成情况的任务",
-              statuses: ["active", "mixed"],
-              manualHint: "未找到合适任务或需要兼容旧文档时，可手动输入功能名称。输入 0 或直接回车返回。",
-              manualQuestion: "请输入要检查的功能名称："
-            });
-            if (featureName === undefined) {
-              console.log("已取消检查功能完成情况，返回主菜单。");
-              break;
-            }
-
-            await runMenuAction(getMainMenuItemName(menuAnswer), () => runFinish(projectRoot, [featureName]));
-            await pauseAfterMenuAction(useKeyMenu);
-            break;
-          }
-        case "5":
-          await runMenuAction(getMainMenuItemName(menuAnswer), () => runTasks(projectRoot, []));
-          await pauseAfterMenuAction(useKeyMenu);
-          break;
-        case "6": {
-          const featureName = await selectTaskFeatureNameForMenu(projectRoot, rl, {
-            title: "选择要归档的任务",
-            statuses: ["active", "mixed"],
-            manualHint: "未找到合适任务或需要兼容旧文档时，可手动输入功能名称。输入 0 或直接回车返回。",
-            manualQuestion: "请输入要归档的功能名称："
-          });
-          if (featureName === undefined) {
-            console.log("已取消归档已完成任务，返回主菜单。");
-            break;
-          }
-
-          await runMenuAction(getMainMenuItemName(menuAnswer), () => runArchive(projectRoot, [featureName]));
-          await pauseAfterMenuAction(useKeyMenu);
-          break;
-        }
-        case "7":
-          await runMenuAction(getMainMenuItemName(menuAnswer), () => runCheck(projectRoot));
-          await pauseAfterMenuAction(useKeyMenu);
-          break;
-        case "8":
-          if (await runApplyMenu(projectRoot, rl)) {
-            await pauseAfterMenuAction(useKeyMenu);
-          }
-          break;
-        case "9":
-          if (await runSkillMenu(projectRoot, rl)) {
-            await pauseAfterMenuAction(useKeyMenu);
-          }
-          break;
-        case "10":
-          if (await runHooksMenu(projectRoot, rl)) {
-            await pauseAfterMenuAction(useKeyMenu);
-          }
-          break;
-        case "0":
-          console.log("已退出 code-helper。");
-          shouldExit = true;
-          break;
-        default:
-          console.log("无效选择，请重新输入。");
+        // 其它可恢复业务错误：打印后回到菜单循环
+        console.error(error instanceof Error ? error.message : String(error));
       }
     }
 
@@ -303,11 +199,190 @@ async function runInteractiveMenu(
 }
 
 /**
- * plan 和交互菜单需要复用已初始化项目根。
- * 这样从 docs/ 等子目录触发时不会把需求文档目录误当成 projectRoot。
+ * 单次主菜单迭代：读取选择并执行对应动作。
+ * 从 runInteractiveMenu 拆出，便于在循环层统一捕获可恢复错误。
+ */
+async function runInteractiveMenuIteration(options: {
+  projectRoot: string;
+  inputBasePath: string;
+  versionUpdate?: VersionUpdateState;
+  menuOptions: ReturnType<typeof buildMainMenuSelectOptions>;
+  rl: ReturnType<typeof createInterface>;
+  onExit: () => void;
+}): Promise<void> {
+  const { projectRoot, inputBasePath, versionUpdate, menuOptions, rl, onExit } = options;
+  const useKeyMenu = canUseInteractiveKeys(input, output);
+  const answer = useKeyMenu
+    ? await promptSelect(input, output, "code-helper 操作菜单", menuOptions)
+    : await askTextMenu(rl, versionUpdate);
+  const menuAnswer = normalizeMainMenuAnswer(answer, versionUpdate);
+
+  switch (menuAnswer) {
+    case QUICK_UPGRADE_MENU_VALUE:
+      await runMenuAction("更新到最新版本", () => runCodeHelperQuickUpgrade(projectRoot));
+      await pauseAfterMenuAction(useKeyMenu);
+      break;
+    case "1":
+      await runMenuAction(getMainMenuItemName(menuAnswer), () =>
+        runInit(projectRoot, [], { showInteractiveCompletionHint: false })
+      );
+      await pauseAfterMenuAction(useKeyMenu);
+      break;
+    case "2": {
+      printInputHint("生成任务计划模板需要需求文档路径，支持直接把文件拖到终端。输入 0 或直接回车返回。");
+      const requirementPath = await askRequiredMenuInput(rl, "请输入或拖拽需求文档路径：");
+      if (requirementPath === undefined) {
+        console.log("已取消生成任务计划模板，返回主菜单。");
+        break;
+      }
+
+      const featureName = await askOptionalMenuInput(rl, "请输入中文功能名称（可留空，默认取需求标题或中文文件名；输入 0 返回）：");
+      if (featureName === undefined) {
+        console.log("已取消生成任务计划模板，返回主菜单。");
+        break;
+      }
+
+      await runMenuAction(getMainMenuItemName(menuAnswer), () =>
+        runPlan(
+          projectRoot,
+          [normalizeDroppedPath(requirementPath, projectRoot, { inputBasePath }), featureName].filter(Boolean),
+          { inputBasePath }
+        )
+      );
+      await pauseAfterMenuAction(useKeyMenu);
+      break;
+    }
+    case "3": {
+      const featureName = await selectTaskFeatureNameForMenu(projectRoot, rl, {
+        title: "选择要生成手工测试模板的任务",
+        statuses: ["active", "mixed"],
+        manualHint: "未找到合适任务或需要新建文档时，可手动输入功能名称。输入 0 或直接回车返回。",
+        manualQuestion: "请输入功能名称："
+      });
+      if (featureName === undefined) {
+        console.log("已取消生成手工测试模板，返回主菜单。");
+        break;
+      }
+
+      const title = await askOptionalMenuInput(rl, "请输入测试文档标题（可留空；输入 0 返回）：");
+      if (title === undefined) {
+        console.log("已取消生成手工测试模板，返回主菜单。");
+        break;
+      }
+
+      await runMenuAction(getMainMenuItemName(menuAnswer), () =>
+        runManualTest(projectRoot, [featureName, title].filter(Boolean))
+      );
+      await pauseAfterMenuAction(useKeyMenu);
+      break;
+    }
+    case "4": {
+      const featureName = await selectTaskFeatureNameForMenu(projectRoot, rl, {
+        title: "选择要检查完成情况的任务",
+        statuses: ["active", "mixed"],
+        manualHint: "未找到合适任务或需要兼容旧文档时，可手动输入功能名称。输入 0 或直接回车返回。",
+        manualQuestion: "请输入要检查的功能名称："
+      });
+      if (featureName === undefined) {
+        console.log("已取消检查功能完成情况，返回主菜单。");
+        break;
+      }
+
+      await runMenuAction(getMainMenuItemName(menuAnswer), () => runFinish(projectRoot, [featureName]));
+      await pauseAfterMenuAction(useKeyMenu);
+      break;
+    }
+    case "5":
+      await runMenuAction(getMainMenuItemName(menuAnswer), () => runTasks(projectRoot, []));
+      await pauseAfterMenuAction(useKeyMenu);
+      break;
+    case "6": {
+      const featureName = await selectTaskFeatureNameForMenu(projectRoot, rl, {
+        title: "选择要归档的任务",
+        statuses: ["active", "mixed"],
+        manualHint: "未找到合适任务或需要兼容旧文档时，可手动输入功能名称。输入 0 或直接回车返回。",
+        manualQuestion: "请输入要归档的功能名称："
+      });
+      if (featureName === undefined) {
+        console.log("已取消归档已完成任务，返回主菜单。");
+        break;
+      }
+
+      await runMenuAction(getMainMenuItemName(menuAnswer), () => runArchive(projectRoot, [featureName]));
+      await pauseAfterMenuAction(useKeyMenu);
+      break;
+    }
+    case "7":
+      await runMenuAction(getMainMenuItemName(menuAnswer), () => runCheck(projectRoot));
+      await pauseAfterMenuAction(useKeyMenu);
+      break;
+    case "8":
+      if (await runApplyMenu(projectRoot, rl)) {
+        await pauseAfterMenuAction(useKeyMenu);
+      }
+      break;
+    case "9":
+      if (await runSkillMenu(projectRoot, rl)) {
+        await pauseAfterMenuAction(useKeyMenu);
+      }
+      break;
+    case "10":
+      if (await runHooksMenu(projectRoot, rl)) {
+        await pauseAfterMenuAction(useKeyMenu);
+      }
+      break;
+    case "0":
+      console.log("已退出 code-helper。");
+      onExit();
+      break;
+    default:
+      console.log("无效选择，请重新输入。");
+  }
+}
+
+/**
+ * 判断交互菜单是否遇到无法继续的致命错误。
+ * stdin / readline 关闭后无法再读输入，应结束会话而不是假装回到菜单。
+ */
+function isFatalInteractiveMenuError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return message.includes("readline was closed")
+    || message.includes("the readline interface instance has been finished")
+    || (message.includes("stdin") && (message.includes("close") || message.includes("closed")))
+    || error.name === "AbortError";
+}
+
+/**
+ * 需要读写已初始化工作区（.code-helper / code-helper-docs）的命令列表。
+ * 从子目录执行这些命令时必须向上解析项目根，避免误写到子目录。
+ */
+const COMMANDS_NEEDING_INITIALIZED_ROOT = new Set<string | undefined>([
+  undefined,
+  "menu",
+  "plan",
+  "finish",
+  "archive",
+  "manual-test",
+  "check",
+  "tasks",
+  "skills",
+  "hooks",
+  "update",
+  "features"
+]);
+
+/**
+ * 按命令解析应使用的项目根目录。
+ * - 依赖已初始化工作区的命令：向上查找 .code-helper 或 code-helper-docs
+ * - init：保持传入路径（cwd），以便在新目录初始化；勿强制上探到其它项目
+ * - version / help / npm-scripts / sync-local 等：保持 cwd，无需项目根
  */
 async function resolveProjectRootForCommand(command: string | undefined, projectRoot: string): Promise<string> {
-  if (command === undefined || command === "menu" || command === "plan") {
+  if (COMMANDS_NEEDING_INITIALIZED_ROOT.has(command)) {
     return resolveInitializedProjectRoot(projectRoot);
   }
 
@@ -541,6 +616,7 @@ async function runApplyMenu(
 /**
  * 包装菜单动作的执行回显。
  * 用户按回车确认后，会立即看到动作开始和完成状态，避免误以为没有响应。
+ * 业务异常只打印错误并返回，不向上抛出，避免一次失败结束整个交互会话。
  */
 async function runMenuAction(label: string, action: () => Promise<number>): Promise<void> {
   console.log(`\n▶ 开始：${label}`);
@@ -555,7 +631,7 @@ async function runMenuAction(label: string, action: () => Promise<number>): Prom
     }
   } catch (error) {
     console.log(`✗ 失败：${label}`);
-    throw error;
+    console.error(error instanceof Error ? error.message : String(error));
   }
 }
 

@@ -1,19 +1,20 @@
-import { chmod, stat } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { chmod, readFile, stat } from "node:fs/promises";
+import { isAbsolute, join, resolve } from "node:path";
 
 import { projectPath, readTextIfExists, writeText } from "../fs-utils.js";
 import type { OperationResult } from "../types.js";
 
 import { CODE_HELPER_GIT_HOOK_MARKER, renderGitHook } from "./renderers.js";
-import { getGitHookPath } from "./targets.js";
+import { getDefaultGitHookPath } from "./targets.js";
 
 /**
  * 安装 Git pre-commit hook。
  * 已存在非 code-helper 管理的 hook 时停止，避免覆盖用户自己的提交检查。
+ * 支持普通仓库（.git 为目录）与 worktree（.git 为 gitdir 文件）。
  */
 export async function installGitHook(projectRoot: string): Promise<OperationResult> {
-  await assertGitRepository(projectRoot);
-
-  const targetPath = getGitHookPath(projectRoot);
+  const targetPath = await resolveGitHookPath(projectRoot, { requireRepository: true });
   const existing = await readTextIfExists(targetPath);
   const content = renderGitHook();
 
@@ -44,7 +45,7 @@ export async function installGitHook(projectRoot: string): Promise<OperationResu
  * 为保持原有行为，这里清空受控文件而不是删除文件本身。
  */
 export async function uninstallGitHook(projectRoot: string): Promise<OperationResult> {
-  const targetPath = getGitHookPath(projectRoot);
+  const targetPath = await resolveGitHookPath(projectRoot, { requireRepository: false });
   const existing = await readTextIfExists(targetPath);
 
   if (existing === undefined) {
@@ -77,25 +78,203 @@ export async function uninstallGitHook(projectRoot: string): Promise<OperationRe
  * 只识别 code-helper marker，不把用户已有 pre-commit 当作本工具安装结果。
  */
 export async function isGitHookInstalled(projectRoot: string): Promise<boolean> {
-  return (await readTextIfExists(getGitHookPath(projectRoot)))?.includes(CODE_HELPER_GIT_HOOK_MARKER) === true;
+  const targetPath = await resolveGitHookPath(projectRoot, { requireRepository: false });
+  return (await readTextIfExists(targetPath))?.includes(CODE_HELPER_GIT_HOOK_MARKER) === true;
 }
 
 /**
- * 确认当前目录是 Git 仓库。
- * 不存在 .git 时不主动创建，避免把普通目录误改成半成品 Git 结构。
+ * 判断项目根目录是否为 Git 仓库（含 worktree）。
+ * .git 可为目录或指向 gitdir 的文件。
  */
-async function assertGitRepository(projectRoot: string): Promise<void> {
-  try {
-    const gitDirectory = await stat(projectPath(projectRoot, ".git"));
+export async function isGitRepository(projectRoot: string): Promise<boolean> {
+  return (await tryResolveGitHooksDirectory(projectRoot)) !== undefined;
+}
 
-    if (!gitDirectory.isDirectory()) {
-      throw new Error("当前项目的 .git 不是目录，无法安装 Git hook。");
+/**
+ * 解析 Git pre-commit hook 的绝对路径。
+ * 优先使用 `git rev-parse --git-path hooks`，失败时回退解析 .git 目录/文件（含 worktree commondir）。
+ *
+ * @param requireRepository 为 true 时，无法解析则抛出友好错误；为 false 时回退到默认 `.git/hooks/pre-commit`。
+ */
+export async function resolveGitHookPath(
+  projectRoot: string,
+  options: { requireRepository: boolean }
+): Promise<string> {
+  const hooksDirectory = await tryResolveGitHooksDirectory(projectRoot);
+
+  if (hooksDirectory !== undefined) {
+    return join(hooksDirectory, "pre-commit");
+  }
+
+  if (options.requireRepository) {
+    throw await buildMissingGitRepositoryError(projectRoot);
+  }
+
+  return getDefaultGitHookPath(projectRoot);
+}
+
+/**
+ * 尝试解析 hooks 目录绝对路径。
+ * 返回 undefined 表示当前目录不是可用的 Git 仓库。
+ */
+export async function tryResolveGitHooksDirectory(projectRoot: string): Promise<string | undefined> {
+  const fromGitCommand = tryResolveHooksDirectoryWithGit(projectRoot);
+  if (fromGitCommand !== undefined) {
+    return fromGitCommand;
+  }
+
+  return tryResolveHooksDirectoryFromDotGit(projectRoot);
+}
+
+/**
+ * 通过 `git rev-parse --git-path hooks` 解析 hooks 目录。
+ * git 不可用或命令失败时返回 undefined，由调用方走文件解析回退。
+ */
+function tryResolveHooksDirectoryWithGit(projectRoot: string): string | undefined {
+  try {
+    const result = spawnSync("git", ["rev-parse", "--git-path", "hooks"], {
+      cwd: projectRoot,
+      encoding: "utf8"
+    });
+
+    if (result.error || result.status !== 0) {
+      return undefined;
     }
+
+    const relativeOrAbsolute = (result.stdout ?? "").trim();
+    if (relativeOrAbsolute === "") {
+      return undefined;
+    }
+
+    return isAbsolute(relativeOrAbsolute) ? relativeOrAbsolute : resolve(projectRoot, relativeOrAbsolute);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 通过读取 `.git` 目录或 worktree 的 gitdir 文件解析 hooks 目录。
+ * worktree 的 gitdir 常指向 `.git/worktrees/<name>`，真实 hooks 在 commondir 下。
+ */
+async function tryResolveHooksDirectoryFromDotGit(projectRoot: string): Promise<string | undefined> {
+  const gitPath = projectPath(projectRoot, ".git");
+
+  let gitStat;
+  try {
+    gitStat = await stat(gitPath);
   } catch (error) {
     if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
-      throw new Error("当前目录不是 Git 仓库，无法安装 Git hook。");
+      return undefined;
     }
 
     throw error;
+  }
+
+  if (gitStat.isDirectory()) {
+    return join(gitPath, "hooks");
+  }
+
+  if (!gitStat.isFile()) {
+    return undefined;
+  }
+
+  const gitDir = await parseGitDirFile(gitPath, projectRoot);
+  if (gitDir === undefined) {
+    return undefined;
+  }
+
+  // worktree：commondir 指向主仓库 git 目录，hooks 安装在主仓库 hooks 下。
+  const commonDir = await readCommonDir(gitDir);
+  const hooksRoot = commonDir ?? gitDir;
+  return join(hooksRoot, "hooks");
+}
+
+/**
+ * 解析 `.git` 文件中的 `gitdir: <path>` 行。
+ * 相对路径相对于项目根目录解析。
+ */
+async function parseGitDirFile(gitFilePath: string, projectRoot: string): Promise<string | undefined> {
+  let content: string;
+  try {
+    content = await readFile(gitFilePath, "utf8");
+  } catch {
+    return undefined;
+  }
+
+  const match = /^gitdir:\s*(.+)$/m.exec(content);
+  if (match === null) {
+    return undefined;
+  }
+
+  const rawPath = match[1].trim();
+  if (rawPath === "") {
+    return undefined;
+  }
+
+  const gitDir = isAbsolute(rawPath) ? rawPath : resolve(projectRoot, rawPath);
+
+  try {
+    const gitDirStat = await stat(gitDir);
+    if (!gitDirStat.isDirectory()) {
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+
+  return gitDir;
+}
+
+/**
+ * 读取 worktree gitdir 内的 commondir，得到主仓库 git 目录。
+ * 普通仓库或无 commondir 时返回 undefined。
+ */
+async function readCommonDir(gitDir: string): Promise<string | undefined> {
+  const commonDirFile = join(gitDir, "commondir");
+
+  try {
+    const raw = (await readFile(commonDirFile, "utf8")).trim();
+    if (raw === "") {
+      return undefined;
+    }
+
+    const commonDir = isAbsolute(raw) ? raw : resolve(gitDir, raw);
+    const commonStat = await stat(commonDir);
+    return commonStat.isDirectory() ? commonDir : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 构造「无法安装 Git hook」时的友好错误信息。
+ */
+async function buildMissingGitRepositoryError(projectRoot: string): Promise<Error> {
+  const gitPath = projectPath(projectRoot, ".git");
+
+  try {
+    const gitStat = await stat(gitPath);
+
+    if (gitStat.isFile()) {
+      return new Error(
+        "当前项目的 .git 是 worktree 指针文件，但无法解析有效的 gitdir/hooks 路径。请确认 worktree 完整，或安装 Git 后重试。"
+      );
+    }
+
+    if (!gitStat.isDirectory()) {
+      return new Error("当前项目的 .git 既不是目录也不是有效的 gitdir 文件，无法安装 Git hook。");
+    }
+
+    return new Error("当前目录的 Git 元数据无法解析 hooks 路径，无法安装 Git hook。");
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+      return new Error("当前目录不是 Git 仓库，无法安装 Git hook。");
+    }
+
+    if (error instanceof Error) {
+      return error;
+    }
+
+    return new Error("当前目录不是 Git 仓库，无法安装 Git hook。");
   }
 }

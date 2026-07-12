@@ -1,10 +1,18 @@
 import type { FeatureKey } from "../types.js";
+import { renderAgentFinishCheckScript, renderGitHook } from "../hooks/renderers.js";
 
 /**
  * 返回可选 hook 模板。
  * Git hooks 和 Agent hooks 分别受不同功能开关控制，避免概念混用。
+ * sample 正文与安装脚本同源：由 renderGitHook / renderAgentFinishCheckScript 生成，禁止双份维护。
  */
 export function getHookTemplates(): Array<{ fileName: string; content: string; feature: FeatureKey }> {
+  // pre-commit.sample 在安装用 hook 正文前附加「可选模板」说明，正文仍来自 renderGitHook。
+  const gitHookBody = renderGitHook()
+    .split("\n")
+    .slice(1)
+    .join("\n");
+
   return [
     {
       fileName: "pre-commit.sample",
@@ -12,65 +20,13 @@ export function getHookTemplates(): Array<{ fileName: string; content: string; f
       content: `#!/bin/sh
 # code-helper 可选 pre-commit 模板。
 # 启用方式：复制到 .git/hooks/pre-commit 并添加可执行权限。
-# code-helper:managed-pre-commit
-npx @skrupellose/code-helper check
-`
+${gitHookBody}`
     },
     {
       fileName: "agent-finish-check.mjs.sample",
       feature: "agentHooks",
-      content: `#!/usr/bin/env node
-/**
- * code-helper Agent Stop hook 包装脚本。
- * Codex Stop hook 会解析 stdout 为 JSON，因此所有检查文本都必须写入 stderr。
- */
-import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-
-const invocation = resolveCodeHelperInvocation();
-const result = spawnSync(invocation.command, invocation.args, {
-  cwd: process.cwd(),
-  encoding: "utf8"
-});
-
-// 把 code-helper 的人类可读输出转到 stderr，避免污染 Stop hook 的 JSON stdout。
-for (const chunk of [result.stdout, result.stderr]) {
-  const text = chunk.trim();
-  if (text !== "") {
-    console.error(text);
-  }
-}
-
-// Stop hook stdout 必须始终是合法 JSON；空对象表示不阻止 agent 停止。
-process.stdout.write("{}\\n");
-process.exit(result.status ?? 0);
-
-function resolveCodeHelperInvocation() {
-  const localEntry = join(process.cwd(), "dist", "index.js");
-
-  if (isCodeHelperRepository() && existsSync(localEntry)) {
-    return {
-      command: process.execPath,
-      args: [localEntry, "finish", "--check-only"]
-    };
-  }
-
-  return {
-    command: process.platform === "win32" ? "npx.cmd" : "npx",
-    args: ["@skrupellose/code-helper", "finish", "--check-only"]
-  };
-}
-
-function isCodeHelperRepository() {
-  try {
-    const packageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
-    return packageJson.name === "@skrupellose/code-helper";
-  } catch {
-    return false;
-  }
-}
-`
+      // 与安装到 .code-helper/hooks/agent-finish-check.mjs 的脚本完全一致。
+      content: renderAgentFinishCheckScript()
     },
     {
       fileName: "agent-hooks.md.sample",

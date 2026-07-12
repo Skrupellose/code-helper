@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -283,10 +284,20 @@ function getRegistryUrl(): string {
 }
 
 /**
- * 在 code-helper 仓库自身开发时跳过版本检查，避免测试和本地构建触网。
+ * 判断当前工作目录是否为 code-helper 本包源码仓库。
+ * 不能用目录名 endsWith("code-helper")：例如 my-code-helper 会误判并错误跳过版本检查。
+ * 以 cwd 下 package.json 的 name 是否等于本包名为准；读失败则视为非本仓。
+ *
+ * @param cwd 可选，默认 process.cwd()，单测可注入临时目录
  */
-function isLocalDevelopmentRepository(): boolean {
-  return Boolean(process.cwd().endsWith("code-helper"));
+export function isLocalDevelopmentRepository(cwd: string = process.cwd()): boolean {
+  try {
+    const packageJsonPath = join(cwd, "package.json");
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { name?: unknown };
+    return packageJson.name === PACKAGE_NAME;
+  } catch {
+    return false;
+  }
 }
 
 /**

@@ -2,10 +2,9 @@ import { loadConfig } from "./config.js";
 import type { OperationResult } from "./types.js";
 
 import { installAgentHook, isAgentHookInstalled, uninstallAgentHook } from "./hooks/agent.js";
-import { installGitHook, isGitHookInstalled, uninstallGitHook } from "./hooks/git.js";
+import { installGitHook, isGitHookInstalled, resolveGitHookPath, uninstallGitHook } from "./hooks/git.js";
 import {
   getAgentHookConfigPath,
-  getGitHookPath,
   parseHookTargets,
   type AgentHookInstallTarget,
   type HookInstallationStatus,
@@ -20,12 +19,14 @@ export { parseHookTargets, type HookInstallationStatus, type HookInstallTarget }
  */
 export async function listHookInstallations(projectRoot: string): Promise<HookInstallationStatus[]> {
   const config = await loadConfig(projectRoot);
+  // 解析 worktree 真实 hooks 路径；非仓库时回退默认 `.git/hooks/pre-commit`。
+  const gitHookPath = await resolveGitHookPath(projectRoot, { requireRepository: false });
 
   return [
     {
       target: "git",
       label: "Git pre-commit",
-      path: getGitHookPath(projectRoot),
+      path: gitHookPath,
       enabled: config.features.gitHooks.enabled,
       installed: await isGitHookInstalled(projectRoot)
     },

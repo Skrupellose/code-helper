@@ -94,14 +94,18 @@ export async function updateExistingHooks(projectRoot: string, config: CodeHelpe
 
 /**
  * Git hook 需要现有 Git 仓库；update 不负责把普通目录初始化为 Git 仓库。
+ * 支持 .git 为目录的普通仓库，以及 .git 为 gitdir 文件的 worktree。
  */
 async function installGitHookIfRepositoryExists(
   projectRoot: string,
   config: CodeHelperConfig
 ): Promise<OperationResult> {
-  const gitDirectory = await statIfExists(projectPath(projectRoot, ".git"));
+  const gitMeta = await statIfExists(projectPath(projectRoot, ".git"));
+  // 普通仓库 .git 是目录；worktree 的 .git 是包含 gitdir: 的文件。
+  const looksLikeGitRepository =
+    gitMeta !== undefined && (gitMeta.isDirectory() || gitMeta.isFile());
 
-  if (gitDirectory === undefined || !gitDirectory.isDirectory()) {
+  if (!looksLikeGitRepository) {
     return {
       path: projectPath(projectRoot, ".git/hooks/pre-commit"),
       action: "skipped",
@@ -115,7 +119,7 @@ async function installGitHookIfRepositoryExists(
 
     if (gitStatus?.installed !== true) {
       return {
-        path: projectPath(projectRoot, ".git/hooks/pre-commit"),
+        path: gitStatus?.path ?? projectPath(projectRoot, ".git/hooks/pre-commit"),
         action: "skipped",
         message: "Git hook 能力未启用且未安装 code-helper 管理的 Git hook，已跳过"
       };

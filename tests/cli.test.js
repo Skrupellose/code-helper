@@ -254,6 +254,53 @@ test("plan 从需求文档子目录执行时仍写入已初始化项目根", asy
   }
 });
 
+test("check 与 finish 从子目录执行时仍解析到已初始化项目根", async () => {
+  // finish/check 与 plan 一样依赖工作区文档；cwd 落在子目录时不能把子目录当成项目根。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-cli-subroot-"));
+  const nestedRoot = join(root, "packages", "app");
+  const logs = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+
+  try {
+    console.log = (...args) => {
+      logs.push(args.join(" "));
+    };
+    console.error = (...args) => {
+      logs.push(args.join(" "));
+    };
+
+    await initializeProject({ projectRoot: root });
+    await mkdir(nestedRoot, { recursive: true });
+    await writeFile(join(root, "requirement.md"), "# 子目录收尾\n\n验证项目根上探。", "utf8");
+    await createPlanWorkbench({
+      projectRoot: root,
+      requirementPath: "requirement.md",
+      featureName: "子目录收尾"
+    });
+
+    const checkExitCode = await runCli(["check"], nestedRoot);
+    const finishExitCode = await runCli(["finish", "子目录收尾", "--check-only"], nestedRoot);
+
+    assert.equal(checkExitCode, 0);
+    assert.equal(finishExitCode, 0);
+    // 若误用 nestedRoot，finish 会找不到任务文档或写到错误位置
+    assert.match(logs.join("\n"), /子目录收尾|完成检查|协作规范|check/i);
+    await assert.rejects(
+      () => stat(join(nestedRoot, "code-helper-docs")),
+      /ENOENT/
+    );
+    await assert.rejects(
+      () => stat(join(nestedRoot, ".code-helper")),
+      /ENOENT/
+    );
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("sync-local 刷新 AGENTS 和三类项目级 skills 且不创建其他入口或 hooks", async () => {
   // sync-local 面向 code-helper 本仓库开发后刷新本地资产，不能借初始化顺带安装 Agent/Git hooks。
   const root = await mkdtemp(join(tmpdir(), "code-helper-cli-sync-local-"));

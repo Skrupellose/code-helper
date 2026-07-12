@@ -269,6 +269,115 @@ test("createCompletionReview 兼容读取归档旧英文任务文档", async () 
   }
 });
 
+test("createCompletionReview 在 mixed 部分归档时双侧探测文档并提示整理", async () => {
+  // plan 仅在 archive、result/status 仍在 active 时，不得简单报 missing-docs 而忽略 mixed。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-mixed-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await mkdir(join(root, "code-helper-docs/plan-doc/archive"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/result-doc/混合任务"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/status-doc"), { recursive: true });
+    await writeFile(
+      join(root, "code-helper-docs/plan-doc/archive/混合任务.md"),
+      "# 混合任务\n\n状态：已完成\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/result-doc/混合任务/实施记录.md"),
+      "# 混合任务实施记录\n\n状态：已完成\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/混合任务-状态.md"),
+      "# 混合任务状态\n\n## 当前执行节点\n\n状态：已完成\n\n## 子计划队列\n\n状态：已完成\n",
+      "utf8"
+    );
+
+    const review = await createCompletionReview(root, "混合任务");
+
+    assert.equal(review.taskStatus, "mixed");
+    assert.notEqual(review.reviewStatus, "missing-docs");
+    assert.equal(review.documents.plan.exists, true);
+    assert.match(review.documents.plan.relativePath, /archive/);
+    assert.equal(review.documents.result.exists, true);
+    assert.equal(review.documents.status.exists, true);
+    assert.ok(review.recommendations.some((item) => item.includes("mixed") && item.includes("--resolve-mixed")));
+    assert.ok(review.requiredConfirmations.some((item) => item.includes("mixed") && item.includes("--resolve-mixed")));
+    assert.equal(review.shouldSelectNextTask, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 支持规范化任务名查找", async () => {
+  // 文档名经 normalize 会把空格变成连字符；用户用空格形式调用 finish 时应命中同一任务。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-normalize-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/result-doc/名称-规范化"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/status-doc"), { recursive: true });
+    await writeFile(join(root, "code-helper-docs/plan-doc/名称-规范化.md"), "# 名称-规范化\n\n状态：进行中\n", "utf8");
+    await writeFile(
+      join(root, "code-helper-docs/result-doc/名称-规范化/实施记录.md"),
+      "# 实施记录\n\n状态：进行中\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/名称-规范化-状态.md"),
+      "# 状态\n\n## 当前执行节点\n\n状态：进行中\n\n## 子计划队列\n\n状态：未开始\n",
+      "utf8"
+    );
+
+    const review = await createCompletionReview(root, "名称 规范化");
+
+    assert.equal(review.featureName, "名称-规范化");
+    assert.equal(review.documents.plan.exists, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 同时统计半角与全角冒号状态枚举", async () => {
+  // 手写文档可能使用「状态:已完成」，完成检查应与「状态：已完成」同等计入。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-colon-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/result-doc/冒号兼容"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/status-doc"), { recursive: true });
+    await writeFile(
+      join(root, "code-helper-docs/plan-doc/冒号兼容.md"),
+      "# 冒号兼容\n\n状态:已完成\n状态：未开始\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/result-doc/冒号兼容/实施记录.md"),
+      "# 实施记录\n\n状态:进行中\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/冒号兼容-状态.md"),
+      "# 状态\n\n## 当前执行节点\n\n状态:被阻塞\n\n## 子计划队列\n\n状态:部分完成\n",
+      "utf8"
+    );
+
+    const review = await createCompletionReview(root, "冒号兼容");
+
+    assert.equal(review.statusCounts.done, 1);
+    assert.equal(review.statusCounts.notStarted, 1);
+    assert.equal(review.statusCounts.inProgress, 1);
+    assert.equal(review.statusCounts.blocked, 1);
+    assert.equal(review.statusCounts.partial, 1);
+    assert.equal(review.reviewStatus, "blocked");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("createCompletionReview 会保留 git 当前变更路径的首字符和中文路径", async (t) => {
   // 完成检查会把当前变更展示给用户，路径不能因为 git porcelain 解析丢首字符或把中文转成转义片段。
   try {

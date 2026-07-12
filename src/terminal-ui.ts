@@ -2,6 +2,17 @@ import { clearScreenDown, cursorTo, emitKeypressEvents } from "node:readline";
 import type { ReadStream, WriteStream } from "node:tty";
 
 /**
+ * 用户按 Ctrl+C 中断交互时抛出。
+ * keypress handler 不得直接 process.exit，否则会跳过 withRawMode 的终端恢复逻辑。
+ */
+export class TerminalInterruptError extends Error {
+  constructor(message = "用户中断") {
+    super(message);
+    this.name = "TerminalInterruptError";
+  }
+}
+
+/**
  * 单选菜单项。
  * value 是程序内部使用的稳定值，label 是展示给用户看的文案。
  */
@@ -56,7 +67,7 @@ export async function promptSelect<T extends string>(
   let selectedIndex = findNextEnabledOptionIndex(options, -1, 1);
 
   return withRawMode(input, output, () => {
-    return new Promise<T>((resolve) => {
+    return new Promise<T>((resolve, reject) => {
       /**
        * 重新绘制菜单。
        * 每次按键后清空当前屏幕区域，避免列表残影。
@@ -76,11 +87,13 @@ export async function promptSelect<T extends string>(
       /**
        * 处理键盘输入。
        * 支持方向键，也支持 j/k，方便不同终端习惯。
+       * Ctrl+C：先 cleanup 再 reject，由 withRawMode 恢复终端后以 130 退出。
        */
       const onKeypress = (_text: string, key: { name?: string; ctrl?: boolean }): void => {
         if (key.ctrl && key.name === "c") {
           cleanup();
-          process.exit(130);
+          reject(new TerminalInterruptError());
+          return;
         }
 
         if (key.name === "up" || key.name === "k") {
@@ -154,7 +167,7 @@ export async function promptMultiSelect<T extends string>(
   const nextOptions = options.map((option) => ({ ...option }));
 
   return withRawMode(input, output, () => {
-    return new Promise<MultiSelectResult<T>>((resolve) => {
+    return new Promise<MultiSelectResult<T>>((resolve, reject) => {
       /**
        * 重新绘制多选菜单。
        * checked 用 [x] / [ ] 展示，用户可以直接看到切换结果。
@@ -175,11 +188,13 @@ export async function promptMultiSelect<T extends string>(
       /**
        * 处理多选菜单键盘输入。
        * 回车只保存，不切换当前项，避免误操作。
+       * Ctrl+C 与单选一致：reject 专用错误，禁止直接 process.exit。
        */
       const onKeypress = (_text: string, key: { name?: string; ctrl?: boolean }): void => {
         if (key.ctrl && key.name === "c") {
           cleanup();
-          process.exit(130);
+          reject(new TerminalInterruptError());
+          return;
         }
 
         if (key.name === "up" || key.name === "k") {
@@ -232,17 +247,18 @@ export async function promptMultiSelect<T extends string>(
  */
 export async function promptContinue(input: ReadStream, output: WriteStream, message = "按回车返回菜单..."): Promise<void> {
   return withRawMode(input, output, () => {
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
       output.write(`\n${message}`);
 
       /**
        * 处理继续按键。
-       * 回车、空格或 Esc 都视为确认返回菜单。
+       * 回车、空格或 Esc 都视为确认返回菜单；Ctrl+C 走统一中断路径。
        */
       const onKeypress = (_text: string, key: { name?: string; ctrl?: boolean }): void => {
         if (key.ctrl && key.name === "c") {
           cleanup();
-          process.exit(130);
+          reject(new TerminalInterruptError());
+          return;
         }
 
         if (key.name === "return" || key.name === "space" || key.name === "escape") {
@@ -266,7 +282,7 @@ export async function promptContinue(input: ReadStream, output: WriteStream, mes
 
 /**
  * 在 raw mode 下执行交互函数，并确保结束时恢复终端状态。
- * 这样即使交互中抛错，也不会让用户终端停留在不可输入状态。
+ * 正常结束、业务异常、用户 Ctrl+C 都会走同一套 restore，避免终端卡在隐藏光标或 raw mode。
  */
 async function withRawMode<T>(
   input: ReadStream,
@@ -275,17 +291,73 @@ async function withRawMode<T>(
 ): Promise<T> {
   emitKeypressEvents(input);
 
+  // 记录进入前的 raw 状态，结束时原样还原
   const wasRaw = input.isRaw;
+  // 幂等恢复：catch 里可能先 restore 再 exit，finally 也会再调一次
+  let restored = false;
+
+  /**
+   * 同步恢复 setRawMode、显示光标并 pause stdin。
+   * 必须在 process.exit 之前调用：exit 会立刻终止进程，可能跳过尚未执行的 finally。
+   */
+  const restore = (): void => {
+    if (restored) {
+      return;
+    }
+
+    restored = true;
+    restoreTerminalAfterRawMode(input, output, wasRaw);
+  };
+
   input.setRawMode(true);
   input.resume();
+  // 隐藏光标，减少菜单重绘时的闪烁
   output.write("\x1B[?25l");
 
   try {
     return await action();
+  } catch (error) {
+    // 先恢复终端，再处理中断退出；顺序不可颠倒
+    restore();
+
+    if (error instanceof TerminalInterruptError) {
+      process.exit(130);
+    }
+
+    throw error;
   } finally {
+    restore();
+  }
+}
+
+/**
+ * 同步恢复 raw mode 交互对终端的改动。
+ * 独立成函数便于 catch / finally 共用，并在单测或排错时一眼看清恢复步骤。
+ */
+function restoreTerminalAfterRawMode(
+  input: ReadStream,
+  output: WriteStream,
+  wasRaw: boolean
+): void {
+  try {
+    // 显示光标（进入 raw mode 时用 \x1B[?25l 隐藏）
     output.write("\x1B[?25h");
-    input.setRawMode(wasRaw);
-    // raw mode 交互结束后释放 stdin 对事件循环的引用；后续菜单或提示会在进入下一次交互时重新 resume。
+  } catch {
+    // 输出流已关闭时忽略，避免二次异常掩盖原始错误
+  }
+
+  try {
+    if (typeof input.setRawMode === "function") {
+      input.setRawMode(wasRaw);
+    }
+  } catch {
+    // stdin 不可用时忽略
+  }
+
+  try {
+    // 释放 stdin 对事件循环的引用；后续菜单会在进入下一次交互时重新 resume
     input.pause();
+  } catch {
+    // pause 失败时忽略
   }
 }

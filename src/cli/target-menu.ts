@@ -299,22 +299,30 @@ function resolveSkillTargetMenuAnswer(
 
 /**
  * 把 Agent hook 菜单答案解析成目标列表。
- * 返回 undefined 表示用户返回；GitHub Copilot 输入会得到明确错误。
+ * 返回 undefined 表示用户返回或输入非法；非法输入只提示，不抛错打断菜单会话。
+ * 解析函数 parseAgentHookTargetMenuSelection 仍可对非法 token 抛错（供 CLI 子命令语义与单测），
+ * 文本菜单路径在此捕获后转为 undefined。
  */
 function resolveAgentHookTargetMenuAnswer(
   answer: string,
   inferredSkillTargets: SkillRegistrationTarget[]
 ): MenuTargetSelection<Exclude<HookInstallTarget, "git">> | undefined {
-  const targets = parseAgentHookTargetMenuSelection(answer, inferredSkillTargets);
+  try {
+    const targets = parseAgentHookTargetMenuSelection(answer, inferredSkillTargets);
 
-  if (targets.length === 0) {
+    if (targets.length === 0) {
+      return undefined;
+    }
+
+    return {
+      targets,
+      shouldDisableFeatureAfterRemove: isDefaultOrAllTargetAnswer(answer)
+    };
+  } catch (error) {
+    // 文本路径输入了 GitHub Copilot 或不支持目标时，打印原因并当作取消
+    console.error(error instanceof Error ? error.message : String(error));
     return undefined;
   }
-
-  return {
-    targets,
-    shouldDisableFeatureAfterRemove: isDefaultOrAllTargetAnswer(answer)
-  };
 }
 
 /**

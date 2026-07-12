@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import {
   compareVersions,
   formatOutdatedVersionMessage,
+  isLocalDevelopmentRepository,
   maybeNotifyVersionUpdate,
   shouldSkipVersionCheck
 } from "../dist/version-check.js";
@@ -25,6 +26,37 @@ test("shouldSkipVersionCheck 在 CI 和非菜单命令中跳过", () => {
   assert.equal(shouldSkipVersionCheck("help", {}), true);
   assert.equal(shouldSkipVersionCheck("update", {}), true);
   assert.equal(shouldSkipVersionCheck("sync-local", {}), true);
+});
+
+test("isLocalDevelopmentRepository 以 package.json name 判定，不依赖目录名后缀", async () => {
+  // 正样本：包名等于本包应识别为本仓开发环境并跳过版本检查。
+  // 负样本：目录名虽含 code-helper 但包名不同，或无 package.json，均不得误判。
+  const positiveRoot = await mkdtemp(join(tmpdir(), "my-code-helper-positive-"));
+  const negativeRoot = await mkdtemp(join(tmpdir(), "code-helper-negative-"));
+  const bareRoot = await mkdtemp(join(tmpdir(), "code-helper-bare-"));
+
+  try {
+    await writeFile(
+      join(positiveRoot, "package.json"),
+      JSON.stringify({ name: "@skrupellose/code-helper", version: "0.0.0" }, null, 2),
+      "utf8"
+    );
+    await writeFile(
+      join(negativeRoot, "package.json"),
+      JSON.stringify({ name: "my-code-helper", version: "1.0.0" }, null, 2),
+      "utf8"
+    );
+
+    assert.equal(isLocalDevelopmentRepository(positiveRoot), true);
+    assert.equal(isLocalDevelopmentRepository(negativeRoot), false);
+    assert.equal(isLocalDevelopmentRepository(bareRoot), false);
+    // 真实本仓（npm test 的 cwd）应判定为正样本
+    assert.equal(isLocalDevelopmentRepository(process.cwd()), true);
+  } finally {
+    await rm(positiveRoot, { recursive: true, force: true });
+    await rm(negativeRoot, { recursive: true, force: true });
+    await rm(bareRoot, { recursive: true, force: true });
+  }
 });
 
 test("formatOutdatedVersionMessage 简洁说明菜单快捷升级含义", () => {

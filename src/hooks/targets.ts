@@ -63,11 +63,19 @@ export function formatAgentTargetName(target: AgentHookInstallTarget): string {
 }
 
 /**
- * Git hook 安装路径。
- * 通过 projectPath 统一拼接项目内路径，避免不同平台路径分隔符不一致。
+ * 默认 Git hook 安装路径（假定 .git 为普通目录）。
+ * 实际安装/检测请优先使用 git.ts 的 resolveGitHookPath，以支持 worktree。
+ */
+export function getDefaultGitHookPath(projectRoot: string): string {
+  return projectPath(projectRoot, ".git/hooks/pre-commit");
+}
+
+/**
+ * @deprecated 请使用 getDefaultGitHookPath 或 resolveGitHookPath；保留别名避免外部误用时行为突变。
+ * 同步返回默认路径，不解析 worktree。
  */
 export function getGitHookPath(projectRoot: string): string {
-  return projectPath(projectRoot, ".git/hooks/pre-commit");
+  return getDefaultGitHookPath(projectRoot);
 }
 
 /**

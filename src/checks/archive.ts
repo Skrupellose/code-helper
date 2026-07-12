@@ -38,7 +38,7 @@ export async function checkArchiveState(projectRoot: string, config: CodeHelperC
         level: "warning",
         code: "mixed-task-archive-state",
         message: `任务同时存在活动文档和归档文档：${task.featureName}`,
-        suggestion: "确认该任务是否已经结束；如果已结束，运行 `npx @skrupellose/code-helper archive <中文功能名>` 或手动补齐归档。"
+        suggestion: "确认该任务是否已经结束：若 archive 侧为正确终态，运行 `npx @skrupellose/code-helper archive <中文功能名> --resolve-mixed` 清理活动副本；若仍有活动侧未归档文档，先补齐后再执行 `npx @skrupellose/code-helper archive <中文功能名>`。"
       });
     }
   }

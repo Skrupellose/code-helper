@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
 import { FEATURE_KEYS } from "../constants.js";
-import { ensureDirectory, projectPath, upsertMarkdownSection, writeText } from "../fs-utils.js";
+import { ensureDirectory, projectPath, readTextIfExists, upsertMarkdownSection, writeText } from "../fs-utils.js";
 import { getHookTemplates, getRuleTemplates, getSkillTemplates } from "../templates.js";
 import type { CodeHelperConfig, OperationResult } from "../types.js";
 import { renderEntryFileList } from "./entries.js";
@@ -86,7 +86,7 @@ export async function installSkillTemplates(projectRoot: string, config: CodeHel
 
 /**
  * 安装可选 hook 模板。
- * 即使 gitHooks 功能关闭，也只生成 sample 文件，不写入 .git/hooks。
+ * 即使功能关闭也会写入 sample 文件（action 为 created/updated，message 说明仅 sample），不安装实际 hook。
  */
 export async function installHookTemplates(projectRoot: string, config: CodeHelperConfig): Promise<OperationResult[]> {
   const operations: OperationResult[] = [];
@@ -94,14 +94,18 @@ export async function installHookTemplates(projectRoot: string, config: CodeHelp
   for (const template of getHookTemplates()) {
     const targetPath = projectPath(projectRoot, join(config.directories.workspace, "hooks", template.fileName));
     const enabled = config.features[template.feature].enabled;
+    const existing = await readTextIfExists(targetPath);
+    const action = existing === undefined ? "created" : "updated";
+    const kindLabel = template.feature === "gitHooks" ? "Git hook" : "Agent hook";
+    const featureLabel = template.feature === "gitHooks" ? "Git hooks" : "Agent hooks";
 
     await writeText(targetPath, template.content);
     operations.push({
       path: targetPath,
-      action: enabled ? "updated" : "skipped",
+      action,
       message: enabled
-        ? `已刷新可选 ${template.feature === "gitHooks" ? "Git hook" : "Agent hook"} 模板`
-        : `${template.feature === "gitHooks" ? "Git hooks" : "Agent hooks"} 默认关闭，仅保留 sample 模板`
+        ? `已${action === "created" ? "创建" : "刷新"}可选 ${kindLabel} 模板`
+        : `${featureLabel} 功能关闭，已${action === "created" ? "创建" : "更新"} sample 模板（仅示例，未安装实际 hook）`
     });
   }
 

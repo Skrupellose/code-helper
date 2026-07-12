@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 
-import { listTasks, type TaskRecord } from "./archive.js";
+import { getArchiveFeatureNameCandidates, listTasks, type TaskRecord } from "./archive.js";
 import { loadConfig } from "./config.js";
 import { portablePath, projectPath, readTextIfExists } from "./fs-utils.js";
 import { MANUAL_TEST_FILE_NAME, RESULT_RECORD_FILE_NAME } from "./workflows.js";
@@ -69,10 +69,19 @@ export async function createCompletionReview(projectRoot: string, featureName: s
   const task = findTask(tasks, featureName);
 
   if (task === undefined) {
-    throw new Error(`未找到任务文档：${featureName}。请先生成计划文档，或确认任务名称是否正确。`);
+    // 找不到任务时附上可用任务列表，方便用户对照空格/连字符/中英文候选名差异。
+    const availableTasks = tasks.map((item) => item.featureName);
+    const availableHint = availableTasks.length > 0
+      ? `可用任务：${availableTasks.join("、")}。`
+      : "当前项目还没有可识别的任务文档。";
+    throw new Error(`未找到任务文档：${featureName}。请先生成计划文档，或确认任务名称是否正确。${availableHint}`);
   }
 
-  const plan = await readDocument(projectRoot, getPlanDocumentPath(task, config.directories.planDoc));
+  // plan 也走候选列表：mixed 时需在 active 与 archive 双侧探测，避免误判缺失。
+  const plan = await readDocumentCandidates(
+    projectRoot,
+    getPlanDocumentPathCandidates(task, config.directories.planDoc)
+  );
   const result = await readDocumentCandidates(
     projectRoot,
     getResultDocumentPathCandidates(task, config.directories.resultDoc)
@@ -100,10 +109,12 @@ export async function createCompletionReview(projectRoot: string, featureName: s
     hasSubPlanQueue
   });
   const shouldAskMemoryUpdate = detectMemoryUpdateNeed(changedPaths, combinedContent);
-  const shouldAskArchive = reviewStatus === "ready-to-archive";
-  const shouldSelectNextTask = shouldAskArchive;
+  // mixed 时即使文档齐全也要先整理冲突，不能直接当 ready-to-archive 去切换任务。
+  const shouldAskArchive = reviewStatus === "ready-to-archive" || task.status === "mixed";
+  const shouldSelectNextTask = reviewStatus === "ready-to-archive" && task.status !== "mixed";
   const requiredConfirmations = buildRequiredConfirmations({
     reviewStatus,
+    taskStatus: task.status,
     shouldAskMemoryUpdate,
     shouldAskArchive,
     shouldSelectNextTask
@@ -129,6 +140,7 @@ export async function createCompletionReview(projectRoot: string, featureName: s
     requiredConfirmations,
     recommendations: buildRecommendations({
       reviewStatus,
+      taskStatus: task.status,
       shouldAskMemoryUpdate,
       shouldAskArchive,
       shouldSelectNextTask,
@@ -144,13 +156,27 @@ export async function createCompletionReview(projectRoot: string, featureName: s
  */
 function buildRequiredConfirmations(input: {
   reviewStatus: CompletionReviewStatus;
+  taskStatus: TaskRecord["status"];
   shouldAskMemoryUpdate: boolean;
   shouldAskArchive: boolean;
   shouldSelectNextTask: boolean;
 }): string[] {
   const confirmations: string[] = [];
 
-  if (input.reviewStatus === "needs-work" || input.reviewStatus === "blocked" || input.reviewStatus === "node-review" || input.reviewStatus === "missing-docs") {
+  // mixed 时必须先处理 active/archive 冲突，不能当成普通未完成任务或直接切换新任务。
+  if (input.taskStatus === "mixed") {
+    confirmations.push(
+      "任务处于 mixed（活动文档与归档文档并存），必须先整理后再继续：确认 archive 为终态则执行 `code-helper archive <功能名> --resolve-mixed` 清理活动副本；若活动侧仍有未归档内容，补齐后执行 `code-helper archive <功能名>`。"
+    );
+  }
+
+  if (
+    input.taskStatus !== "mixed"
+    && (input.reviewStatus === "needs-work"
+      || input.reviewStatus === "blocked"
+      || input.reviewStatus === "node-review"
+      || input.reviewStatus === "missing-docs")
+  ) {
     confirmations.push("不得询问归档或切换新任务，必须继续当前任务或先补齐阻塞/缺失文档。");
   }
 
@@ -158,7 +184,9 @@ function buildRequiredConfirmations(input: {
     confirmations.push("必须询问用户是否更新长期记忆；用户确认前不得写入长期规则。");
   }
 
-  if (input.shouldAskArchive) {
+  if (input.shouldAskArchive && input.taskStatus === "mixed") {
+    confirmations.push("必须先向用户说明 mixed 冲突处理方式，用户确认前不得执行 archive 或 --resolve-mixed。");
+  } else if (input.shouldAskArchive) {
     confirmations.push("必须询问用户是否归档当前任务文档；用户确认前不得执行 archive。");
   }
 
@@ -170,13 +198,31 @@ function buildRequiredConfirmations(input: {
 }
 
 /**
- * 根据任务状态返回计划文档读取路径。
+ * 按任务状态合并 active / archive 文档候选路径。
+ * - active：只读活动侧
+ * - archived：只读归档侧
+ * - mixed：先 active 后 archive，避免部分归档时误判 missing-docs
+ */
+function mergeDocumentPathCandidates(task: TaskRecord, activePaths: string[], archivedPaths: string[]): string[] {
+  if (task.status === "archived") {
+    return archivedPaths;
+  }
+
+  if (task.status === "mixed") {
+    return [...activePaths, ...archivedPaths];
+  }
+
+  return activePaths;
+}
+
+/**
+ * 根据任务状态返回计划文档读取候选路径。
  * archived 任务已经结束，完成检查应读取 archive 中的文档而不是误判 active 文档缺失。
  */
-function getPlanDocumentPath(task: TaskRecord, planDirectory: string): string {
+function getPlanDocumentPathCandidates(task: TaskRecord, planDirectory: string): string[] {
   const activePath = portablePath(planDirectory, `${task.featureName}.md`);
   const archivedPath = portablePath(planDirectory, "archive", `${task.featureName}.md`);
-  return task.status === "archived" ? archivedPath : activePath;
+  return mergeDocumentPathCandidates(task, [activePath], [archivedPath]);
 }
 
 /**
@@ -184,14 +230,16 @@ function getPlanDocumentPath(task: TaskRecord, planDirectory: string): string {
  * 新项目固定生成中文文件；旧项目可能仍保留 implementation.md，因此作为兼容 fallback。
  */
 function getResultDocumentPathCandidates(task: TaskRecord, resultDirectory: string): string[] {
-  const activePath = portablePath(resultDirectory, task.featureName, RESULT_RECORD_FILE_NAME);
-  const legacyActivePath = portablePath(resultDirectory, task.featureName, LEGACY_RESULT_RECORD_FILE_NAME);
-  const archivedPath = portablePath(resultDirectory, "archive", task.featureName, RESULT_RECORD_FILE_NAME);
-  const legacyArchivedPath = portablePath(resultDirectory, "archive", task.featureName, LEGACY_RESULT_RECORD_FILE_NAME);
+  const activePaths = [
+    portablePath(resultDirectory, task.featureName, RESULT_RECORD_FILE_NAME),
+    portablePath(resultDirectory, task.featureName, LEGACY_RESULT_RECORD_FILE_NAME)
+  ];
+  const archivedPaths = [
+    portablePath(resultDirectory, "archive", task.featureName, RESULT_RECORD_FILE_NAME),
+    portablePath(resultDirectory, "archive", task.featureName, LEGACY_RESULT_RECORD_FILE_NAME)
+  ];
 
-  return task.status === "archived"
-    ? [archivedPath, legacyArchivedPath]
-    : [activePath, legacyActivePath];
+  return mergeDocumentPathCandidates(task, activePaths, archivedPaths);
 }
 
 /**
@@ -199,14 +247,16 @@ function getResultDocumentPathCandidates(task: TaskRecord, resultDirectory: stri
  * 新版状态记录优先使用 `-状态.md`，旧项目的 `-status.md` 仅作为 fallback 读取。
  */
 function getStatusDocumentPathCandidates(task: TaskRecord, statusDirectory: string): string[] {
-  const activePath = portablePath(statusDirectory, `${task.featureName}-状态.md`);
-  const legacyActivePath = portablePath(statusDirectory, `${task.featureName}-status.md`);
-  const archivedPath = portablePath(statusDirectory, "archive", `${task.featureName}-状态.md`);
-  const legacyArchivedPath = portablePath(statusDirectory, "archive", `${task.featureName}-status.md`);
+  const activePaths = [
+    portablePath(statusDirectory, `${task.featureName}-状态.md`),
+    portablePath(statusDirectory, `${task.featureName}-status.md`)
+  ];
+  const archivedPaths = [
+    portablePath(statusDirectory, "archive", `${task.featureName}-状态.md`),
+    portablePath(statusDirectory, "archive", `${task.featureName}-status.md`)
+  ];
 
-  return task.status === "archived"
-    ? [archivedPath, legacyArchivedPath]
-    : [activePath, legacyActivePath];
+  return mergeDocumentPathCandidates(task, activePaths, archivedPaths);
 }
 
 /**
@@ -214,44 +264,70 @@ function getStatusDocumentPathCandidates(task: TaskRecord, statusDirectory: stri
  * 手工测试文档仍按中文生成，manual-test.md 仅用于旧项目完成检查兼容。
  */
 function getManualTestDocumentPathCandidates(task: TaskRecord, resultDirectory: string): string[] {
-  const activePath = portablePath(resultDirectory, task.featureName, MANUAL_TEST_FILE_NAME);
-  const legacyActivePath = portablePath(resultDirectory, task.featureName, LEGACY_MANUAL_TEST_FILE_NAME);
-  const archivedPath = portablePath(resultDirectory, "archive", task.featureName, MANUAL_TEST_FILE_NAME);
-  const legacyArchivedPath = portablePath(resultDirectory, "archive", task.featureName, LEGACY_MANUAL_TEST_FILE_NAME);
+  const activePaths = [
+    portablePath(resultDirectory, task.featureName, MANUAL_TEST_FILE_NAME),
+    portablePath(resultDirectory, task.featureName, LEGACY_MANUAL_TEST_FILE_NAME)
+  ];
+  const archivedPaths = [
+    portablePath(resultDirectory, "archive", task.featureName, MANUAL_TEST_FILE_NAME),
+    portablePath(resultDirectory, "archive", task.featureName, LEGACY_MANUAL_TEST_FILE_NAME)
+  ];
 
-  return task.status === "archived"
-    ? [archivedPath, legacyArchivedPath]
-    : [activePath, legacyActivePath];
+  return mergeDocumentPathCandidates(task, activePaths, archivedPaths);
 }
 
 /**
  * 从任务列表中按功能名查找任务。
- * 先做精确匹配，再做大小写不敏感匹配，兼容用户手动输入。
+ * 依次尝试精确匹配、大小写不敏感匹配、规范化候选名匹配（空格/连字符、中英文命名规则）。
  */
 function findTask(tasks: TaskRecord[], featureName: string): TaskRecord | undefined {
-  return tasks.find((task) => task.featureName === featureName)
-    ?? tasks.find((task) => task.featureName.toLowerCase() === featureName.toLowerCase());
+  const exact = tasks.find((task) => task.featureName === featureName);
+  if (exact !== undefined) {
+    return exact;
+  }
+
+  const caseInsensitive = tasks.find((task) => task.featureName.toLowerCase() === featureName.toLowerCase());
+  if (caseInsensitive !== undefined) {
+    return caseInsensitive;
+  }
+
+  const inputKeys = getFeatureNameLookupKeys(featureName);
+  return tasks.find((task) => {
+    for (const key of getFeatureNameLookupKeys(task.featureName)) {
+      if (inputKeys.has(key)) {
+        return true;
+      }
+    }
+
+    return false;
+  });
 }
 
 /**
- * 读取文档内容，并保留相对路径和存在状态。
+ * 生成用于任务名比对的查找键集合。
+ * 复用 archive 的功能名候选规则，保证 finish / archive / tasks 对同一输入命中同一任务。
  */
-async function readDocument(
-  projectRoot: string,
-  relativePath: string
-): Promise<DocumentPresence & { content: string | undefined }> {
-  const content = await readTextIfExists(projectPath(projectRoot, relativePath));
+function getFeatureNameLookupKeys(rawFeatureName: string): Set<string> {
+  const keys = new Set<string>();
+  const raw = rawFeatureName.trim();
 
-  return {
-    relativePath,
-    exists: content !== undefined,
-    content
-  };
+  if (raw.length > 0) {
+    keys.add(raw);
+    keys.add(raw.toLowerCase());
+  }
+
+  for (const candidate of getArchiveFeatureNameCandidates(rawFeatureName)) {
+    keys.add(candidate);
+    keys.add(candidate.toLowerCase());
+  }
+
+  return keys;
 }
 
 /**
  * 按优先级读取文档候选路径。
  * 中文新文件始终排在第一位；旧英文文件仅在中文文件不存在时兼容读取。
+ * mixed 时候选列表已合并 active 与 archive，按先 active 后 archive 探测。
  */
 async function readDocumentCandidates(
   projectRoot: string,
@@ -288,15 +364,16 @@ function toDocumentPresence(document: DocumentPresence & { content: string | und
 
 /**
  * 统计计划和状态文档中的标准状态枚举。
+ * 同时接受全角冒号「状态：」与半角冒号「状态:」，兼容手写与自动生成混用。
  * 这是启发式判断，最终仍以用户验收和 agent 的实现检查为准。
  */
 function countStatusMarkers(content: string): CompletionReview["statusCounts"] {
   return {
-    notStarted: countMatches(content, /状态：未开始/gu),
-    inProgress: countMatches(content, /状态：进行中/gu),
-    partial: countMatches(content, /状态：部分完成/gu),
-    blocked: countMatches(content, /状态：被阻塞/gu),
-    done: countMatches(content, /状态：已完成/gu)
+    notStarted: countMatches(content, /状态[：:]未开始/gu),
+    inProgress: countMatches(content, /状态[：:]进行中/gu),
+    partial: countMatches(content, /状态[：:]部分完成/gu),
+    blocked: countMatches(content, /状态[：:]被阻塞/gu),
+    done: countMatches(content, /状态[：:]已完成/gu)
   };
 }
 
@@ -410,6 +487,7 @@ function detectMemoryUpdateNeed(changedPaths: string[], content: string): boolea
  */
 function buildRecommendations(input: {
   reviewStatus: CompletionReviewStatus;
+  taskStatus: TaskRecord["status"];
   shouldAskMemoryUpdate: boolean;
   shouldAskArchive: boolean;
   shouldSelectNextTask: boolean;
@@ -418,8 +496,19 @@ function buildRecommendations(input: {
 }): string[] {
   const recommendations: string[] = [];
 
+  // mixed 优先提示，避免只看到 missing-docs / ready-to-archive 而忽略 active/archive 冲突。
+  if (input.taskStatus === "mixed") {
+    recommendations.push(
+      "任务处于 mixed：active 与 archive 同时存在同名文档。请先确认哪一侧为正确版本；若 archive 已是终态，执行 `code-helper archive <功能名> --resolve-mixed` 清理活动副本；若活动侧仍有内容，补齐 plan/result/status 后执行 `code-helper archive <功能名>` 完成归档。"
+    );
+  }
+
   if (input.reviewStatus === "missing-docs") {
-    recommendations.push("先补齐 plan-doc、result-doc 和 status-doc，再判断功能是否完成。");
+    recommendations.push(
+      input.taskStatus === "mixed"
+        ? "mixed 场景下请同时检查 active 与 archive 两侧：补齐仍缺失的 plan-doc、result-doc 和 status-doc 后再判断功能是否完成。"
+        : "先补齐 plan-doc、result-doc 和 status-doc，再判断功能是否完成。"
+    );
   }
 
   if (input.reviewStatus === "blocked") {
@@ -454,7 +543,9 @@ function buildRecommendations(input: {
     recommendations.push("如果本轮变更只是一次性实现细节，不需要更新长期记忆。");
   }
 
-  if (input.shouldAskArchive) {
+  if (input.shouldAskArchive && input.taskStatus === "mixed") {
+    recommendations.push("整理 mixed 冲突并经用户确认后，再执行 archive 或 --resolve-mixed；确认前不得切换到新任务。");
+  } else if (input.shouldAskArchive) {
     recommendations.push("功能整体完成并经用户确认后，询问是否执行文档归档。");
   }
 

@@ -96,10 +96,11 @@ async function findArchiveConflicts(
 }
 
 /**
- * 生成归档任务名候选。
- * 新文档强制中文命名；旧项目可能仍有英文 feature 文档，因此归档时保留旧英文兼容。
+ * 生成归档与任务查找共用的功能名候选。
+ * 新文档强制中文命名；旧项目可能仍有英文 feature 文档，因此保留旧英文兼容。
+ * 导出给 completion 等模块复用，避免各处自行实现不一致的规范化规则。
  */
-function getArchiveFeatureNameCandidates(rawFeatureName: string): string[] {
+export function getArchiveFeatureNameCandidates(rawFeatureName: string): string[] {
   const legacyName = normalizeFeatureName(rawFeatureName);
   const chineseName = normalizeDocumentName(rawFeatureName, "功能文档");
   const orderedNames = containsChinese(rawFeatureName)

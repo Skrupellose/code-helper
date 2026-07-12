@@ -13,45 +13,88 @@ export const CODE_HELPER_GIT_HOOK_MARKER = "# code-helper:managed-pre-commit";
 /**
  * 渲染 Git pre-commit hook 内容。
  * Git hook 是提交前兜底检查，和 Agent Stop hook 的 JSON 协议完全分离。
+ *
+ * 解析顺序：
+ * 1. 项目 node_modules 中的 code-helper 二进制（用户项目最常见）
+ * 2. 本仓库开发态：package.json 名为 @skrupellose/code-helper 且存在 dist/index.js
+ * 3. 已安装包的 dist 入口（无 .bin 链接时）
+ * 4. 回退 npx（可能触网；在 code-helper 源码仓内单独依赖 npx 会找不到本地 bin）
  */
 export function renderGitHook(): string {
   return `#!/bin/sh
 ${CODE_HELPER_GIT_HOOK_MARKER}
-npx @skrupellose/code-helper check
+if [ -f "./node_modules/.bin/code-helper" ]; then
+  exec ./node_modules/.bin/code-helper check
+fi
+if [ -f "./dist/index.js" ] && [ -f "./package.json" ] && grep -q '"name": "@skrupellose/code-helper"' ./package.json 2>/dev/null; then
+  exec node ./dist/index.js check
+fi
+if [ -f "./node_modules/@skrupellose/code-helper/dist/index.js" ]; then
+  exec node ./node_modules/@skrupellose/code-helper/dist/index.js check
+fi
+exec npx --yes @skrupellose/code-helper check
 `;
 }
 
 /**
  * 渲染 Agent Stop hook 包装脚本。
  * Codex Stop hook 会解析 stdout 为 JSON，因此所有检查文本都必须写入 stderr。
+ * 任意失败路径仍保证 stdout 输出合法 JSON `{}`，再以非 0 退出码表示检查未通过或未跑完。
  */
 export function renderAgentFinishCheckScript(): string {
   return `#!/usr/bin/env node
 /**
  * code-helper Agent Stop hook 包装脚本。
  * Codex Stop hook 会解析 stdout 为 JSON，因此所有检查文本都必须写入 stderr。
+ * 任意失败路径仍保证 stdout 输出合法 JSON {}，再以非 0 退出码表示检查未通过或未跑完。
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const invocation = resolveCodeHelperInvocation();
-const result = spawnSync(invocation.command, invocation.args, {
-  cwd: process.cwd(),
-  encoding: "utf8"
-});
+let exitCode = 1;
 
-// 把 code-helper 的人类可读输出转到 stderr，避免污染 Stop hook 的 JSON stdout。
-for (const chunk of [result.stdout, result.stderr]) {
-  const text = chunk.trim();
-  if (text !== "") {
-    console.error(text);
+try {
+  const invocation = resolveCodeHelperInvocation();
+  const result = spawnSync(invocation.command, invocation.args, {
+    cwd: process.cwd(),
+    encoding: "utf8"
+  });
+
+  // spawnSync 在部分失败场景下 stdout/stderr 可能为 null，必须先规范化再 trim。
+  for (const chunk of [result.stdout, result.stderr]) {
+    const text = (chunk ?? "").trim();
+    if (text !== "") {
+      console.error(text);
+    }
   }
+
+  if (result.error) {
+    // 子进程未能启动（例如命令不存在），finish 检查未真正跑完。
+    console.error(\`code-helper finish 检查启动失败：\${result.error.message}\`);
+    exitCode = 1;
+  } else if (result.signal) {
+    // 被信号打断时 status 常为 null，不能按成功处理。
+    console.error(\`code-helper finish 检查被信号中断：\${result.signal}\`);
+    exitCode = 1;
+  } else if (result.status === null) {
+    // status 为 null 且无 error/signal 时仍视为未正常结束，避免假成功。
+    console.error("code-helper finish 检查未正常结束（exit status 为空）");
+    exitCode = 1;
+  } else {
+    exitCode = result.status;
+  }
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(\`code-helper finish 检查执行异常：\${message}\`);
+  exitCode = 1;
+} finally {
+  // Stop hook stdout 必须始终是合法 JSON；空对象表示不阻止 agent 停止。
+  // 先写 JSON 再按 exitCode 退出，避免失败路径破坏 Codex Stop 协议。
+  process.stdout.write("{}\\n");
 }
 
-// Stop hook stdout 必须始终是合法 JSON；空对象表示不阻止 agent 停止。
-process.stdout.write("{}\\n");
-process.exit(result.status ?? 0);
+process.exit(exitCode);
 
 function resolveCodeHelperInvocation() {
   const localEntry = join(process.cwd(), "dist", "index.js");
