@@ -16,6 +16,7 @@ import {
   getHooksMenuItems,
   getMainMenuGroups,
   getSkillMenuItems,
+  isFatalInteractiveMenuError,
   parseAgentHookTargetMenuSelection,
   parseSkillTargetMenuSelection,
   resolveCodeHelperUpdateCommand,
@@ -25,6 +26,36 @@ import {
 import { initializeProject } from "../dist/init.js";
 import { resolvePackageManagerSpawnCommand } from "../dist/cli/quick-upgrade.js";
 import { createPlanWorkbench } from "../dist/workflows.js";
+
+test("isFatalInteractiveMenuError：code / AbortError 命中，普通 Error 不命中", () => {
+  // 纯函数契约：优先 name/code，message 仅兜底；业务 Error 不得被当成致命会话错误。
+  const abortError = new Error("aborted");
+  abortError.name = "AbortError";
+  assert.equal(isFatalInteractiveMenuError(abortError), true);
+
+  const closed = Object.assign(new Error("Interface closed"), { code: "ERR_USE_AFTER_CLOSE" });
+  assert.equal(isFatalInteractiveMenuError(closed), true);
+
+  const destroyed = Object.assign(new Error("stream destroyed"), { code: "ERR_STREAM_DESTROYED" });
+  assert.equal(isFatalInteractiveMenuError(destroyed), true);
+
+  const epipe = Object.assign(new Error("broken pipe"), { code: "EPIPE" });
+  assert.equal(isFatalInteractiveMenuError(epipe), true);
+
+  // message 子串兜底（无 code 的历史文案）
+  assert.equal(isFatalInteractiveMenuError(new Error("readline was closed")), true);
+  assert.equal(
+    isFatalInteractiveMenuError(new Error("The readline interface instance has been finished")),
+    true
+  );
+
+  // 普通业务错误与非 Error 值不得命中
+  assert.equal(isFatalInteractiveMenuError(new Error("功能文档不存在")), false);
+  assert.equal(isFatalInteractiveMenuError(new Error("invalid selection")), false);
+  assert.equal(isFatalInteractiveMenuError("string error"), false);
+  assert.equal(isFatalInteractiveMenuError(null), false);
+  assert.equal(isFatalInteractiveMenuError(undefined), false);
+});
 
 test("主菜单按项目准备、任务推进、项目维护、工具设置分组展示", () => {
   // 主菜单分组是菜单信息架构的稳定契约，raw mode 和数字兜底菜单都复用这份配置。

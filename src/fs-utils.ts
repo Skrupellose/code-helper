@@ -14,6 +14,12 @@ function isNotFoundError(error: unknown): boolean {
 }
 
 /**
+ * 与 `node:fs/promises` 的 `access` 兼容的探测函数签名。
+ * 供 pathExists 第二参注入，仅用于测试；生产默认使用真实 access。
+ */
+export type PathAccessFn = (path: string, mode?: number) => Promise<void>;
+
+/**
  * 判断路径是否存在（文件或目录均可）。
  *
  * 语义约定（全仓库统一）：
@@ -23,10 +29,16 @@ function isNotFoundError(error: unknown): boolean {
  * 使用 `access` 而非读取内容，可安全探测二进制文件（如 bun.lockb）。
  * 若调用方必须在权限等错误时也当作“不存在”继续走 soft miss，请在调用处显式 try/catch，
  * 不要在此处静默吞掉非 ENOENT 错误，以免掩盖真实环境问题。
+ *
+ * @param path 待探测路径
+ * @param accessImpl 可选 access 实现，**仅供测试注入**；生产请省略，默认 `node:fs/promises.access`
  */
-export async function pathExists(path: string): Promise<boolean> {
+export async function pathExists(
+  path: string,
+  accessImpl: PathAccessFn = access
+): Promise<boolean> {
   try {
-    await access(path);
+    await accessImpl(path);
     return true;
   } catch (error) {
     if (isNotFoundError(error)) {

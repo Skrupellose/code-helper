@@ -69,6 +69,7 @@ import {
   runSkills
 } from "./cli/commands/tools.js";
 import { printHelp } from "./cli/help.js";
+import { isFatalInteractiveMenuError } from "./cli/menu-errors.js";
 import { resolveInitializedProjectRoot } from "./project-root.js";
 
 export {
@@ -109,6 +110,8 @@ export {
   SKILL_MENU_ITEMS,
   type SubMenuItem
 } from "./cli/sub-menus.js";
+// 交互菜单致命错误判断：供单测与外部复用
+export { isFatalInteractiveMenuError } from "./cli/menu-errors.js";
 
 /**
  * CLI 主入口。
@@ -175,11 +178,6 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
 }
 
 /**
- * 无参数时展示交互菜单。
- * 使用 Node 内置 readline，减少首版运行依赖和安装体积。
- * 菜单循环内业务错误只提示并继续，避免一次动作失败就结束整个会话。
- */
-/**
  * 主菜单循环内可变状态。
  * 快捷升级成功后需要清空 versionUpdate 并重建 menuOptions，
  * 否则下一轮循环仍会显示“有更新”入口（文本菜单与 raw 菜单共用此状态）。
@@ -189,6 +187,12 @@ interface InteractiveMenuState {
   menuOptions: ReturnType<typeof buildMainMenuSelectOptions>;
 }
 
+/**
+ * 无参数时展示交互菜单。
+ * 使用 Node 内置 readline，减少首版运行依赖和安装体积。
+ * 菜单循环内业务错误只提示并继续，避免一次动作失败就结束整个会话。
+ * 主菜单 Esc（TerminalCancelError）仅取消本次选择并回到菜单，不退出进程。
+ */
 async function runInteractiveMenu(
   projectRoot: string,
   versionUpdate?: VersionUpdateState,
@@ -218,6 +222,7 @@ async function runInteractiveMenu(
       } catch (error) {
         // 主菜单 Esc：取消本次选择，重新显示菜单，不退出进程
         if (error instanceof TerminalCancelError) {
+          console.log("已取消，返回菜单。");
           continue;
         }
 
@@ -386,22 +391,6 @@ async function runInteractiveMenuIteration(options: {
     default:
       console.log("无效选择，请重新输入。");
   }
-}
-
-/**
- * 判断交互菜单是否遇到无法继续的致命错误。
- * stdin / readline 关闭后无法再读输入，应结束会话而不是假装回到菜单。
- */
-function isFatalInteractiveMenuError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  return message.includes("readline was closed")
-    || message.includes("the readline interface instance has been finished")
-    || (message.includes("stdin") && (message.includes("close") || message.includes("closed")))
-    || error.name === "AbortError";
 }
 
 /**

@@ -31,9 +31,35 @@ test("pathExists：存在为 true，ENOENT 为 false", async () => {
   }
 });
 
-test("pathExists：非 ENOENT 错误应向上抛出", async () => {
+test("pathExists：非 ENOENT 错误应向上抛出（注入 access，跨平台）", async () => {
+  // 通过可选第二参注入 access 实现，不依赖 chmod，win32 也能稳定覆盖 EACCES 契约。
+  const eaccesAccess = async () => {
+    const error = new Error("permission denied");
+    error.code = "EACCES";
+    throw error;
+  };
+
+  await assert.rejects(() => pathExists("/any/path", eaccesAccess), (error) => {
+    assert.ok(error && typeof error === "object" && "code" in error);
+    assert.equal(error.code, "EACCES");
+    return true;
+  });
+});
+
+test("pathExists：注入 access 时 ENOENT 仍 soft miss 为 false", async () => {
+  // 注入实现也必须遵守 ENOENT → false，避免测试双轨语义。
+  const enoentAccess = async () => {
+    const error = new Error("not found");
+    error.code = "ENOENT";
+    throw error;
+  };
+
+  assert.equal(await pathExists("/missing", enoentAccess), false);
+});
+
+test("pathExists：非 ENOENT 错误应向上抛出（chmod 场景，非 win32）", async () => {
   // 权限等错误不能被吞掉，调用方若需要 soft miss 必须自行 try/catch。
-  // 在不支持 chmod 限制目录遍历的平台上跳过，避免误报。
+  // 在不支持 chmod 限制目录遍历的平台上跳过，避免误报；跨平台契约由注入测覆盖。
   if (process.platform === "win32") {
     return;
   }

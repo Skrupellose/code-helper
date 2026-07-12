@@ -12,6 +12,7 @@ import {
   normalizeRuleDocumentForCompare
 } from "../dist/fs-utils.js";
 import {
+  getLegacyRuleTemplateFingerprints,
   initializeProject,
   installRuleTemplates,
   refreshRuleTemplates,
@@ -51,6 +52,45 @@ function replaceEntrySectionBody(content, newBody) {
     `## 调用入口文件\n\n${newBody}\n`
   );
 }
+
+/**
+ * 根据 fixture 文件名解析对应内置规则名（LEGACY 表的 key）。
+ * 约定：`{规则基名}-{版本或提交}.md`，例如 `Agent协作规范-0.1.0.md`。
+ */
+function resolveLegacyRuleNameFromFixture(fixtureFileName, legacyKeys) {
+  for (const ruleName of legacyKeys) {
+    const baseName = ruleName.replace(/\.md$/u, "");
+    if (fixtureFileName.startsWith(`${baseName}-`) && fixtureFileName.endsWith(".md")) {
+      return ruleName;
+    }
+  }
+
+  return undefined;
+}
+
+test("tests/fixtures/user-rules 中每个 fixture 的指纹落在 LEGACY 对应规则名下", async () => {
+  // 轻量防漂移：fixture 用于无指纹 state 升级路径，必须与 LEGACY 表可对上，否则历史升级会误判为用户改动。
+  const legacy = getLegacyRuleTemplateFingerprints();
+  const legacyKeys = Object.keys(legacy);
+  const fixturesDir = join(process.cwd(), "tests/fixtures/user-rules");
+  const fixtureFiles = (await readdir(fixturesDir)).filter((name) => name.endsWith(".md"));
+
+  assert.ok(fixtureFiles.length > 0, "应至少存在一个历史规则 fixture");
+
+  for (const fixtureFile of fixtureFiles) {
+    const ruleName = resolveLegacyRuleNameFromFixture(fixtureFile, legacyKeys);
+    assert.ok(ruleName, `无法从 fixture 文件名解析规则名：${fixtureFile}`);
+
+    const content = await readFile(join(fixturesDir, fixtureFile), "utf8");
+    const fingerprint = createRuleDocumentFingerprint(content);
+    const known = legacy[ruleName] ?? [];
+
+    assert.ok(
+      known.includes(fingerprint),
+      `fixture ${fixtureFile} 的指纹 ${fingerprint} 未登记在 LEGACY[${ruleName}] 中`
+    );
+  }
+});
 
 test("normalizeRuleDocumentForCompare 忽略入口小节差异", () => {
   // 入口列表变化不应影响「正文是否被用户改过」的判定。

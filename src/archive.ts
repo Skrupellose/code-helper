@@ -77,6 +77,9 @@ export async function archiveFeature(
 /**
  * 归档前预检查 active/archive 同名冲突。
  * 这样默认模式下不会先移动部分文档再报错，保持归档动作可预期。
+ *
+ * pathExists 契约：仅 ENOENT soft-miss 为 false；EACCES 等非 ENOENT 错误会向上抛出，
+ * 不在此处吞掉，以便权限/IO 问题尽早暴露，而不是被误判为「路径不存在」。
  */
 async function findArchiveConflicts(
   projectRoot: string,
@@ -85,6 +88,7 @@ async function findArchiveConflicts(
   const conflicts: string[] = [];
 
   for (const move of moves) {
+    // 非 ENOENT 由 pathExists 原样抛出，不 soft-miss
     const sourceExists = await pathExists(projectPath(projectRoot, move.from));
     const targetExists = await pathExists(projectPath(projectRoot, move.to));
 
@@ -162,6 +166,9 @@ function getArchiveMoves(config: CodeHelperConfig, featureName: string): Array<{
 /**
  * 文件或目录存在时移动到 archive。
  * 目标已存在时不覆盖，避免破坏用户手动归档后的内容。
+ *
+ * 源/目标探测走 pathExists：仅 ENOENT 视为不存在；权限等非 ENOENT 错误向上抛出，
+ * 避免在不可读环境下误跳过真实文件。
  */
 async function movePathIfExists(
   projectRoot: string,
@@ -171,6 +178,7 @@ async function movePathIfExists(
 ): Promise<OperationResult> {
   const fromPath = projectPath(projectRoot, fromRelativePath);
   const toPath = projectPath(projectRoot, toRelativePath);
+  // 非 ENOENT 由 pathExists 原样抛出，不 soft-miss
   const sourceExists = await pathExists(fromPath);
   const targetExists = await pathExists(toPath);
 

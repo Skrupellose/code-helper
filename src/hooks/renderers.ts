@@ -15,9 +15,10 @@ export const CODE_HELPER_GIT_HOOK_MARKER = "# code-helper:managed-pre-commit";
  * Git hook 是提交前兜底检查，和 Agent Stop hook 的 JSON 协议完全分离。
  *
  * 解析顺序：
- * 1. 项目 node_modules 中的 code-helper 二进制（用户项目最常见）
+ * 1. 项目 node_modules 中的 code-helper 二进制（用户项目最常见；Windows 也主要靠此 .bin）
  * 2. 本仓库开发态：package.json 名为 @skrupellose/code-helper 且存在 dist/index.js
- * 3. 已安装包的 dist 入口（无 .bin 链接时）
+ *    —— dist 分支依赖 PATH 上的 `node`（`command -v node`）；找不到 node 时落到后续分支
+ * 3. 已安装包的 dist 入口（无 .bin 链接时；同样依赖 PATH 上的 node）
  * 4. 回退 npx（可能触网；在 code-helper 源码仓内单独依赖 npx 会找不到本地 bin）
  */
 export function renderGitHook(): string {
@@ -27,10 +28,14 @@ if [ -f "./node_modules/.bin/code-helper" ]; then
   exec ./node_modules/.bin/code-helper check
 fi
 if [ -f "./dist/index.js" ] && [ -f "./package.json" ] && grep -q '"name": "@skrupellose/code-helper"' ./package.json 2>/dev/null; then
-  exec node ./dist/index.js check
+  if command -v node >/dev/null 2>&1; then
+    exec node ./dist/index.js check
+  fi
 fi
 if [ -f "./node_modules/@skrupellose/code-helper/dist/index.js" ]; then
-  exec node ./node_modules/@skrupellose/code-helper/dist/index.js check
+  if command -v node >/dev/null 2>&1; then
+    exec node ./node_modules/@skrupellose/code-helper/dist/index.js check
+  fi
 fi
 exec npx --yes @skrupellose/code-helper check
 `;
