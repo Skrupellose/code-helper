@@ -186,7 +186,9 @@ export async function installProjectSkillRegistrations(
 
 /**
  * 根据 init 确定的同一批 agent 目标安装对应 Agent hooks。
+ * 与 skills 对齐：关闭 agentHooks 开关时只展示跳过结果，不写入配置、不强制重新打开开关。
  * 当前只有 Codex 和 Claude Code 有项目级 Agent hook 配置；GitHub Copilot skills 不触发 Git hook 或其他 hook。
+ * 注意：本函数只在 init 路径使用；`hooks install` 命令路径由 CLI 先安装再 setFeatureEnabled，可直接应用能力。
  */
 export async function installProjectAgentHooks(
   projectRoot: string,
@@ -214,9 +216,25 @@ export async function installProjectAgentHooks(
     ];
   }
 
+  // 与 installProjectSkillRegistrations 对称：功能关闭时跳过安装，便于用户理解 init 行为。
+  if (!config.features.agentHooks.enabled) {
+    const statuses = await listHookInstallations(projectRoot);
+
+    return hookTargets.map((target) => {
+      const status = statuses.find((item) => item.target === target);
+
+      return {
+        path: status?.path ?? projectPath(projectRoot, `${config.directories.workspace}/hooks`),
+        action: "skipped" as const,
+        message: "Agent hooks 功能已关闭，跳过安装"
+      };
+    });
+  }
+
   const operations: OperationResult[] = [];
 
   for (const target of hookTargets) {
+    // installHook 本身不会改写功能开关；开关只由 features / hooks install CLI 路径管理。
     operations.push(await installHook(projectRoot, target));
   }
 

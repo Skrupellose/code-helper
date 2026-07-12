@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -211,17 +211,52 @@ async function readVersionCache(projectRoot: string): Promise<VersionCache | und
 
 /**
  * 写入版本检查缓存，减少交互菜单频繁访问网络。
+ * 仅在项目已初始化时写入，避免未 init 时创建半成品 `.code-helper/checks/`。
  */
 async function writeVersionCache(projectRoot: string, cache: VersionCache): Promise<void> {
+  if (!(await isProjectInitializedForVersionCache(projectRoot))) {
+    return;
+  }
+
   await writeText(projectPath(projectRoot, VERSION_CACHE_RELATIVE_PATH), `${JSON.stringify(cache, null, 2)}\n`);
 }
 
 /**
- * 只有缓存未过期且记录的当前版本仍一致时才能复用。
+ * 判断是否适合写入版本检查缓存。
+ * 已初始化信号：存在 `.code-helper/config.json` 或 `code-helper-docs`。
+ */
+async function isProjectInitializedForVersionCache(projectRoot: string): Promise<boolean> {
+  return (
+    await pathExists(projectPath(projectRoot, ".code-helper/config.json"))
+    || await pathExists(projectPath(projectRoot, "code-helper-docs"))
+  );
+}
+
+/**
+ * 判断路径是否存在。
+ * 用于初始化探测，不读取文件内容。
+ */
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 只有缓存未过期、当前版本一致，且包名与 registry 地址未变时才能复用。
  * 包升级后即使 TTL 未过期，也必须重新查询 registry 并写入新版本，避免菜单继续展示旧 currentVersion。
+ * packageName / registryUrl 不一致时同样失效，防止缓存串用或镜像切换后误判。
  */
 function canReuseVersionCache(cache: VersionCache, currentVersion: string): boolean {
-  return cache.currentVersion === currentVersion && isCacheFresh(cache);
+  return (
+    cache.currentVersion === currentVersion
+    && cache.packageName === PACKAGE_NAME
+    && cache.registryUrl === getRegistryUrl()
+    && isCacheFresh(cache)
+  );
 }
 
 /**

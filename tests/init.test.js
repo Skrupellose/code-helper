@@ -6,6 +6,7 @@ import { PassThrough } from "node:stream";
 import { test } from "node:test";
 
 import { ENTRY_BLOCK_END, ENTRY_BLOCK_START } from "../dist/constants.js";
+import { setFeatureEnabled } from "../dist/config.js";
 import { initializeProject, updateProject } from "../dist/init.js";
 import { runChecks } from "../dist/checks.js";
 import { runCli } from "../dist/cli.js";
@@ -160,7 +161,7 @@ test("init 文本兜底菜单空输入重试，0 才显式取消", () => {
 });
 
 test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", async () => {
-  // 该测试覆盖老项目兼容：只有 AGENTS.md 时只注册 Codex，并同步安装 Codex Agent hook。
+  // 老项目只有 AGENTS.md：首次 init 识别 Codex，默认打开 agentHooks 并安装对应 hooks。
   const root = await mkdtemp(join(tmpdir(), "code-helper-init-"));
 
   try {
@@ -242,18 +243,20 @@ test("initializeProject 在没有入口文档的新项目中跳过项目级 skil
 });
 
 test("code-helper init codex 会补齐 AGENTS.md 且不创建 CLAUDE.md", async () => {
-  // 显式选择 Codex 时，入口记忆文档、项目级 skills 和 Codex Agent hook 必须使用同一目标。
+  // 显式选择 Codex：首次 init 应装 skills + Agent hooks，且 agentHooks.enabled 为 true。
   const root = await mkdtemp(join(tmpdir(), "code-helper-init-codex-"));
 
   try {
     const result = await runCliSilently(["init", "codex"], root);
 
     const agents = await readFile(join(root, "AGENTS.md"), "utf8");
+    const config = await readFile(join(root, ".code-helper/config.json"), "utf8");
     const codexSkill = await readFile(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
     const codexHook = await readFile(join(root, ".codex/hooks.json"), "utf8");
 
     assert.equal(result.exitCode, 0);
     assert.match(agents, /code-helper:start/);
+    assert.match(config, /"agentHooks": \{\n      "enabled": true\n    \}/);
     assert.match(codexSkill, /name: code-helper-memory-tuning/);
     assert.match(codexHook, /agent-finish-check\.mjs/);
     await assert.rejects(
@@ -270,18 +273,20 @@ test("code-helper init codex 会补齐 AGENTS.md 且不创建 CLAUDE.md", async 
 });
 
 test("code-helper init claudecode 会补齐 CLAUDE.md 且不创建 AGENTS.md", async () => {
-  // 显式选择 Claude Code 时，不能因为默认配置额外创建 Codex 入口。
+  // 显式选择 Claude Code：不创建 Codex 入口；首次 init 应安装 Claude Agent hooks。
   const root = await mkdtemp(join(tmpdir(), "code-helper-init-claudecode-"));
 
   try {
     const result = await runCliSilently(["init", "claudecode"], root);
 
     const claude = await readFile(join(root, "CLAUDE.md"), "utf8");
+    const config = await readFile(join(root, ".code-helper/config.json"), "utf8");
     const claudeCodeSkill = await readFile(join(root, ".claude/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
     const claudeHook = await readFile(join(root, ".claude/settings.json"), "utf8");
 
     assert.equal(result.exitCode, 0);
     assert.match(claude, /code-helper:start/);
+    assert.match(config, /"agentHooks": \{\n      "enabled": true\n    \}/);
     assert.match(claudeCodeSkill, /name: code-helper-memory-tuning/);
     assert.match(claudeHook, /agent-finish-check\.mjs/);
     await assert.rejects(
@@ -408,7 +413,7 @@ test("code-helper init all 会补齐三类 agent 入口", async () => {
 });
 
 test("initializeProject 支持显式目标并按同一批目标安装 skills 和 Agent hooks", async () => {
-  // 该测试覆盖显式 init 目标：选择 Codex 和 Claude Code 时，同时创建入口、skills 与对应 Agent hooks。
+  // 首次 init + 显式 Codex/Claude Code：同一批目标创建入口、skills，并默认打开 agentHooks 安装 hooks。
   const root = await mkdtemp(join(tmpdir(), "code-helper-init-targets-"));
 
   try {
@@ -416,6 +421,7 @@ test("initializeProject 支持显式目标并按同一批目标安装 skills 和
 
     const agents = await readFile(join(root, "AGENTS.md"), "utf8");
     const claude = await readFile(join(root, "CLAUDE.md"), "utf8");
+    const config = await readFile(join(root, ".code-helper/config.json"), "utf8");
     const codexSkill = await readFile(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
     const claudeCodeSkill = await readFile(join(root, ".claude/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
     const codexHook = await readFile(join(root, ".codex/hooks.json"), "utf8");
@@ -423,6 +429,7 @@ test("initializeProject 支持显式目标并按同一批目标安装 skills 和
 
     assert.match(agents, /code-helper:start/);
     assert.match(claude, /code-helper:start/);
+    assert.match(config, /"agentHooks": \{\n      "enabled": true\n    \}/);
     assert.match(codexSkill, /name: code-helper-memory-tuning/);
     assert.match(claudeCodeSkill, /name: code-helper-memory-tuning/);
     assert.match(codexHook, /commandWindows/);
@@ -432,8 +439,34 @@ test("initializeProject 支持显式目标并按同一批目标安装 skills 和
   }
 });
 
+test("initializeProject 在 agentHooks 关闭后不会重装或强制启用 Agent hooks", async () => {
+  // 与 skillRegistration 对齐：用户 features disable 后再次 init 不得重写开关或安装 hooks。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-init-hooks-disabled-"));
+
+  try {
+    await setFeatureEnabled(root, "agentHooks", true);
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: ["codex"] });
+    assert.match(await readFile(join(root, ".codex/hooks.json"), "utf8"), /agent-finish-check\.mjs/);
+
+    await setFeatureEnabled(root, "agentHooks", false);
+    await rm(join(root, ".codex/hooks.json"), { force: true });
+
+    const result = await initializeProject({ projectRoot: root, skillRegistrationTargets: ["codex"] });
+    const config = await readFile(join(root, ".code-helper/config.json"), "utf8");
+
+    assert.ok(result.operations.some((operation) => operation.message.includes("Agent hooks 功能已关闭")));
+    assert.match(config, /"agentHooks": \{\n      "enabled": false\n    \}/);
+    await assert.rejects(
+      () => stat(join(root, ".codex/hooks.json")),
+      /ENOENT/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("initializeProject 在只有 CLAUDE.md 的项目中只注册 Claude Code skills", async () => {
-  // 该测试覆盖 Claude Code 单工具项目：不能因为默认配置创建 AGENTS.md 或注册其他 agent 工具。
+  // Claude Code 单工具项目：不创建 AGENTS.md；首次 init 应默认安装 Claude Agent hooks。
   const root = await mkdtemp(join(tmpdir(), "code-helper-init-claude-only-"));
 
   try {
@@ -450,6 +483,7 @@ test("initializeProject 在只有 CLAUDE.md 的项目中只注册 Claude Code sk
     assert.match(claude, /code-helper:start/);
     assert.match(config, /"agents": false/);
     assert.match(config, /"claude": true/);
+    assert.match(config, /"agentHooks": \{\n      "enabled": true\n    \}/);
     assert.match(claudeCodeSkill, /name: code-helper-memory-tuning/);
     assert.match(claudeHook, /agent-finish-check\.mjs/);
     await assert.rejects(

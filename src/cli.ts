@@ -81,6 +81,7 @@ export {
 export {
   type CodeHelperQuickUpgradeOptions,
   type PackageUpgradeCommand,
+  resolveCodeHelperUpdateCommand,
   resolveCodeHelperUpgradeCommand,
   runCodeHelperQuickUpgrade
 } from "./cli/quick-upgrade.js";
@@ -158,13 +159,27 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
  * 使用 Node 内置 readline，减少首版运行依赖和安装体积。
  * 菜单循环内业务错误只提示并继续，避免一次动作失败就结束整个会话。
  */
+/**
+ * 主菜单循环内可变状态。
+ * 快捷升级成功后需要清空 versionUpdate 并重建 menuOptions，
+ * 否则下一轮循环仍会显示“有更新”入口（文本菜单与 raw 菜单共用此状态）。
+ */
+interface InteractiveMenuState {
+  versionUpdate?: VersionUpdateState;
+  menuOptions: ReturnType<typeof buildMainMenuSelectOptions>;
+}
+
 async function runInteractiveMenu(
   projectRoot: string,
   versionUpdate?: VersionUpdateState,
   inputBasePath = projectRoot
 ): Promise<number> {
   const rl = createInterface({ input, output });
-  const menuOptions = buildMainMenuSelectOptions(versionUpdate);
+  // 循环内可变：升级成功后刷新顶部快捷升级项
+  const menuState: InteractiveMenuState = {
+    versionUpdate,
+    menuOptions: buildMainMenuSelectOptions(versionUpdate)
+  };
 
   try {
     let shouldExit = false;
@@ -174,8 +189,7 @@ async function runInteractiveMenu(
         await runInteractiveMenuIteration({
           projectRoot,
           inputBasePath,
-          versionUpdate,
-          menuOptions,
+          menuState,
           rl,
           onExit: () => {
             shouldExit = true;
@@ -205,12 +219,13 @@ async function runInteractiveMenu(
 async function runInteractiveMenuIteration(options: {
   projectRoot: string;
   inputBasePath: string;
-  versionUpdate?: VersionUpdateState;
-  menuOptions: ReturnType<typeof buildMainMenuSelectOptions>;
+  menuState: InteractiveMenuState;
   rl: ReturnType<typeof createInterface>;
   onExit: () => void;
 }): Promise<void> {
-  const { projectRoot, inputBasePath, versionUpdate, menuOptions, rl, onExit } = options;
+  const { projectRoot, inputBasePath, menuState, rl, onExit } = options;
+  const versionUpdate = menuState.versionUpdate;
+  const menuOptions = menuState.menuOptions;
   const useKeyMenu = canUseInteractiveKeys(input, output);
   const answer = useKeyMenu
     ? await promptSelect(input, output, "code-helper 操作菜单", menuOptions)
@@ -218,10 +233,18 @@ async function runInteractiveMenuIteration(options: {
   const menuAnswer = normalizeMainMenuAnswer(answer, versionUpdate);
 
   switch (menuAnswer) {
-    case QUICK_UPGRADE_MENU_VALUE:
-      await runMenuAction("更新到最新版本", () => runCodeHelperQuickUpgrade(projectRoot));
+    case QUICK_UPGRADE_MENU_VALUE: {
+      // 仅在升级成功时刷新菜单状态；失败时保留“有更新”入口便于重试
+      const upgradeExitCode = await runMenuAction("更新到最新版本", () => runCodeHelperQuickUpgrade(projectRoot));
+
+      if (upgradeExitCode === 0) {
+        menuState.versionUpdate = undefined;
+        menuState.menuOptions = buildMainMenuSelectOptions(undefined);
+      }
+
       await pauseAfterMenuAction(useKeyMenu);
       break;
+    }
     case "1":
       await runMenuAction(getMainMenuItemName(menuAnswer), () =>
         runInit(projectRoot, [], { showInteractiveCompletionHint: false })
@@ -616,9 +639,10 @@ async function runApplyMenu(
 /**
  * 包装菜单动作的执行回显。
  * 用户按回车确认后，会立即看到动作开始和完成状态，避免误以为没有响应。
- * 业务异常只打印错误并返回，不向上抛出，避免一次失败结束整个交互会话。
+ * 业务异常只打印错误并返回退出码，不向上抛出，避免一次失败结束整个交互会话。
+ * 返回动作退出码，供调用方在成功后做菜单状态刷新等后续处理。
  */
-async function runMenuAction(label: string, action: () => Promise<number>): Promise<void> {
+async function runMenuAction(label: string, action: () => Promise<number>): Promise<number> {
   console.log(`\n▶ 开始：${label}`);
 
   try {
@@ -629,9 +653,12 @@ async function runMenuAction(label: string, action: () => Promise<number>): Prom
     } else {
       console.log(`✗ 失败：${label}（退出码 ${exitCode}）`);
     }
+
+    return exitCode;
   } catch (error) {
     console.log(`✗ 失败：${label}`);
     console.error(error instanceof Error ? error.message : String(error));
+    return 1;
   }
 }
 

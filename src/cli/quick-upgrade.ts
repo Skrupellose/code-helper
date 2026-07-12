@@ -89,17 +89,36 @@ export async function resolveCodeHelperUpgradeCommand(projectRoot: string): Prom
 }
 
 /**
+ * 解析升级后用于刷新本地资产的 update 命令。
+ * 优先调用刚安装到 node_modules 的本地入口，确保执行的是新版本代码；
+ * 本地入口不存在时回退到完整 scoped 包名的 npx，避免裸短名 code-helper 解析歧义。
+ */
+export async function resolveCodeHelperUpdateCommand(projectRoot: string): Promise<PackageUpgradeCommand> {
+  const localEntryPath = projectPath(
+    projectRoot,
+    "node_modules/@skrupellose/code-helper/dist/index.js"
+  );
+
+  if (await pathExists(localEntryPath)) {
+    return {
+      command: "node",
+      args: [localEntryPath, "update"]
+    };
+  }
+
+  return {
+    command: "npx",
+    args: ["--yes", CODE_HELPER_PACKAGE_NAME, "update"]
+  };
+}
+
+/**
  * 运行升级后安装到项目里的 code-helper update。
  * 不能直接调用当前进程的 updateProject，否则 npm 包虽然已升级，刷新逻辑仍然来自旧版本代码。
  */
-function runLatestCodeHelperUpdateCommand(projectRoot: string): Promise<number> {
-  return runPackageUpgradeCommand(
-    {
-      command: "npx",
-      args: ["code-helper", "update"]
-    },
-    projectRoot
-  );
+async function runLatestCodeHelperUpdateCommand(projectRoot: string): Promise<number> {
+  const command = await resolveCodeHelperUpdateCommand(projectRoot);
+  return runPackageUpgradeCommand(command, projectRoot);
 }
 
 /**

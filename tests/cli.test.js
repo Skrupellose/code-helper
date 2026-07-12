@@ -13,6 +13,7 @@ import {
   getMainMenuGroups,
   parseAgentHookTargetMenuSelection,
   parseSkillTargetMenuSelection,
+  resolveCodeHelperUpdateCommand,
   runCodeHelperQuickUpgrade,
   runCli
 } from "../dist/cli.js";
@@ -98,7 +99,9 @@ test("快捷升级会先执行 npm install 再运行新版 code-helper update", 
         return 0;
       },
       runUpdateCommand: async (projectRoot) => {
-        calls.push(["update", projectRoot]);
+        // 默认 update 路径解析应使用完整 scoped 包名，而不是裸短名 code-helper
+        const updateCommand = await resolveCodeHelperUpdateCommand(projectRoot);
+        calls.push(["update", updateCommand.command, updateCommand.args, projectRoot]);
         return 0;
       }
     });
@@ -106,10 +109,28 @@ test("快捷升级会先执行 npm install 再运行新版 code-helper update", 
     assert.equal(exitCode, 0);
     assert.deepEqual(calls, [
       ["install", "npm", ["install", "-D", "@skrupellose/code-helper@latest"], root],
-      ["update", root]
+      ["update", "npx", ["--yes", "@skrupellose/code-helper", "update"], root]
     ]);
   } finally {
     console.log = originalLog;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("快捷升级 update 优先使用本地 node_modules 入口", async () => {
+  // 本地已安装包时，update 必须走 node <local>/dist/index.js，避免再走 npx 解析到旧全局版本。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-cli-quick-upgrade-local-"));
+
+  try {
+    const localEntry = join(root, "node_modules/@skrupellose/code-helper/dist/index.js");
+    await mkdir(join(root, "node_modules/@skrupellose/code-helper/dist"), { recursive: true });
+    await writeFile(localEntry, "console.log('local');\n", "utf8");
+
+    const command = await resolveCodeHelperUpdateCommand(root);
+
+    assert.equal(command.command, "node");
+    assert.deepEqual(command.args, [localEntry, "update"]);
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
