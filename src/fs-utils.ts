@@ -162,11 +162,56 @@ export async function upsertMarkdownSection(
 }
 
 /**
+ * 专题规则比较时使用的「调用入口文件」小节规范化占位。
+ * 入口列表会随 entryFiles 变化，比较正文是否被用户改过时应忽略该小节差异。
+ */
+const RULE_ENTRY_SECTION_COMPARE_PLACEHOLDER = "## 调用入口文件\n\n__CODE_HELPER_ENTRY_SECTION__";
+
+/**
+ * 规范化专题规则文档，便于判断「是否仍是未改动的内置规则」。
+ * 统一换行后，将指定入口小节替换为固定占位，再 trim 文末空白；不删除其它内容。
+ */
+export function normalizeRuleDocumentForCompare(
+  content: string,
+  entrySectionTitle = "## 调用入口文件"
+): string {
+  // 统一为 LF，避免 Windows CRLF 导致误判为用户改动。
+  const normalizedEol = content.replace(/\r\n/gu, "\n");
+  const withPlaceholder =
+    replaceMarkdownSection(normalizedEol, entrySectionTitle, RULE_ENTRY_SECTION_COMPARE_PLACEHOLDER) ??
+    normalizedEol;
+
+  // 与 ensureTrailingNewline 一致地去掉文末空白，避免仅尾随换行差异影响比较。
+  return withPlaceholder.replace(/\s+$/u, "");
+}
+
+/**
+ * 判断磁盘上的规则正文（忽略调用入口小节）是否与内置模板一致。
+ * 一致则视为未改动的内置规则，update 时可安全整文件刷新。
+ */
+export function isUnmodifiedBuiltinRuleDocument(
+  existingContent: string,
+  templateContent: string,
+  entrySectionTitle = "## 调用入口文件"
+): boolean {
+  return (
+    normalizeRuleDocumentForCompare(existingContent, entrySectionTitle) ===
+    normalizeRuleDocumentForCompare(templateContent, entrySectionTitle)
+  );
+}
+
+/**
  * 通过行扫描替换 Markdown 二级小节。
  * 不使用复杂正则，是为了保证多次 init 时小节边界稳定、不会残留旧列表项。
+ * 找不到小节时返回 undefined，调用方决定追加或跳过。
  */
-function replaceMarkdownSection(content: string, sectionTitle: string, replacement: string): string | undefined {
-  const lines = content.split("\n");
+export function replaceMarkdownSection(
+  content: string,
+  sectionTitle: string,
+  replacement: string
+): string | undefined {
+  // 先统一换行再按行扫描，避免 CRLF 下 `## 标题` 行尾带 `\r` 导致 trim 匹配失败。
+  const lines = content.replace(/\r\n/gu, "\n").split("\n");
   const startIndex = lines.findIndex((line) => line.trim() === sectionTitle);
 
   if (startIndex === -1) {

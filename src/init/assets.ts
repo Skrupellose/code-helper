@@ -1,10 +1,31 @@
 import { join } from "node:path";
 
 import { FEATURE_KEYS } from "../constants.js";
-import { ensureDirectory, projectPath, readTextIfExists, upsertMarkdownSection, writeText } from "../fs-utils.js";
+import { loadConfig } from "../config.js";
+import {
+  ensureDirectory,
+  ensureTrailingNewline,
+  isUnmodifiedBuiltinRuleDocument,
+  projectPath,
+  readTextIfExists,
+  upsertMarkdownSection,
+  writeText
+} from "../fs-utils.js";
 import { getHookTemplates, getRuleTemplates, getSkillTemplates } from "../templates.js";
 import type { CodeHelperConfig, OperationResult } from "../types.js";
+import { getCurrentPackageVersion } from "../version-check.js";
 import { renderEntryFileList } from "./entries.js";
+
+/**
+ * 安装 / 刷新专题规则时的选项。
+ */
+export interface InstallRuleTemplatesOptions {
+  /**
+   * 为 true 时强制用当前内置模板整文件覆盖（仅内置模板文件名）。
+   * 危险：会丢弃用户在这些文件上的自定义改动；message 必须写清。
+   */
+  refreshRules?: boolean;
+}
 
 /**
  * 创建所有固定目录。
@@ -43,25 +64,100 @@ export async function createDirectories(
 }
 
 /**
- * 安装专题规则模板。
- * 老项目已有同名规则时不会覆盖，避免丢失用户维护的规则。
+ * 安装专题规则模板，并在安全前提下刷新未改动的内置规则。
+ *
+ * 语义：
+ * 1. 文件不存在 → 写入完整模板（created）
+ * 2. 文件是未改动的内置规则（忽略「调用入口文件」差异后与模板正文一致）→ 整文件写为当前模板（updated）
+ * 3. 用户改过正文 → 只 upsert「调用入口文件」小节，保留用户改动
+ * 4. refreshRules / force → 对内置文件名强制整文件覆盖（绝不碰用户自建的其它 md）
  */
-export async function installRuleTemplates(projectRoot: string, config: CodeHelperConfig): Promise<OperationResult[]> {
+export async function installRuleTemplates(
+  projectRoot: string,
+  config: CodeHelperConfig,
+  options: InstallRuleTemplatesOptions = {}
+): Promise<OperationResult[]> {
   const operations: OperationResult[] = [];
+  const forceRefresh = options.refreshRules === true;
+  const entrySectionTitle = "## 调用入口文件";
+  const entrySectionBody = renderEntryFileList(config);
 
   for (const template of getRuleTemplates(config)) {
     const targetPath = projectPath(projectRoot, join(config.directories.userRules, template.fileName));
+    const existing = await readTextIfExists(targetPath);
+
+    // 缺失文件：直接创建完整模板。
+    if (existing === undefined) {
+      await writeText(targetPath, ensureTrailingNewline(template.content));
+      operations.push({
+        path: targetPath,
+        action: "created",
+        message: "已创建缺失的内置规则模板"
+      });
+      continue;
+    }
+
+    const nextTemplateContent = ensureTrailingNewline(template.content);
+
+    // 强制刷新：仅覆盖内置模板列表中的同名文件。
+    if (forceRefresh) {
+      if (existing === nextTemplateContent || ensureTrailingNewline(existing) === nextTemplateContent) {
+        operations.push({
+          path: targetPath,
+          action: "skipped",
+          message: "内置规则已是最新（强制刷新未写入变更）"
+        });
+        continue;
+      }
+
+      await writeText(targetPath, nextTemplateContent);
+      operations.push({
+        path: targetPath,
+        action: "updated",
+        message: "已强制刷新内置规则全文（用户改动已被覆盖）"
+      });
+      continue;
+    }
+
+    // 未改动的内置规则：安全整文件刷新为当前模板（含最新入口列表与上游正文改进）。
+    if (isUnmodifiedBuiltinRuleDocument(existing, template.content, entrySectionTitle)) {
+      if (existing === nextTemplateContent || ensureTrailingNewline(existing) === nextTemplateContent) {
+        operations.push({
+          path: targetPath,
+          action: "skipped",
+          message: "内置规则已是最新"
+        });
+        continue;
+      }
+
+      await writeText(targetPath, nextTemplateContent);
+      operations.push({
+        path: targetPath,
+        action: "updated",
+        message: "已刷新未改动的内置规则"
+      });
+      continue;
+    }
+
+    // 用户改过正文：只同步调用入口小节，绝不覆盖自定义段落。
     operations.push(
-      await upsertMarkdownSection(
-        targetPath,
-        "## 调用入口文件",
-        renderEntryFileList(config),
-        template.content
-      )
+      await upsertMarkdownSection(targetPath, entrySectionTitle, entrySectionBody, template.content)
     );
   }
 
   return operations;
+}
+
+/**
+ * 仅刷新内置专题规则模板（不触碰用户自建 md）。
+ * force=true 时整文件覆盖内置规则；否则对未改动规则做安全刷新，改动过的只更新入口小节。
+ */
+export async function refreshRuleTemplates(
+  projectRoot: string,
+  options: { force?: boolean } = {}
+): Promise<OperationResult[]> {
+  const config = await loadConfig(projectRoot);
+  return installRuleTemplates(projectRoot, config, { refreshRules: options.force === true });
 }
 
 /**
@@ -115,12 +211,15 @@ export async function installHookTemplates(projectRoot: string, config: CodeHelp
 /**
  * 写入 code-helper 状态文件。
  * 该文件记录工具自身最近一次初始化状态，不替代业务项目 status-doc。
+ * packageVersion 供后续 doctor 判断本地资产是否落后于当前 CLI 版本。
  */
 export async function writeStateFile(projectRoot: string, config: CodeHelperConfig): Promise<OperationResult> {
   const enabledFeatures = FEATURE_KEYS.filter((feature) => config.features[feature].enabled);
   const targetPath = projectPath(projectRoot, `${config.directories.workspace}/state.json`);
+  const packageVersion = await getCurrentPackageVersion();
   const state = {
     initializedAt: new Date().toISOString(),
+    packageVersion,
     enabledFeatures,
     note: "此文件由 code-helper 维护，仅记录工具状态，不承载业务项目状态。"
   };

@@ -6,11 +6,16 @@ import { test } from "node:test";
 
 import {
   buildMainMenuSelectOptions,
+  buildSubMenuSelectOptions,
   formatMainMenuGroupTitle,
   formatMainMenuSelectItemLabel,
   formatMainMenuTextItemLines,
+  formatSubMenuTextLines,
   formatVersionUpgradeSelectItemLabel,
+  getApplyMenuItems,
+  getHooksMenuItems,
   getMainMenuGroups,
+  getSkillMenuItems,
   parseAgentHookTargetMenuSelection,
   parseSkillTargetMenuSelection,
   resolveCodeHelperUpdateCommand,
@@ -80,6 +85,75 @@ test("主菜单布局格式区分标题、功能名和说明", () => {
   assert.deepEqual(formatMainMenuTextItemLines(item), [
     "   2. 生成任务计划模板",
     "      根据需求文档创建计划、状态记录和执行记录模板，供 agent 继续完善"
+  ]);
+});
+
+/**
+ * 断言子菜单 raw 选项与 text 行由同一 items 派生，且含返回 0 与关键项。
+ * 与主菜单契约测试一致：锁定 value/label，防止两套手写列表漂移。
+ */
+function assertSubMenuContract(items, expectedKeyLabels) {
+  const rawOptions = buildSubMenuSelectOptions(items);
+  const textLines = formatSubMenuTextLines(items);
+
+  assert.deepEqual(
+    rawOptions.map((option) => ({ value: option.value, label: option.label })),
+    items.map((item) => ({ value: item.value, label: item.label }))
+  );
+  assert.deepEqual(
+    textLines,
+    items.map((item) => `${item.value}. ${item.label}`)
+  );
+  assert.equal(items.some((item) => item.value === "0" && item.label === "返回"), true);
+  assert.equal(rawOptions.some((option) => option.value === "0" && option.label === "返回"), true);
+  assert.equal(textLines.some((line) => line === "0. 返回"), true);
+
+  for (const [value, label] of expectedKeyLabels) {
+    assert.equal(items.some((item) => item.value === value && item.label === label), true);
+    assert.equal(rawOptions.some((option) => option.value === value && option.label === label), true);
+    assert.equal(textLines.some((line) => line === `${value}. ${label}`), true);
+  }
+
+  // raw 与 text 的 value 序列必须完全一致，避免用户在不同终端下编号不同。
+  assert.deepEqual(
+    rawOptions.map((option) => option.value),
+    items.map((item) => item.value)
+  );
+  assert.deepEqual(
+    textLines.map((line) => line.split(".")[0]),
+    items.map((item) => item.value)
+  );
+}
+
+test("Skills 子菜单 raw 与 text 由同一数据驱动且含返回与关键项", () => {
+  // Skills 管理菜单的 value 是用户习惯编号，不得与 switch 分发脱节。
+  assertSubMenuContract(getSkillMenuItems(), [
+    ["1", "查看注册状态"],
+    ["2", "按当前项目注册 Skills"],
+    ["9", "Skills 质量检查"],
+    ["10", "Skills 建议分析"]
+  ]);
+});
+
+test("Hooks 子菜单 raw 与 text 由同一数据驱动且含返回与关键项", () => {
+  // Hooks 管理菜单需同时覆盖 Git 与 Agent 安装/卸载入口。
+  assertSubMenuContract(getHooksMenuItems(), [
+    ["1", "查看 Hooks 状态"],
+    ["2", "安装 Git pre-commit hook"],
+    ["4", "安装 Codex Agent hook"],
+    ["8", "安装全部 Hooks"],
+    ["9", "卸载全部 Hooks"]
+  ]);
+});
+
+test("功能管理子菜单 raw 与 text 由同一数据驱动且含返回与关键项", () => {
+  // 功能管理是一级能力入口，应用/取消 Skills、hooks 与状态查看必须齐全。
+  assertSubMenuContract(getApplyMenuItems(), [
+    ["1", "应用项目级 Skills"],
+    ["3", "应用 Agent hooks"],
+    ["5", "应用 Git hook"],
+    ["7", "刷新规则和模板"],
+    ["8", "查看应用状态"]
   ]);
 });
 

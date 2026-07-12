@@ -42,8 +42,12 @@ export function printHelp(): void {
 
 用法：
   code-helper                         打开交互菜单
-  code-helper init [target]           初始化项目规则和工作区，可指定 all|codex|claudecode|githubcopilot
-  code-helper update                  按当前项目已启用能力刷新 code-helper 本地资产
+  code-helper init [target] [--refresh-rules]
+                                      初始化项目规则和工作区，可指定 all|codex|claudecode|githubcopilot；
+                                      --refresh-rules 强制覆盖内置规则全文（危险，会丢掉用户改动）
+  code-helper update [--refresh-rules]
+                                      按当前项目已启用能力刷新 code-helper 本地资产；
+                                      默认安全刷新未改动的内置规则；--refresh-rules 强制覆盖
   code-helper version                 查看当前 code-helper 版本
   code-helper npm-scripts install     写入常用 npm scripts（不覆盖同名脚本）
   code-helper sync-local              刷新本仓库本地模板并注册全部项目级 skills

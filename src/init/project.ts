@@ -22,7 +22,7 @@ import {
   updateExistingHooks,
   updateExistingProjectSkillRegistrations
 } from "./registrations.js";
-import type { InitializeOptions, InitializeResult, UpdateResult } from "./types.js";
+import type { InitializeOptions, InitializeResult, UpdateOptions, UpdateResult } from "./types.js";
 
 /**
  * 旧版工作区配置路径（与 config.ts 中的 LEGACY 路径保持一致）。
@@ -66,7 +66,12 @@ export async function initializeProject(options: InitializeOptions): Promise<Ini
   });
 
   operations.push(...(await installEntryDocuments(options.projectRoot, config)));
-  operations.push(...(await installRuleTemplates(options.projectRoot, config)));
+  // 默认安全刷新未改动的内置规则；--refresh-rules 时强制覆盖内置文件名。
+  operations.push(
+    ...(await installRuleTemplates(options.projectRoot, config, {
+      refreshRules: options.refreshRules === true
+    }))
+  );
   operations.push(...(await installSkillTemplates(options.projectRoot, config)));
   operations.push(...(await installProjectSkillRegistrations(options.projectRoot, config, skillRegistrationTargets)));
   operations.push(...(await installProjectAgentHooks(options.projectRoot, config, skillRegistrationTargets, agentHookTargets)));
@@ -79,8 +84,12 @@ export async function initializeProject(options: InitializeOptions): Promise<Ini
 /**
  * 升级当前项目中 code-helper 管理的本地资产。
  * 与 init 不同，update 不根据默认配置创建新的 agent 入口，也不自动打开未启用的 skills 或 hooks。
+ * 对 user-rules 内置规则默认做「未改动则整文件刷新、改动过只更新入口」的安全刷新。
  */
-export async function updateProject(projectRoot: string): Promise<UpdateResult> {
+export async function updateProject(
+  projectRoot: string,
+  options: UpdateOptions = {}
+): Promise<UpdateResult> {
   const config = await loadConfig(projectRoot);
   const operations: OperationResult[] = [];
 
@@ -96,7 +105,11 @@ export async function updateProject(projectRoot: string): Promise<UpdateResult> 
   });
 
   operations.push(...(await installEntryDocuments(projectRoot, config)));
-  operations.push(...(await installRuleTemplates(projectRoot, config)));
+  operations.push(
+    ...(await installRuleTemplates(projectRoot, config, {
+      refreshRules: options.refreshRules === true
+    }))
+  );
   operations.push(...(await installSkillTemplates(projectRoot, config)));
   operations.push(...(await installHookTemplates(projectRoot, config)));
   operations.push(...(await updateExistingProjectSkillRegistrations(projectRoot, config)));

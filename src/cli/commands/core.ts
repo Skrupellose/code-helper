@@ -39,17 +39,28 @@ interface RunInitOptions {
 /**
  * 初始化命令实现。
  * 输出所有操作结果，便于用户看清哪些文件被创建、更新或跳过。
+ * 支持可选 `--refresh-rules`：强制用内置模板覆盖 user-rules 中的内置规则文件。
  */
 export async function runInit(projectRoot: string, args: string[] = [], options: RunInitOptions = {}): Promise<number> {
-  if (args.length > 1) {
-    console.error("init 只接受一个可选 agent 目标。用法：code-helper init [all|codex|claudecode|githubcopilot]");
+  const refreshRules = args.includes("--refresh-rules");
+  // 位置参数只保留 agent 目标；标志参数单独解析。
+  const positionalArgs = args.filter((arg) => arg !== "--refresh-rules");
+
+  if (positionalArgs.length > 1) {
+    console.error(
+      "init 只接受一个可选 agent 目标，以及可选 --refresh-rules。用法：code-helper init [all|codex|claudecode|githubcopilot] [--refresh-rules]"
+    );
     return 1;
   }
 
-  const skillRegistrationTargets = args[0] === undefined
+  const skillRegistrationTargets = positionalArgs[0] === undefined
     ? await resolveInitSkillRegistrationTargets(projectRoot)
-    : parseSkillRegistrationTargets(args[0]);
-  const result = await initializeProject({ projectRoot, skillRegistrationTargets });
+    : parseSkillRegistrationTargets(positionalArgs[0]);
+  const result = await initializeProject({
+    projectRoot,
+    skillRegistrationTargets,
+    refreshRules
+  });
   printOperations(result.operations);
 
   if (options.showInteractiveCompletionHint !== false && input.isTTY && output.isTTY) {
@@ -62,14 +73,18 @@ export async function runInit(projectRoot: string, args: string[] = [], options:
 /**
  * 更新当前项目中已经使用的 code-helper 受控资产。
  * update 不自动开启未启用能力，适合发新版后同步入口、skills 和 hooks。
+ * 默认安全刷新未改动的内置规则；`--refresh-rules` 强制覆盖内置规则全文（危险）。
  */
 export async function runUpdate(projectRoot: string, args: string[] = []): Promise<number> {
-  if (args.length > 0) {
-    console.error("update 暂不接受参数。用法：code-helper update");
+  const refreshRules = args.includes("--refresh-rules");
+  const unknownArgs = args.filter((arg) => arg !== "--refresh-rules");
+
+  if (unknownArgs.length > 0) {
+    console.error("update 只接受可选参数 --refresh-rules。用法：code-helper update [--refresh-rules]");
     return 1;
   }
 
-  const result = await updateProject(projectRoot);
+  const result = await updateProject(projectRoot, { refreshRules });
   printOperations(result.operations);
   return 0;
 }

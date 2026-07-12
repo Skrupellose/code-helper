@@ -24,6 +24,13 @@ import {
   pauseAfterMenuAction,
   printInputHint
 } from "./cli/menu-input.js";
+import {
+  APPLY_MENU_ITEMS,
+  askTextSubMenu,
+  buildSubMenuSelectOptions,
+  HOOKS_MENU_ITEMS,
+  SKILL_MENU_ITEMS
+} from "./cli/sub-menus.js";
 import { runCodeHelperQuickUpgrade } from "./cli/quick-upgrade.js";
 import {
   formatAgentHookTargetList,
@@ -89,6 +96,19 @@ export {
   parseAgentHookTargetMenuSelection,
   parseSkillTargetMenuSelection
 } from "./cli/target-menu.js";
+export {
+  APPLY_MENU_ITEMS,
+  askTextSubMenu,
+  buildSubMenuSelectOptions,
+  formatSubMenuTextLines,
+  getApplyMenuItems,
+  getHooksMenuItems,
+  getSkillMenuItems,
+  HOOKS_MENU_ITEMS,
+  printSubMenuText,
+  SKILL_MENU_ITEMS,
+  type SubMenuItem
+} from "./cli/sub-menus.js";
 
 /**
  * CLI 主入口。
@@ -426,25 +446,14 @@ async function runSkillMenu(
   rl: ReturnType<typeof createInterface>
 ): Promise<boolean> {
   const useKeyMenu = canUseInteractiveKeys(input, output);
-  const options = [
-    { value: "1", label: "查看注册状态" },
-    { value: "2", label: "按当前项目注册 Skills" },
-    { value: "3", label: "按当前项目取消注册 Skills" },
-    { value: "4", label: "仅注册 Codex" },
-    { value: "5", label: "仅注册 Claude Code" },
-    { value: "6", label: "仅注册 GitHub Copilot" },
-    { value: "7", label: "注册全部" },
-    { value: "8", label: "取消注册全部" },
-    { value: "9", label: "Skills 质量检查" },
-    { value: "10", label: "Skills 建议分析" },
-    { value: "0", label: "返回" }
-  ];
+  // raw / text 共用 SKILL_MENU_ITEMS，避免两套手写列表编号漂移。
+  const options = buildSubMenuSelectOptions(SKILL_MENU_ITEMS);
 
   let answer: string;
   try {
     answer = useKeyMenu
       ? await promptSelect(input, output, "管理项目 Skills", options)
-      : await askTextSkillMenu(rl);
+      : await askTextSubMenu(rl, "管理项目 Skills", SKILL_MENU_ITEMS);
   } catch (error) {
     // 子菜单 Esc：返回主菜单，不退出进程
     if (error instanceof TerminalCancelError) {
@@ -503,24 +512,14 @@ async function runHooksMenu(
   rl: ReturnType<typeof createInterface>
 ): Promise<boolean> {
   const useKeyMenu = canUseInteractiveKeys(input, output);
-  const options = [
-    { value: "1", label: "查看 Hooks 状态" },
-    { value: "2", label: "安装 Git pre-commit hook" },
-    { value: "3", label: "卸载 Git pre-commit hook" },
-    { value: "4", label: "安装 Codex Agent hook" },
-    { value: "5", label: "卸载 Codex Agent hook" },
-    { value: "6", label: "安装 Claude Code Agent hook" },
-    { value: "7", label: "卸载 Claude Code Agent hook" },
-    { value: "8", label: "安装全部 Hooks" },
-    { value: "9", label: "卸载全部 Hooks" },
-    { value: "0", label: "返回" }
-  ];
+  // raw / text 共用 HOOKS_MENU_ITEMS，避免两套手写列表编号漂移。
+  const options = buildSubMenuSelectOptions(HOOKS_MENU_ITEMS);
 
   let answer: string;
   try {
     answer = useKeyMenu
       ? await promptSelect(input, output, "管理 Hooks", options)
-      : await askTextHooksMenu(rl);
+      : await askTextSubMenu(rl, "管理 Hooks", HOOKS_MENU_ITEMS);
   } catch (error) {
     // 子菜单 Esc：返回主菜单，不退出进程
     if (error instanceof TerminalCancelError) {
@@ -576,23 +575,14 @@ async function runApplyMenu(
   rl: ReturnType<typeof createInterface>
 ): Promise<boolean> {
   const useKeyMenu = canUseInteractiveKeys(input, output);
-  const options = [
-    { value: "1", label: "应用项目级 Skills" },
-    { value: "2", label: "取消项目级 Skills" },
-    { value: "3", label: "应用 Agent hooks" },
-    { value: "4", label: "取消 Agent hooks" },
-    { value: "5", label: "应用 Git hook" },
-    { value: "6", label: "取消 Git hook" },
-    { value: "7", label: "刷新规则和模板" },
-    { value: "8", label: "查看应用状态" },
-    { value: "0", label: "返回" }
-  ];
+  // raw / text 共用 APPLY_MENU_ITEMS，避免两套手写列表编号漂移。
+  const options = buildSubMenuSelectOptions(APPLY_MENU_ITEMS);
 
   let answer: string;
   try {
     answer = useKeyMenu
       ? await promptSelect(input, output, "功能管理", options)
-      : await askTextApplyMenu(rl);
+      : await askTextSubMenu(rl, "功能管理", APPLY_MENU_ITEMS);
   } catch (error) {
     // 子菜单 Esc：返回主菜单，不退出进程
     if (error instanceof TerminalCancelError) {
@@ -726,64 +716,6 @@ async function askTextMenu(rl: ReturnType<typeof createInterface>, versionUpdate
 
   console.log("\n  0. 退出");
   console.log("      关闭 code-helper 菜单");
-
-  return askQuestionOrDefault(rl, "请选择操作：", "0");
-}
-
-/**
- * 非 TTY 环境下的项目 Skills 管理菜单。
- * 输入 0 立即返回，避免用户误入子菜单后无法退出。
- */
-async function askTextSkillMenu(rl: ReturnType<typeof createInterface>): Promise<string> {
-  console.log("\n管理项目 Skills");
-  console.log("1. 查看注册状态");
-  console.log("2. 按当前项目注册 Skills");
-  console.log("3. 按当前项目取消注册 Skills");
-  console.log("4. 仅注册 Codex");
-  console.log("5. 仅注册 Claude Code");
-  console.log("6. 仅注册 GitHub Copilot");
-  console.log("7. 注册全部");
-  console.log("8. 取消注册全部");
-  console.log("9. Skills 质量检查");
-  console.log("10. Skills 建议分析");
-  console.log("0. 返回");
-
-  return askQuestionOrDefault(rl, "请选择操作：", "0");
-}
-
-/**
- * 非 TTY 环境下的功能管理菜单。
- */
-async function askTextApplyMenu(rl: ReturnType<typeof createInterface>): Promise<string> {
-  console.log("\n功能管理");
-  console.log("1. 应用项目级 Skills");
-  console.log("2. 取消项目级 Skills");
-  console.log("3. 应用 Agent hooks");
-  console.log("4. 取消 Agent hooks");
-  console.log("5. 应用 Git hook");
-  console.log("6. 取消 Git hook");
-  console.log("7. 刷新规则和模板");
-  console.log("8. 查看应用状态");
-  console.log("0. 返回");
-
-  return askQuestionOrDefault(rl, "请选择操作：", "0");
-}
-
-/**
- * 非 TTY 环境下的 Hooks 管理菜单。
- */
-async function askTextHooksMenu(rl: ReturnType<typeof createInterface>): Promise<string> {
-  console.log("\n管理 Hooks");
-  console.log("1. 查看 Hooks 状态");
-  console.log("2. 安装 Git pre-commit hook");
-  console.log("3. 卸载 Git pre-commit hook");
-  console.log("4. 安装 Codex Agent hook");
-  console.log("5. 卸载 Codex Agent hook");
-  console.log("6. 安装 Claude Code Agent hook");
-  console.log("7. 卸载 Claude Code Agent hook");
-  console.log("8. 安装全部 Hooks");
-  console.log("9. 卸载全部 Hooks");
-  console.log("0. 返回");
 
   return askQuestionOrDefault(rl, "请选择操作：", "0");
 }

@@ -12,6 +12,22 @@ export interface InitializeOptions {
    * 不传时仅根据初始化前已有入口文件推断；传空数组表示调用方已经确认应保守跳过项目级能力安装。
    */
   skillRegistrationTargets?: SkillRegistrationTarget[];
+  /**
+   * 为 true 时强制用内置模板整文件覆盖 user-rules 中的内置规则文件。
+   * 危险：会覆盖用户对内置规则的改动；默认 false 时仅安全刷新未改动规则。
+   */
+  refreshRules?: boolean;
+}
+
+/**
+ * 升级项目中 code-helper 本地资产的可选参数。
+ */
+export interface UpdateOptions {
+  /**
+   * 为 true 时强制刷新内置规则全文（即使用户改过也覆盖）。
+   * 默认 false：仅对「未改动的内置规则」整文件刷新，改动过的只更新入口小节。
+   */
+  refreshRules?: boolean;
 }
 
 /**
