@@ -13,6 +13,12 @@ export interface PackageUpgradeCommand {
 }
 
 /**
+ * 交给 child_process.spawn 的最终命令。
+ * Windows 的 `.cmd` shim 需要通过 cmd.exe 运行，因此与逻辑层的包管理器命令分开建模。
+ */
+export interface PackageUpgradeSpawnCommand extends PackageUpgradeCommand {}
+
+/**
  * 快捷升级依赖项。
  * 单元测试通过注入 runPackageCommand 和 runUpdateCommand 验证执行顺序，真实 CLI 使用默认实现。
  */
@@ -100,7 +106,8 @@ export async function resolveCodeHelperUpdateCommand(projectRoot: string): Promi
 
   if (await pathExists(localEntryPath)) {
     return {
-      command: "node",
+      // 使用当前 Node 进程的绝对可执行文件，避免 Windows 执行层把 `node` 错误解析成不存在的 `node.cmd`。
+      command: process.execPath,
       args: [localEntryPath, "update"]
     };
   }
@@ -185,11 +192,12 @@ function readPackageManagerField(
 
 /**
  * 执行包管理器升级命令。
- * Windows 下 npm/pnpm/yarn/bun 通过 .cmd 启动；其他平台直接执行二进制，避免额外 shell 层污染参数。
+ * Windows 下包管理器 shim 通过 .cmd 启动；Node 绝对路径等原生可执行文件保持不变，避免生成 node.exe.cmd。
  */
 function runPackageUpgradeCommand(command: PackageUpgradeCommand, projectRoot: string): Promise<number> {
   return new Promise((resolve, reject) => {
-    const child = spawn(resolvePackageManagerExecutable(command.command), command.args, {
+    const spawnCommand = resolvePackageManagerSpawnCommand(command);
+    const child = spawn(spawnCommand.command, spawnCommand.args, {
       cwd: projectRoot,
       stdio: "inherit"
     });
@@ -202,9 +210,25 @@ function runPackageUpgradeCommand(command: PackageUpgradeCommand, projectRoot: s
 }
 
 /**
- * 解析跨平台可执行文件名。
- * Node 在 Windows 上不通过 shell 启动 .cmd 文件时需要显式补后缀。
+ * 解析交给 spawn 的跨平台命令与参数。
+ * Node 官方文档明确说明 Windows 的 `.cmd` 文件不能作为普通可执行文件直接启动，因此 npm 等 shim
+ * 必须显式交给 cmd.exe；这里不使用 `shell: true`，避免 Node 将参数拼成未经约束的 shell 命令。
+ * 当前进入 cmd.exe 的命令名和参数均由本工具内部固定生成，不接收用户输入；项目路径只通过 cwd 传递。
+ * Bun 在 Windows 上提供原生可执行文件，不属于 `.cmd` shim，必须保持直接启动。
  */
-function resolvePackageManagerExecutable(command: string): string {
-  return process.platform === "win32" ? `${command}.cmd` : command;
+export function resolvePackageManagerSpawnCommand(
+  command: PackageUpgradeCommand,
+  platform: NodeJS.Platform = process.platform,
+  commandProcessor: string = process.env.ComSpec ?? "cmd.exe"
+): PackageUpgradeSpawnCommand {
+  const windowsCommandShims = new Set(["npm", "npx", "pnpm", "pnpx", "yarn"]);
+
+  if (platform === "win32" && windowsCommandShims.has(command.command.toLowerCase())) {
+    return {
+      command: commandProcessor,
+      args: ["/d", "/s", "/c", `${command.command}.cmd`, ...command.args]
+    };
+  }
+
+  return command;
 }

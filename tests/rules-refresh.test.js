@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { runCli } from "../dist/cli.js";
 import { loadConfig } from "../dist/config.js";
 import {
+  createRuleDocumentFingerprint,
   isUnmodifiedBuiltinRuleDocument,
   normalizeRuleDocumentForCompare
 } from "../dist/fs-utils.js";
@@ -108,6 +109,227 @@ test("首次 init 创建内置规则，state.json 含 packageVersion", async () 
     assert.ok(createdRules.length >= 1);
     assert.equal(state.packageVersion, packageVersion);
     assert.ok(Array.isArray(state.enabledFeatures));
+    assert.equal(typeof state.ruleTemplateFingerprints["项目记忆规则优化.md"], "string");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("无指纹旧 state 中的真实历史模板在 update 时自动刷新正文", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-rules-version-upgrade-"));
+
+  try {
+    await writeFile(join(root, "AGENTS.md"), "# Agents\n", "utf8");
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
+
+    const ruleName = "Agent协作规范.md";
+    const rulePath = join(root, "code-helper-docs/user-rules", ruleName);
+    const currentTemplate = await readFile(rulePath, "utf8");
+    const historicalTemplate = await readFile(
+      join(process.cwd(), "tests/fixtures/user-rules/Agent协作规范-4d342b9.md"),
+      "utf8"
+    );
+    await writeFile(rulePath, historicalTemplate, "utf8");
+
+    // 模拟指纹机制上线前的旧 state：保留真实旧字段，但完全不含 ruleTemplateFingerprints。
+    const statePath = join(root, ".code-helper/state.json");
+    const state = JSON.parse(await readFile(statePath, "utf8"));
+    delete state.ruleTemplateFingerprints;
+    await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+
+    await updateProject(root);
+    const afterUpdate = await readFile(rulePath, "utf8");
+    assert.equal(afterUpdate, currentTemplate);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("0.1.0 的真实 Agent 规则在无指纹 state 下整文件升级", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-rules-010-release-"));
+
+  try {
+    await writeFile(join(root, "AGENTS.md"), "# Agents\n", "utf8");
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
+
+    const rulePath = join(root, "code-helper-docs/user-rules/Agent协作规范.md");
+    const earlyTemplate = await readFile(
+      join(process.cwd(), "tests/fixtures/user-rules/Agent协作规范-0.1.0.md"),
+      "utf8"
+    );
+    assert.equal(
+      createRuleDocumentFingerprint(earlyTemplate),
+      "2fd5b5ed5ab66564129f1c7f635311d8843a2ac5cf92d390bb59334815e2268e"
+    );
+    await writeFile(rulePath, earlyTemplate, "utf8");
+
+    const statePath = join(root, ".code-helper/state.json");
+    const oldState = JSON.parse(await readFile(statePath, "utf8"));
+    delete oldState.ruleTemplateFingerprints;
+    oldState.packageVersion = "0.1.0";
+    await writeFile(statePath, `${JSON.stringify(oldState, null, 2)}\n`, "utf8");
+
+    await updateProject(root);
+    const afterUpdate = await readFile(rulePath, "utf8");
+    assert.notEqual(afterUpdate, earlyTemplate);
+    // 0.1.0 只有五条基础规则；以下正文断言证明已完整刷新到当前模板。
+    assert.match(afterUpdate, /主会话定位为协调者/);
+    assert.match(afterUpdate, /如果当前会话收到主会话派发/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("0.1.1 至 0.1.2 的真实 Agent 规则在无指纹 state 下整文件升级", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-rules-early-release-"));
+
+  try {
+    await writeFile(join(root, "AGENTS.md"), "# Agents\n", "utf8");
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
+
+    const rulePath = join(root, "code-helper-docs/user-rules/Agent协作规范.md");
+    const earlyTemplate = await readFile(
+      join(process.cwd(), "tests/fixtures/user-rules/Agent协作规范-0.1.2.md"),
+      "utf8"
+    );
+    assert.equal(
+      createRuleDocumentFingerprint(earlyTemplate),
+      "8b17d40ea5a6dcdf096050f52a9c60002c883c7128dbcba9c9d6236e29d7586b"
+    );
+    await writeFile(rulePath, earlyTemplate, "utf8");
+
+    const statePath = join(root, ".code-helper/state.json");
+    const oldState = JSON.parse(await readFile(statePath, "utf8"));
+    delete oldState.ruleTemplateFingerprints;
+    oldState.packageVersion = "0.1.2";
+    await writeFile(statePath, `${JSON.stringify(oldState, null, 2)}\n`, "utf8");
+
+    await updateProject(root);
+    const afterUpdate = await readFile(rulePath, "utf8");
+    assert.notEqual(afterUpdate, earlyTemplate);
+    // 这两条只存在于 0.1.3 之后的模板，能证明发生了正文整文件刷新，而非仅入口同步。
+    assert.match(afterUpdate, /如果当前会话收到主会话派发/);
+    assert.match(afterUpdate, /执行子代理发现自身缺少必要工具、权限或上下文时/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("0.1.6 至 0.1.8 的真实项目记忆规则在无指纹 state 下自动刷新", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-rules-release-upgrade-"));
+
+  try {
+    await writeFile(join(root, "AGENTS.md"), "# Agents\n", "utf8");
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
+
+    const ruleName = "项目记忆规则优化.md";
+    const rulePath = join(root, "code-helper-docs/user-rules", ruleName);
+    const releasedTemplate = await readFile(
+      join(process.cwd(), "tests/fixtures/user-rules/项目记忆规则优化-0.1.6.md"),
+      "utf8"
+    );
+    // 该 fixture 来自 0.1.6 发布提交，0.1.7/0.1.8 沿用同一正文；固定指纹防止 fixture 漂移。
+    assert.equal(
+      createRuleDocumentFingerprint(releasedTemplate),
+      "004980664656826a58eb3e9402a496145650f0727d7264ce9d147f8a82e82439"
+    );
+    await writeFile(rulePath, releasedTemplate, "utf8");
+
+    const statePath = join(root, ".code-helper/state.json");
+    const oldState = JSON.parse(await readFile(statePath, "utf8"));
+    delete oldState.ruleTemplateFingerprints;
+    oldState.packageVersion = "0.1.8";
+    await writeFile(statePath, `${JSON.stringify(oldState, null, 2)}\n`, "utf8");
+    await writeFile(join(root, "CLAUDE.md"), "# Claude\n", "utf8");
+
+    await updateProject(root);
+    const afterUpdate = await readFile(rulePath, "utf8");
+    assert.notEqual(afterUpdate, releasedTemplate);
+    assert.match(afterUpdate, /CLAUDE\.md/);
+    // 同时核对当前模板正文的稳定规则，避免测试只验证入口列表发生变化。
+    assert.match(
+      afterUpdate,
+      /15\. 新功能、小节点或重构形成稳定规则后，agent 必须主动询问用户是否更新记忆/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("用户修改过的真实历史模板在无指纹 state 下保留正文", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-rules-version-custom-"));
+
+  try {
+    await writeFile(join(root, "AGENTS.md"), "# Agents\n", "utf8");
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
+
+    const ruleName = "Agent协作规范.md";
+    const rulePath = join(root, "code-helper-docs/user-rules", ruleName);
+    const historicalTemplate = await readFile(
+      join(process.cwd(), "tests/fixtures/user-rules/Agent协作规范-4d342b9.md"),
+      "utf8"
+    );
+    const customizedV1 = `${historicalTemplate.trimEnd()}\n\n## 用户补充\n\n这段内容必须保留。\n`;
+    await writeFile(rulePath, customizedV1, "utf8");
+
+    const statePath = join(root, ".code-helper/state.json");
+    const state = JSON.parse(await readFile(statePath, "utf8"));
+    delete state.ruleTemplateFingerprints;
+    await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+
+    await updateProject(root);
+    const afterUpdate = await readFile(rulePath, "utf8");
+    assert.match(afterUpdate, /这段内容必须保留/);
+    // 历史模板原有正文与用户补充应同时保留，证明默认路径没有整文件覆盖用户版本。
+    assert.match(afterUpdate, /16\. Agent hooks 只作为完成检查提醒和兜底/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("state 指纹字段形状错误时 update 不抛错并保守保留未知正文", async () => {
+  for (const invalidState of [null, [], { ruleTemplateFingerprints: null }, { ruleTemplateFingerprints: [] }, { ruleTemplateFingerprints: { "Agent协作规范.md": 42 } }]) {
+    const root = await mkdtemp(join(tmpdir(), "code-helper-rules-invalid-state-"));
+
+    try {
+      await writeFile(join(root, "AGENTS.md"), "# Agents\n", "utf8");
+      await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
+      const rulePath = join(root, "code-helper-docs/user-rules/Agent协作规范.md");
+      const customContent = `${await readFile(rulePath, "utf8")}\n## 未知自定义正文\n\n必须保留。\n`;
+      await writeFile(rulePath, customContent, "utf8");
+      await writeFile(
+        join(root, ".code-helper/state.json"),
+        `${JSON.stringify(invalidState, null, 2)}\n`,
+        "utf8"
+      );
+
+      await updateProject(root);
+      assert.match(await readFile(rulePath, "utf8"), /必须保留/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("writeStateFile 保留合法 state 的未知字段并覆盖受控字段", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-rules-state-merge-"));
+
+  try {
+    await writeFile(join(root, "AGENTS.md"), "# Agents\n", "utf8");
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
+    const statePath = join(root, ".code-helper/state.json");
+    const before = JSON.parse(await readFile(statePath, "utf8"));
+    await writeFile(
+      statePath,
+      `${JSON.stringify({ ...before, extensionField: { keep: true }, packageVersion: "旧值" }, null, 2)}\n`,
+      "utf8"
+    );
+
+    await updateProject(root);
+    const after = JSON.parse(await readFile(statePath, "utf8"));
+    assert.deepEqual(after.extensionField, { keep: true });
+    assert.equal(after.packageVersion, await getCurrentPackageVersion());
+    assert.equal(typeof after.ruleTemplateFingerprints["Agent协作规范.md"], "string");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

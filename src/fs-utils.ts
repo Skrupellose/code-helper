@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, posix, resolve } from "node:path";
 
@@ -183,6 +184,21 @@ export function normalizeRuleDocumentForCompare(
 
   // 与 ensureTrailingNewline 一致地去掉文末空白，避免仅尾随换行差异影响比较。
   return withPlaceholder.replace(/\s+$/u, "");
+}
+
+/**
+ * 计算内置规则正文的稳定指纹。
+ *
+ * 指纹基于忽略「调用入口文件」小节后的规范化正文，因此入口文件增减、CRLF 与
+ * 文末空白不会被误判为用户修改；正文的任何真实改动都会产生不同指纹。
+ */
+export function createRuleDocumentFingerprint(
+  content: string,
+  entrySectionTitle = "## 调用入口文件"
+): string {
+  return createHash("sha256")
+    .update(normalizeRuleDocumentForCompare(content, entrySectionTitle), "utf8")
+    .digest("hex");
 }
 
 /**

@@ -23,6 +23,7 @@ import {
   runCli
 } from "../dist/cli.js";
 import { initializeProject } from "../dist/init.js";
+import { resolvePackageManagerSpawnCommand } from "../dist/cli/quick-upgrade.js";
 import { createPlanWorkbench } from "../dist/workflows.js";
 
 test("主菜单按项目准备、任务推进、项目维护、工具设置分组展示", () => {
@@ -191,8 +192,8 @@ test("快捷升级会先执行 npm install 再运行新版 code-helper update", 
   }
 });
 
-test("快捷升级 update 优先使用本地 node_modules 入口", async () => {
-  // 本地已安装包时，update 必须走 node <local>/dist/index.js，避免再走 npx 解析到旧全局版本。
+test("快捷升级 update 优先使用当前 Node 可执行文件运行本地入口", async () => {
+  // 本地已安装包时，update 必须走当前 Node 绝对路径，避免 Windows 将 node 错误改写成 node.cmd。
   const root = await mkdtemp(join(tmpdir(), "code-helper-cli-quick-upgrade-local-"));
 
   try {
@@ -202,11 +203,57 @@ test("快捷升级 update 优先使用本地 node_modules 入口", async () => {
 
     const command = await resolveCodeHelperUpdateCommand(root);
 
-    assert.equal(command.command, "node");
+    assert.equal(command.command, process.execPath);
     assert.deepEqual(command.args, [localEntry, "update"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("Windows 快捷升级通过命令处理器运行包管理器 cmd shim", () => {
+  // .cmd 不能由 shell:false 的 spawn 直接执行，生产调用链必须显式启动 cmd.exe 并保持参数数组结构。
+  assert.deepEqual(
+    resolvePackageManagerSpawnCommand(
+      { command: "npm", args: ["install", "-D", "@skrupellose/code-helper@latest"] },
+      "win32",
+      "C:\\Windows\\System32\\cmd.exe"
+    ),
+    {
+      command: "C:\\Windows\\System32\\cmd.exe",
+      args: ["/d", "/s", "/c", "npm.cmd", "install", "-D", "@skrupellose/code-helper@latest"]
+    }
+  );
+  assert.deepEqual(
+    resolvePackageManagerSpawnCommand(
+      { command: "npx", args: ["--yes", "@skrupellose/code-helper", "update"] },
+      "win32",
+      "cmd.exe"
+    ),
+    {
+      command: "cmd.exe",
+      args: ["/d", "/s", "/c", "npx.cmd", "--yes", "@skrupellose/code-helper", "update"]
+    }
+  );
+});
+
+test("Windows 快捷升级直接启动 Node 与 Bun 原生可执行文件", () => {
+  // Node 使用绝对路径，Bun 使用原生 exe；二者都不得追加 .cmd 或经过命令处理器。
+  const nodeCommand = { command: process.execPath, args: ["local-entry.js", "update"] };
+  const bunCommand = { command: "bun", args: ["add", "-d", "@skrupellose/code-helper@latest"] };
+  const bunxCommand = { command: "bunx", args: ["code-helper", "update"] };
+
+  assert.deepEqual(resolvePackageManagerSpawnCommand(nodeCommand, "win32"), nodeCommand);
+  assert.deepEqual(resolvePackageManagerSpawnCommand(bunCommand, "win32"), bunCommand);
+  assert.deepEqual(resolvePackageManagerSpawnCommand(bunxCommand, "win32"), bunxCommand);
+});
+
+test("非 Windows 平台不改写包管理器命令", () => {
+  // macOS 与 Linux 直接执行 PATH 中的包管理器二进制，不追加 Windows 专用后缀。
+  const npmCommand = { command: "npm", args: ["install"] };
+  const pnpmCommand = { command: "pnpm", args: ["add"] };
+
+  assert.deepEqual(resolvePackageManagerSpawnCommand(npmCommand, "darwin"), npmCommand);
+  assert.deepEqual(resolvePackageManagerSpawnCommand(pnpmCommand, "linux"), pnpmCommand);
 });
 
 test("快捷升级缺少 package.json 时失败且不刷新项目资产", async () => {
