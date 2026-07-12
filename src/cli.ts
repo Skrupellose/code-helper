@@ -2,7 +2,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
 import { normalizeDroppedPath } from "./input-utils.js";
-import { canUseInteractiveKeys, promptSelect } from "./terminal-ui.js";
+import { canUseInteractiveKeys, promptSelect, TerminalCancelError } from "./terminal-ui.js";
 import {
   maybeNotifyVersionUpdate,
   type VersionUpdateState
@@ -196,6 +196,11 @@ async function runInteractiveMenu(
           }
         });
       } catch (error) {
+        // 主菜单 Esc：取消本次选择，重新显示菜单，不退出进程
+        if (error instanceof TerminalCancelError) {
+          continue;
+        }
+
         // stdin 关闭或 readline 已关闭：会话无法继续，向上抛出让 runCli 退出
         if (isFatalInteractiveMenuError(error)) {
           throw error;
@@ -434,9 +439,20 @@ async function runSkillMenu(
     { value: "10", label: "Skills 建议分析" },
     { value: "0", label: "返回" }
   ];
-  const answer = useKeyMenu
-    ? await promptSelect(input, output, "管理项目 Skills", options)
-    : await askTextSkillMenu(rl);
+
+  let answer: string;
+  try {
+    answer = useKeyMenu
+      ? await promptSelect(input, output, "管理项目 Skills", options)
+      : await askTextSkillMenu(rl);
+  } catch (error) {
+    // 子菜单 Esc：返回主菜单，不退出进程
+    if (error instanceof TerminalCancelError) {
+      console.log("已返回主菜单。");
+      return false;
+    }
+    throw error;
+  }
 
   switch (answer.trim()) {
     case "1":
@@ -499,9 +515,20 @@ async function runHooksMenu(
     { value: "9", label: "卸载全部 Hooks" },
     { value: "0", label: "返回" }
   ];
-  const answer = useKeyMenu
-    ? await promptSelect(input, output, "管理 Hooks", options)
-    : await askTextHooksMenu(rl);
+
+  let answer: string;
+  try {
+    answer = useKeyMenu
+      ? await promptSelect(input, output, "管理 Hooks", options)
+      : await askTextHooksMenu(rl);
+  } catch (error) {
+    // 子菜单 Esc：返回主菜单，不退出进程
+    if (error instanceof TerminalCancelError) {
+      console.log("已返回主菜单。");
+      return false;
+    }
+    throw error;
+  }
 
   switch (answer.trim()) {
     case "1":
@@ -560,9 +587,20 @@ async function runApplyMenu(
     { value: "8", label: "查看应用状态" },
     { value: "0", label: "返回" }
   ];
-  const answer = useKeyMenu
-    ? await promptSelect(input, output, "功能管理", options)
-    : await askTextApplyMenu(rl);
+
+  let answer: string;
+  try {
+    answer = useKeyMenu
+      ? await promptSelect(input, output, "功能管理", options)
+      : await askTextApplyMenu(rl);
+  } catch (error) {
+    // 子菜单 Esc：返回主菜单，不退出进程
+    if (error instanceof TerminalCancelError) {
+      console.log("已返回主菜单。");
+      return false;
+    }
+    throw error;
+  }
 
   switch (answer.trim()) {
     case "1": {

@@ -7,6 +7,7 @@ import { test } from "node:test";
 
 import { archiveFeature } from "../dist/archive.js";
 import { createCompletionReview } from "../dist/completion.js";
+import { setFeatureEnabled } from "../dist/config.js";
 import { initializeProject } from "../dist/init.js";
 import { createPlanWorkbench } from "../dist/workflows.js";
 
@@ -98,6 +99,142 @@ test("createCompletionReview 缺少任务文档时会报错", async () => {
       () => createCompletionReview(root, "不存在功能"),
       /未找到任务文档/
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 在 completionReview 关闭时会报错", async () => {
+  // 功能开关关闭时不得静默跳过，应明确提示用户先 enable。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-disabled-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await setFeatureEnabled(root, "completionReview", false);
+
+    await assert.rejects(
+      () => createCompletionReview(root, "任意功能"),
+      /功能完成检查已关闭/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 缺少 plan/result/status 时识别为 missing-docs", async () => {
+  // resolveReviewStatus：三类主文档任一缺失即 missing-docs（任务仍可因部分文档被 listTasks 识别）。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-missing-docs-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
+    // 仅有 plan，故意不写 result 与 status，稳定触发 missing-docs
+    await writeFile(
+      join(root, "code-helper-docs/plan-doc/缺文档任务.md"),
+      "# 缺文档任务\n\n状态：进行中\n",
+      "utf8"
+    );
+
+    const review = await createCompletionReview(root, "缺文档任务");
+
+    assert.equal(review.reviewStatus, "missing-docs");
+    assert.equal(review.documents.plan.exists, true);
+    assert.equal(review.documents.result.exists, false);
+    assert.equal(review.documents.status.exists, false);
+    assert.equal(review.shouldAskArchive, false);
+    assert.ok(review.recommendations.some((item) => item.includes("补齐") && item.includes("plan-doc")));
+    assert.ok(review.requiredConfirmations.some((item) => item.includes("不得询问归档")));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 存在阻塞标记时识别为 blocked", async () => {
+  // statusCounts.blocked > 0 时优先于 needs-work / ready-to-archive，匹配「状态：被阻塞」。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-blocked-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/result-doc/阻塞任务"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/status-doc"), { recursive: true });
+    await writeFile(
+      join(root, "code-helper-docs/plan-doc/阻塞任务.md"),
+      "# 阻塞任务\n\n状态：进行中\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/result-doc/阻塞任务/实施记录.md"),
+      "# 实施记录\n\n状态：进行中\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/阻塞任务-状态.md"),
+      [
+        "# 阻塞任务状态",
+        "",
+        "## 当前执行节点",
+        "",
+        "状态：被阻塞",
+        "",
+        "## 子计划队列",
+        "",
+        "状态：未开始",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    const review = await createCompletionReview(root, "阻塞任务");
+
+    assert.equal(review.reviewStatus, "blocked");
+    assert.equal(review.statusCounts.blocked, 1);
+    assert.equal(review.hasCurrentExecutionNode, true);
+    assert.equal(review.hasSubPlanQueue, true);
+    assert.ok(review.recommendations.some((item) => item.includes("阻塞")));
+    assert.ok(review.requiredConfirmations.some((item) => item.includes("不得询问归档")));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 缺少当前执行节点或子计划队列时识别为 node-review", async () => {
+  // 文档齐全且无阻塞，但 status 缺「## 当前执行节点」或「## 子计划队列」时为 node-review。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-node-review-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/result-doc/节点审查"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/status-doc"), { recursive: true });
+    await writeFile(
+      join(root, "code-helper-docs/plan-doc/节点审查.md"),
+      "# 节点审查\n\n状态：进行中\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/result-doc/节点审查/实施记录.md"),
+      "# 实施记录\n\n状态：进行中\n",
+      "utf8"
+    );
+    // 故意只写当前执行节点、不写子计划队列，稳定触发 node-review
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/节点审查-状态.md"),
+      "# 节点审查状态\n\n## 当前执行节点\n\n状态：进行中\n",
+      "utf8"
+    );
+
+    const review = await createCompletionReview(root, "节点审查");
+
+    assert.equal(review.reviewStatus, "node-review");
+    assert.equal(review.documents.plan.exists, true);
+    assert.equal(review.documents.result.exists, true);
+    assert.equal(review.documents.status.exists, true);
+    assert.equal(review.hasCurrentExecutionNode, true);
+    assert.equal(review.hasSubPlanQueue, false);
+    assert.equal(review.statusCounts.blocked, 0);
+    assert.ok(review.recommendations.some((item) => item.includes("当前执行节点") || item.includes("子计划队列")));
+    assert.ok(review.requiredConfirmations.some((item) => item.includes("不得询问归档")));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

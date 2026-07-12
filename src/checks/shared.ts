@@ -1,6 +1,10 @@
 import { readdir } from "node:fs/promises";
 
+import { containsChinese } from "../text-utils.js";
 import type { CheckIssue } from "../types.js";
+
+// 向 checks/* 模块统一再导出，避免各检查文件各自依赖 text-utils 路径不一致。
+export { containsChinese };
 
 /**
  * 安全读取目录。
@@ -12,14 +16,6 @@ export async function safeReadDirectory(path: string): Promise<string[] | undefi
   } catch {
     return undefined;
   }
-}
-
-/**
- * 判断字符串是否包含中文字符。
- * 文档命名规则要求任务名至少包含一个中文字符，保留 Unicode 脚本判断以兼容完整汉字范围。
- */
-export function containsChinese(value: string): boolean {
-  return /\p{Script=Han}/u.test(value);
 }
 
 /**

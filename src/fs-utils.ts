@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, posix, resolve } from "node:path";
 
 import { ENTRY_BLOCK_END, ENTRY_BLOCK_START } from "./constants.js";
@@ -10,6 +10,30 @@ import type { OperationResult } from "./types.js";
  */
 function isNotFoundError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
+/**
+ * 判断路径是否存在（文件或目录均可）。
+ *
+ * 语义约定（全仓库统一）：
+ * - 路径不存在（ENOENT）→ 返回 `false`
+ * - 其它错误（如 EACCES 权限不足、ELOOP 符号链接环）→ **原样抛出**，不吞掉
+ *
+ * 使用 `access` 而非读取内容，可安全探测二进制文件（如 bun.lockb）。
+ * 若调用方必须在权限等错误时也当作“不存在”继续走 soft miss，请在调用处显式 try/catch，
+ * 不要在此处静默吞掉非 ENOENT 错误，以免掩盖真实环境问题。
+ */
+export async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
 }
 
 /**

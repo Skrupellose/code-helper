@@ -584,3 +584,46 @@ test("finish 输出必须确认事项以防遗漏收尾步骤", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("features list/enable/disable 在临时项目上切换开关并写回配置", async () => {
+  // 最小 CLI 契约：list 展示默认状态；disable/enable 立刻改 config 且 stdout 反映新状态。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-cli-features-"));
+  const logs = [];
+  const originalLog = console.log;
+
+  try {
+    console.log = (...args) => {
+      logs.push(args.join(" "));
+    };
+
+    await initializeProject({ projectRoot: root });
+
+    const listExitCode = await runCli(["features", "list"], root);
+    assert.equal(listExitCode, 0);
+    assert.match(logs.join("\n"), /documentArchive: 启用/);
+    assert.match(logs.join("\n"), /checks: 启用/);
+
+    logs.length = 0;
+    const disableExitCode = await runCli(["features", "disable", "documentArchive"], root);
+    assert.equal(disableExitCode, 0);
+    assert.match(logs.join("\n"), /documentArchive: 关闭/);
+
+    const configAfterDisable = JSON.parse(await readFile(join(root, ".code-helper/config.json"), "utf8"));
+    assert.equal(configAfterDisable.features.documentArchive.enabled, false);
+
+    logs.length = 0;
+    const enableExitCode = await runCli(["features", "enable", "documentArchive"], root);
+    assert.equal(enableExitCode, 0);
+    assert.match(logs.join("\n"), /documentArchive: 启用/);
+
+    const configAfterEnable = JSON.parse(await readFile(join(root, ".code-helper/config.json"), "utf8"));
+    assert.equal(configAfterEnable.features.documentArchive.enabled, true);
+
+    logs.length = 0;
+    const invalidExitCode = await runCli(["features", "enable", "notAFeature"], root);
+    assert.equal(invalidExitCode, 1);
+  } finally {
+    console.log = originalLog;
+    await rm(root, { recursive: true, force: true });
+  }
+});

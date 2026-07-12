@@ -2,6 +2,7 @@ import { basename, isAbsolute, join, win32 } from "node:path";
 
 import { loadConfig } from "./config.js";
 import { projectPath, readTextIfExists, writeTextIfMissing } from "./fs-utils.js";
+import { containsChinese } from "./text-utils.js";
 import type { OperationResult } from "./types.js";
 
 /**
@@ -185,13 +186,6 @@ function extractChineseMarkdownTitle(content: string): string | undefined {
   }
 
   return undefined;
-}
-
-/**
- * 判断字符串中是否包含中文字符。
- */
-function containsChinese(value: string): boolean {
-  return /\p{Script=Han}/u.test(value);
 }
 
 /**

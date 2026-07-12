@@ -8,7 +8,7 @@ import {
   resolveSkillRegistrationTargets,
   type SkillRegistrationTarget
 } from "../skills.js";
-import { canUseInteractiveKeys, promptSelect } from "../terminal-ui.js";
+import { canUseInteractiveKeys, promptSelect, TerminalCancelError } from "../terminal-ui.js";
 import { askQuestionOrDefault, type MenuReadline } from "./menu-input.js";
 
 /**
@@ -33,8 +33,16 @@ export async function selectSkillTargetsForMenu(
   const useKeyMenu = canUseInteractiveKeys(input, output);
 
   if (useKeyMenu) {
-    const answer = await promptSelect(input, output, title, buildSkillTargetSelectOptions(inferredTargets));
-    return resolveSkillTargetMenuAnswer(answer, inferredTargets);
+    try {
+      const answer = await promptSelect(input, output, title, buildSkillTargetSelectOptions(inferredTargets));
+      return resolveSkillTargetMenuAnswer(answer, inferredTargets);
+    } catch (error) {
+      // Esc 取消目标选择，返回上级菜单
+      if (error instanceof TerminalCancelError) {
+        return undefined;
+      }
+      throw error;
+    }
   }
 
   const answer = await askTextSkillTargetMenu(rl, title, inferredTargets);
@@ -58,8 +66,16 @@ export async function selectAgentHookTargetsForMenu(
   }
 
   if (canUseInteractiveKeys(input, output)) {
-    const answer = await promptSelect(input, output, title, buildAgentHookTargetSelectOptions(inferredSkillTargets));
-    return resolveAgentHookTargetMenuAnswer(answer, inferredSkillTargets);
+    try {
+      const answer = await promptSelect(input, output, title, buildAgentHookTargetSelectOptions(inferredSkillTargets));
+      return resolveAgentHookTargetMenuAnswer(answer, inferredSkillTargets);
+    } catch (error) {
+      // Esc 取消目标选择，返回上级菜单
+      if (error instanceof TerminalCancelError) {
+        return undefined;
+      }
+      throw error;
+    }
   }
 
   const answer = await askTextAgentHookTargetMenu(rl, title, inferredSkillTargets);

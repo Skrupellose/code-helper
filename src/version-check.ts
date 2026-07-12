@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
-import { access, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { projectPath, readTextIfExists, writeText } from "./fs-utils.js";
+import { pathExists, projectPath, readTextIfExists, writeText } from "./fs-utils.js";
 
 const PACKAGE_NAME = "@skrupellose/code-helper";
 const VERSION_CACHE_RELATIVE_PATH = ".code-helper/checks/version-cache.json";
@@ -230,19 +230,6 @@ async function isProjectInitializedForVersionCache(projectRoot: string): Promise
     await pathExists(projectPath(projectRoot, ".code-helper/config.json"))
     || await pathExists(projectPath(projectRoot, "code-helper-docs"))
   );
-}
-
-/**
- * 判断路径是否存在。
- * 用于初始化探测，不读取文件内容。
- */
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**

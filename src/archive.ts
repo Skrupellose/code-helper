@@ -2,7 +2,8 @@ import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { loadConfig } from "./config.js";
-import { ensureDirectory, portablePath, projectPath, writeText } from "./fs-utils.js";
+import { ensureDirectory, pathExists, portablePath, projectPath, writeText } from "./fs-utils.js";
+import { containsChinese } from "./text-utils.js";
 import type { CodeHelperConfig, OperationResult } from "./types.js";
 import { normalizeDocumentName, normalizeFeatureName } from "./workflows.js";
 
@@ -108,14 +109,6 @@ export function getArchiveFeatureNameCandidates(rawFeatureName: string): string[
     : [legacyName, chineseName];
 
   return [...new Set(orderedNames)];
-}
-
-/**
- * 判断输入是否包含中文。
- * 归档命令用它决定中文新规则和英文旧规则的匹配优先级。
- */
-function containsChinese(value: string): boolean {
-  return /\p{Script=Han}/u.test(value);
 }
 
 /**
@@ -404,18 +397,6 @@ function resolveTaskStatus(task: TaskRecord): TaskStatus {
   }
 
   return "active";
-}
-
-/**
- * 判断路径是否存在。
- */
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**

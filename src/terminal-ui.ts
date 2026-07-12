@@ -4,11 +4,24 @@ import type { ReadStream, WriteStream } from "node:tty";
 /**
  * 用户按 Ctrl+C 中断交互时抛出。
  * keypress handler 不得直接 process.exit，否则会跳过 withRawMode 的终端恢复逻辑。
+ * withRawMode 捕获后恢复终端并以退出码 130 结束进程。
  */
 export class TerminalInterruptError extends Error {
   constructor(message = "用户中断") {
     super(message);
     this.name = "TerminalInterruptError";
+  }
+}
+
+/**
+ * 用户按 Esc 取消当前交互时抛出。
+ * 与 TerminalInterruptError 不同：只取消当前选择，不退出进程。
+ * withRawMode 恢复终端后把错误抛给调用方，由主菜单 / 子菜单决定 continue 或 return。
+ */
+export class TerminalCancelError extends Error {
+  constructor(message = "用户取消") {
+    super(message);
+    this.name = "TerminalCancelError";
   }
 }
 
@@ -76,7 +89,7 @@ export async function promptSelect<T extends string>(
         cursorTo(output, 0, 0);
         clearScreenDown(output);
         output.write(`${title}\n`);
-        output.write("使用 ↑/↓ 移动，空格或回车确认，Ctrl+C 退出。\n\n");
+        output.write("使用 ↑/↓ 移动，空格或回车确认，Esc 取消，Ctrl+C 退出。\n\n");
 
         for (const [index, option] of options.entries()) {
           const pointer = !option.disabled && index === selectedIndex ? ">" : " ";
@@ -87,12 +100,20 @@ export async function promptSelect<T extends string>(
       /**
        * 处理键盘输入。
        * 支持方向键，也支持 j/k，方便不同终端习惯。
-       * Ctrl+C：先 cleanup 再 reject，由 withRawMode 恢复终端后以 130 退出。
+       * Ctrl+C：先 cleanup 再 reject Interrupt，由 withRawMode 恢复终端后以 130 退出。
+       * Esc：先 cleanup 再 reject Cancel，由 withRawMode 恢复终端后抛给调用方处理。
        */
       const onKeypress = (_text: string, key: { name?: string; ctrl?: boolean }): void => {
         if (key.ctrl && key.name === "c") {
           cleanup();
           reject(new TerminalInterruptError());
+          return;
+        }
+
+        // Esc 取消当前单选，不退出进程；主菜单 continue，子菜单 return 上一级
+        if (key.name === "escape") {
+          cleanup();
+          reject(new TerminalCancelError());
           return;
         }
 
@@ -317,9 +338,10 @@ async function withRawMode<T>(
   try {
     return await action();
   } catch (error) {
-    // 先恢复终端，再处理中断退出；顺序不可颠倒
+    // 先恢复终端，再处理中断/取消；顺序不可颠倒
     restore();
 
+    // 仅 Ctrl+C 中断退出进程；Esc 取消必须原样抛出，由菜单层决定 continue / return
     if (error instanceof TerminalInterruptError) {
       process.exit(130);
     }

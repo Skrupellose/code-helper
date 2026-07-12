@@ -2,7 +2,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 
 import { listTasks, type TaskRecord, type TaskStatus } from "../archive.js";
-import { canUseInteractiveKeys, promptSelect } from "../terminal-ui.js";
+import { canUseInteractiveKeys, promptSelect, TerminalCancelError } from "../terminal-ui.js";
 import { askQuestionOrDefault, askRequiredMenuInput, printInputHint, type MenuReadline } from "./menu-input.js";
 
 /**
@@ -22,9 +22,18 @@ export async function selectTaskFeatureNameForMenu(
   const tasks = await getSelectableTasks(projectRoot, options.statuses);
 
   if (tasks.length > 0) {
-    const answer = canUseInteractiveKeys(input, output)
-      ? await promptSelect(input, output, options.title, buildTaskSelectOptions(tasks, true))
-      : await askTextTaskMenu(rl, options.title, tasks);
+    let answer: string;
+    try {
+      answer = canUseInteractiveKeys(input, output)
+        ? await promptSelect(input, output, options.title, buildTaskSelectOptions(tasks, true))
+        : await askTextTaskMenu(rl, options.title, tasks);
+    } catch (error) {
+      // Esc 取消任务选择，返回上级菜单
+      if (error instanceof TerminalCancelError) {
+        return undefined;
+      }
+      throw error;
+    }
 
     if (answer === "__return__") {
       return undefined;
@@ -76,7 +85,17 @@ export async function selectTaskFeatureNameForCommand(
     }
   }
 
-  const answer = await promptSelect(input, output, title, buildTaskSelectOptions(tasks, true));
+  let answer: string;
+  try {
+    answer = await promptSelect(input, output, title, buildTaskSelectOptions(tasks, true));
+  } catch (error) {
+    // 直接命令场景 Esc 视为取消选择，不退出进程
+    if (error instanceof TerminalCancelError) {
+      return undefined;
+    }
+    throw error;
+  }
+
   const rl = createInterface({ input, output });
 
   try {

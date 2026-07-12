@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
-import { access } from "node:fs/promises";
 
-import { projectPath, readTextIfExists } from "../fs-utils.js";
+import { pathExists, projectPath, readTextIfExists } from "../fs-utils.js";
 import { CODE_HELPER_PACKAGE_NAME } from "../version-check.js";
 
 /**
@@ -182,19 +181,6 @@ function readPackageManagerField(
   }
 
   return undefined;
-}
-
-/**
- * 判断路径是否存在。
- * 用 access 而不是读取文件内容，才能安全识别 bun.lockb 这类二进制锁文件。
- */
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**

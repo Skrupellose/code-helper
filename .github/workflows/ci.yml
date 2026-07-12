@@ -17,6 +17,8 @@ jobs:
       fail-fast: false
       matrix:
         node-version:
+          # 与 package.json engines.node（>=18.18.0）对齐，覆盖最低支持线与当前 LTS
+          - 18.x
           - 20.x
           - 22.x
 

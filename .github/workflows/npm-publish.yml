@@ -31,7 +31,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24.x
+          # 与 CI 主验证矩阵中的 LTS 对齐，避免 publish 专用 Node 与日常测试版本漂移
+          node-version: 22.x
           registry-url: https://registry.npmjs.org
           cache: npm
 
