@@ -41,23 +41,52 @@ export async function runPlan(projectRoot: string, args: string[], options: RunP
 }
 
 /**
+ * 解析命令所需功能名：已传参直接使用；否则进入任务选择。
+ * cancelled → 打印「已取消。」并返回 exitCode 0；
+ * missing → 选择流程内部已打印缺参/无任务提示，返回 exitCode 1（不重复用法）；
+ * selected → 返回功能名供后续业务继续。
+ */
+async function resolveFeatureNameForTaskCommand(
+  projectRoot: string,
+  rawFeatureName: string | undefined,
+  title: string
+): Promise<{ featureName: string } | { exitCode: number }> {
+  if (rawFeatureName) {
+    return { featureName: rawFeatureName };
+  }
+
+  const selection = await selectTaskFeatureNameForCommand(projectRoot, title, ["active", "mixed"]);
+
+  if (selection.status === "cancelled") {
+    console.log("已取消。");
+    return { exitCode: 0 };
+  }
+
+  if (selection.status === "missing") {
+    // selectTaskFeatureNameForCommand 内部已打印「缺少功能名称…」，此处不再重复用法
+    return { exitCode: 1 };
+  }
+
+  return { featureName: selection.featureName };
+}
+
+/**
  * 手工测试文档命令。
  * 参数：manual-test <功能名称> [标题]。
  */
 export async function runManualTest(projectRoot: string, args: string[]): Promise<number> {
   const [rawFeatureName, title] = args;
-  const featureName = rawFeatureName ?? await selectTaskFeatureNameForCommand(
+  const resolved = await resolveFeatureNameForTaskCommand(
     projectRoot,
-    "选择要生成手工测试模板的任务",
-    ["active", "mixed"]
+    rawFeatureName,
+    "选择要生成手工测试模板的任务"
   );
 
-  if (!featureName) {
-    console.error("缺少功能名称。用法：code-helper manual-test <中文功能名> [标题]");
-    return 1;
+  if ("exitCode" in resolved) {
+    return resolved.exitCode;
   }
 
-  printOperations([await createManualTestDocument({ projectRoot, featureName, title })]);
+  printOperations([await createManualTestDocument({ projectRoot, featureName: resolved.featureName, title })]);
   return 0;
 }
 
@@ -68,18 +97,19 @@ export async function runManualTest(projectRoot: string, args: string[]): Promis
 export async function runArchive(projectRoot: string, args: string[]): Promise<number> {
   const flags = new Set(args.filter((arg) => arg.startsWith("--")));
   const rawFeatureName = args.find((arg) => !arg.startsWith("--"));
-  const featureName = rawFeatureName ?? await selectTaskFeatureNameForCommand(
+  const resolved = await resolveFeatureNameForTaskCommand(
     projectRoot,
-    "选择要归档的任务",
-    ["active", "mixed"]
+    rawFeatureName,
+    "选择要归档的任务"
   );
 
-  if (!featureName) {
-    console.error("缺少功能名称。用法：code-helper archive <中文功能名> [--resolve-mixed]");
-    return 1;
+  if ("exitCode" in resolved) {
+    return resolved.exitCode;
   }
 
-  printOperations(await archiveFeature(projectRoot, featureName, { resolveMixed: flags.has("--resolve-mixed") }));
+  printOperations(
+    await archiveFeature(projectRoot, resolved.featureName, { resolveMixed: flags.has("--resolve-mixed") })
+  );
   await runTasks(projectRoot, []);
   return 0;
 }
@@ -97,18 +127,17 @@ export async function runFinish(projectRoot: string, args: string[]): Promise<nu
     return 0;
   }
 
-  const featureName = rawFeatureName ?? await selectTaskFeatureNameForCommand(
+  const resolved = await resolveFeatureNameForTaskCommand(
     projectRoot,
-    "选择要检查完成情况的任务",
-    ["active", "mixed"]
+    rawFeatureName,
+    "选择要检查完成情况的任务"
   );
 
-  if (!featureName) {
-    console.error("缺少功能名称。用法：code-helper finish <中文功能名> [--check-only] [--json]");
-    return 1;
+  if ("exitCode" in resolved) {
+    return resolved.exitCode;
   }
 
-  const review = await createCompletionReview(projectRoot, featureName);
+  const review = await createCompletionReview(projectRoot, resolved.featureName);
 
   if (flags.has("--json")) {
     console.log(JSON.stringify(review, null, 2));

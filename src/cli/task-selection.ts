@@ -6,6 +6,17 @@ import { canUseInteractiveKeys, promptSelect, TerminalCancelError } from "../ter
 import { askQuestionOrDefault, askRequiredMenuInput, printInputHint, type MenuReadline } from "./menu-input.js";
 
 /**
+ * 直接命令场景下任务功能名选择的结果。
+ * selected：用户选中或手动输入了功能名；
+ * cancelled：Esc / 返回 0 / __return__ 等主动取消；
+ * missing：无任务、非 TTY 未传参等无法完成选择的缺参路径。
+ */
+export type TaskFeatureCommandSelection =
+  | { status: "selected"; featureName: string }
+  | { status: "cancelled" }
+  | { status: "missing" };
+
+/**
  * 在菜单中选择一个任务功能名。
  * 优先从已有任务文档选择；没有合适任务或用户选择手动输入时，再回退到文本输入。
  */
@@ -53,17 +64,18 @@ export async function selectTaskFeatureNameForMenu(
 /**
  * 直接命令缺少功能名时，从已有任务中选择。
  * 非 TTY 场景不进入交互，只打印可用任务和正确用法。
+ * 返回明确的 selected / cancelled / missing，避免调用方把 Esc 取消误报为缺参。
  */
 export async function selectTaskFeatureNameForCommand(
   projectRoot: string,
   title: string,
   statuses: TaskStatus[]
-): Promise<string | undefined> {
+): Promise<TaskFeatureCommandSelection> {
   const tasks = await getSelectableTasks(projectRoot, statuses);
 
   if (tasks.length === 0) {
     console.error("缺少功能名称，且当前没有发现可选择的活动任务。");
-    return undefined;
+    return { status: "missing" };
   }
 
   if (!input.isTTY || !output.isTTY) {
@@ -71,7 +83,7 @@ export async function selectTaskFeatureNameForCommand(
     for (const task of tasks) {
       console.error(`- ${task.featureName}（${task.status}）`);
     }
-    return undefined;
+    return { status: "missing" };
   }
 
   if (!canUseInteractiveKeys(input, output)) {
@@ -91,7 +103,7 @@ export async function selectTaskFeatureNameForCommand(
   } catch (error) {
     // 直接命令场景 Esc 视为取消选择，不退出进程
     if (error instanceof TerminalCancelError) {
-      return undefined;
+      return { status: "cancelled" };
     }
     throw error;
   }
@@ -137,24 +149,37 @@ export function buildTaskSelectOptions(
 }
 
 /**
- * 将任务选择菜单结果解析为功能名。
+ * 将任务选择菜单结果解析为命令选择结果。
  * 直接命令也保留手动输入入口，兼容旧文档或尚未生成完整任务记录的场景。
+ * 手动输入 0 / 空、返回项 → cancelled；无效下标 → missing；有效功能名 → selected。
  */
 async function resolveTaskSelectionForCommand(
   answer: string,
   tasks: TaskRecord[],
   rl: MenuReadline
-): Promise<string | undefined> {
-
-  if (answer === "__return__" || answer === "__manual__") {
-    if (answer === "__manual__") {
-      return askRequiredMenuInput(rl, "请输入功能名称：");
-    }
-
-    return undefined;
+): Promise<TaskFeatureCommandSelection> {
+  if (answer === "__return__") {
+    return { status: "cancelled" };
   }
 
-  return tasks[Number.parseInt(answer, 10)]?.featureName;
+  if (answer === "__manual__") {
+    const featureName = await askRequiredMenuInput(rl, "请输入功能名称：");
+
+    // 手动输入 0 或空表示取消，与菜单返回语义一致
+    if (!featureName) {
+      return { status: "cancelled" };
+    }
+
+    return { status: "selected", featureName };
+  }
+
+  const featureName = tasks[Number.parseInt(answer, 10)]?.featureName;
+
+  if (!featureName) {
+    return { status: "missing" };
+  }
+
+  return { status: "selected", featureName };
 }
 
 /**

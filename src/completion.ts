@@ -11,6 +11,7 @@ const LEGACY_MANUAL_TEST_FILE_NAME = "manual-test.md";
 /**
  * 完成检查的判断结果。
  * 该状态不替代人工验收，只用于让 agent 在收尾前明确下一步动作。
+ * mixed：任务同时存在 active 与 archive 文档，且已过文档/阻塞/节点门槛，需先整理冲突而非直接归档切换。
  */
 export type CompletionReviewStatus =
   | "needs-work"
@@ -18,7 +19,8 @@ export type CompletionReviewStatus =
   | "node-review"
   | "ready-to-archive"
   | "archived"
-  | "missing-docs";
+  | "missing-docs"
+  | "mixed";
 
 /**
  * 完成检查的结构化结果。
@@ -109,9 +111,10 @@ export async function createCompletionReview(projectRoot: string, featureName: s
     hasSubPlanQueue
   });
   const shouldAskMemoryUpdate = detectMemoryUpdateNeed(changedPaths, combinedContent);
-  // mixed 时即使文档齐全也要先整理冲突，不能直接当 ready-to-archive 去切换任务。
-  const shouldAskArchive = reviewStatus === "ready-to-archive" || task.status === "mixed";
-  const shouldSelectNextTask = reviewStatus === "ready-to-archive" && task.status !== "mixed";
+  // 仅 pure ready-to-archive 或明确的 mixed 结论才提示归档整理；mixed 文档不全时仍为 missing-docs，不误导归档。
+  const shouldAskArchive = reviewStatus === "ready-to-archive" || reviewStatus === "mixed";
+  // 只有纯 active 且文档/状态齐全的 ready-to-archive 才引导切换下一任务；mixed 必须先整理冲突。
+  const shouldSelectNextTask = reviewStatus === "ready-to-archive";
   const requiredConfirmations = buildRequiredConfirmations({
     reviewStatus,
     taskStatus: task.status,
@@ -162,16 +165,18 @@ function buildRequiredConfirmations(input: {
   shouldSelectNextTask: boolean;
 }): string[] {
   const confirmations: string[] = [];
+  // taskStatus 或 reviewStatus 任一为 mixed 都需要显式冲突提示（文档不全时 reviewStatus 仍可能是 missing-docs）。
+  const isMixed = input.taskStatus === "mixed" || input.reviewStatus === "mixed";
 
   // mixed 时必须先处理 active/archive 冲突，不能当成普通未完成任务或直接切换新任务。
-  if (input.taskStatus === "mixed") {
+  if (isMixed) {
     confirmations.push(
       "任务处于 mixed（活动文档与归档文档并存），必须先整理后再继续：确认 archive 为终态则执行 `code-helper archive <功能名> --resolve-mixed` 清理活动副本；若活动侧仍有未归档内容，补齐后执行 `code-helper archive <功能名>`。"
     );
   }
 
   if (
-    input.taskStatus !== "mixed"
+    !isMixed
     && (input.reviewStatus === "needs-work"
       || input.reviewStatus === "blocked"
       || input.reviewStatus === "node-review"
@@ -184,7 +189,7 @@ function buildRequiredConfirmations(input: {
     confirmations.push("必须询问用户是否更新长期记忆；用户确认前不得写入长期规则。");
   }
 
-  if (input.shouldAskArchive && input.taskStatus === "mixed") {
+  if (input.shouldAskArchive && isMixed) {
     confirmations.push("必须先向用户说明 mixed 冲突处理方式，用户确认前不得执行 archive 或 --resolve-mixed。");
   } else if (input.shouldAskArchive) {
     confirmations.push("必须询问用户是否归档当前任务文档；用户确认前不得执行 archive。");
@@ -386,7 +391,8 @@ function countMatches(content: string, pattern: RegExp): number {
 
 /**
  * 根据文档状态推导当前完成检查结论。
- * ready-to-archive 只在任务没有明显未完成状态时给出，避免误导归档。
+ * ready-to-archive 只在非 mixed 任务且没有明显未完成状态时给出，避免误导归档或切换任务。
+ * mixed 任务在越过文档/阻塞/节点门槛后固定返回 "mixed"，不得再升为 ready-to-archive。
  */
 function resolveReviewStatus(input: {
   task: TaskRecord;
@@ -399,6 +405,23 @@ function resolveReviewStatus(input: {
 }): CompletionReviewStatus {
   if (input.task.status === "archived") {
     return "archived";
+  }
+
+  // mixed 与 active 共用文档不全 / 阻塞 / 缺节点门槛，便于保留可操作性；越过门槛后不再走 needs-work / ready-to-archive。
+  if (input.task.status === "mixed") {
+    if (!input.plan.exists || !input.result.exists || !input.status.exists) {
+      return "missing-docs";
+    }
+
+    if (input.statusCounts.blocked > 0) {
+      return "blocked";
+    }
+
+    if (!input.hasCurrentExecutionNode || !input.hasSubPlanQueue) {
+      return "node-review";
+    }
+
+    return "mixed";
   }
 
   if (!input.plan.exists || !input.result.exists || !input.status.exists) {
@@ -495,9 +518,11 @@ function buildRecommendations(input: {
   hasSubPlanQueue: boolean;
 }): string[] {
   const recommendations: string[] = [];
+  // 与 buildRequiredConfirmations 对齐：task mixed 或 reviewStatus mixed 都需要冲突整理提示。
+  const isMixed = input.taskStatus === "mixed" || input.reviewStatus === "mixed";
 
   // mixed 优先提示，避免只看到 missing-docs / ready-to-archive 而忽略 active/archive 冲突。
-  if (input.taskStatus === "mixed") {
+  if (isMixed) {
     recommendations.push(
       "任务处于 mixed：active 与 archive 同时存在同名文档。请先确认哪一侧为正确版本；若 archive 已是终态，执行 `code-helper archive <功能名> --resolve-mixed` 清理活动副本；若活动侧仍有内容，补齐 plan/result/status 后执行 `code-helper archive <功能名>` 完成归档。"
     );
@@ -505,7 +530,7 @@ function buildRecommendations(input: {
 
   if (input.reviewStatus === "missing-docs") {
     recommendations.push(
-      input.taskStatus === "mixed"
+      isMixed
         ? "mixed 场景下请同时检查 active 与 archive 两侧：补齐仍缺失的 plan-doc、result-doc 和 status-doc 后再判断功能是否完成。"
         : "先补齐 plan-doc、result-doc 和 status-doc，再判断功能是否完成。"
     );
@@ -521,6 +546,12 @@ function buildRecommendations(input: {
 
   if (input.reviewStatus === "node-review") {
     recommendations.push("先把 status-doc 补成当前执行入口，明确当前执行节点和子计划队列。");
+  }
+
+  if (input.reviewStatus === "mixed") {
+    recommendations.push(
+      "完成检查结论为 mixed：文档与节点门槛已通过，但仍存在 active/archive 冲突，不得视为 ready-to-archive，也不得切换新任务。"
+    );
   }
 
   if (input.reviewStatus === "archived") {
@@ -543,7 +574,7 @@ function buildRecommendations(input: {
     recommendations.push("如果本轮变更只是一次性实现细节，不需要更新长期记忆。");
   }
 
-  if (input.shouldAskArchive && input.taskStatus === "mixed") {
+  if (input.shouldAskArchive && isMixed) {
     recommendations.push("整理 mixed 冲突并经用户确认后，再执行 archive 或 --resolve-mixed；确认前不得切换到新任务。");
   } else if (input.shouldAskArchive) {
     recommendations.push("功能整体完成并经用户确认后，询问是否执行文档归档。");

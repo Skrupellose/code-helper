@@ -118,13 +118,15 @@ export function printSkillAuditRecommendations(recommendations: SkillAuditRecomm
  * 把完成检查状态转成中文文案。
  */
 function formatCompletionReviewStatus(status: CompletionReview["reviewStatus"]): string {
+  // Record 穷尽所有 CompletionReviewStatus，新增状态时 TypeScript 会在此处报错。
   const labels: Record<CompletionReview["reviewStatus"], string> = {
     "needs-work": "当前任务仍需继续推进",
     blocked: "当前任务存在阻塞",
     "node-review": "需要先补齐当前执行节点",
     "ready-to-archive": "可在用户确认后归档",
     archived: "任务已归档，视为已结束",
-    "missing-docs": "缺少必要协作文档"
+    "missing-docs": "缺少必要协作文档",
+    mixed: "存在 active/archive 冲突，需先整理"
   };
 
   return labels[status];

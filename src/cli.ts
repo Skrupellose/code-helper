@@ -648,9 +648,8 @@ async function runApplyMenu(
       await runMenuAction("取消 Git hook", () => removeGitHook(projectRoot));
       return true;
     case "7":
-      await runMenuAction("刷新规则和模板", () =>
-        runInit(projectRoot, [], { showInteractiveCompletionHint: false })
-      );
+      // 安全刷新规则与模板：走 update 默认路径，不强制 --refresh-rules
+      await runMenuAction("刷新规则和模板", () => runUpdate(projectRoot, []));
       return true;
     case "8":
       await runMenuAction("查看应用状态", () => printApplyStatus(projectRoot));
