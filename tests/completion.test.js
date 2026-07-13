@@ -569,7 +569,7 @@ test("createCompletionReview 支持规范化任务名查找", async () => {
 });
 
 test("createCompletionReview 同时统计半角与全角冒号状态枚举", async () => {
-  // 手写文档可能使用「状态:已完成」，完成检查应与「状态：已完成」同等计入。
+  // 手写 status-doc 可能使用半角或全角冒号；plan/result 的历史状态不再参与当前结论。
   const root = await mkdtemp(join(tmpdir(), "code-helper-completion-colon-"));
 
   try {
@@ -589,18 +589,149 @@ test("createCompletionReview 同时统计半角与全角冒号状态枚举", asy
     );
     await writeFile(
       join(root, "code-helper-docs/status-doc/冒号兼容-状态.md"),
-      "# 状态\n\n## 当前执行节点\n\n状态:被阻塞\n\n## 子计划队列\n\n状态:部分完成\n",
+      "# 状态\n\n## 当前执行节点\n\n状态:被阻塞\n\n## 子计划队列\n\n状态:部分完成\n\n## 明确不做\n\n状态：未开始。范围外。\n\n## 历史记录\n\n状态：已完成。\n",
       "utf8"
     );
 
     const review = await createCompletionReview(root, "冒号兼容");
 
-    assert.equal(review.statusCounts.done, 1);
-    assert.equal(review.statusCounts.notStarted, 1);
-    assert.equal(review.statusCounts.inProgress, 1);
+    assert.equal(review.statusCounts.done, 0);
+    assert.equal(review.statusCounts.notStarted, 0);
+    assert.equal(review.statusCounts.inProgress, 0);
     assert.equal(review.statusCounts.blocked, 1);
     assert.equal(review.statusCounts.partial, 1);
     assert.equal(review.reviewStatus, "blocked");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 按每张结构化表独立解析状态并排除描述文本", async () => {
+  // 覆盖键值表、独立状态列、全半角括号、描述列干扰、跨表列号串用和范围外区段排除。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-table-status-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/result-doc/表格状态"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/status-doc"), { recursive: true });
+    await writeFile(join(root, "code-helper-docs/plan-doc/表格状态.md"), "# 计划\n", "utf8");
+    await writeFile(join(root, "code-helper-docs/result-doc/表格状态/实施记录.md"), "# 实施记录\n", "utf8");
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/表格状态-状态.md"),
+      [
+        "# 状态",
+        "",
+        "## 当前执行节点",
+        "",
+        "| 字段 | 内容 |",
+        "| --- | --- |",
+        "| 当前状态 | 已完成（实现侧） |",
+        "| 历史说明 | 状态：被阻塞。仅为描述 |",
+        "",
+        "状态：已完成(兼容旧式半角括号)",
+        "状态：已完成（兼容旧式全角括号）",
+        "",
+        "## 子计划队列",
+        "",
+        "| 子任务 | 状态 | 描述 |",
+        "| --- | --- | --- |",
+        "| 一 | 未开始 | 描述中出现状态：已完成。不得计入 |",
+        "| 二 | 进行中 | 描述中出现状态：被阻塞。不得计入 |",
+        "| 三 | 部分完成 | 无 |",
+        "| 四 | 被阻塞 | 无 |",
+        "| 五 | 已完成(验证侧) | 无 |",
+        "",
+        "| 子任务 | 描述 |",
+        "| --- | --- |",
+        "| 列结构不同 | 被阻塞 |",
+        "",
+        "## 明确不做",
+        "",
+        "| 项目 | 状态 |",
+        "| --- | --- |",
+        "| 范围外 | 未开始 |",
+        "",
+        "## 历史记录",
+        "",
+        "状态：被阻塞。"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const review = await createCompletionReview(root, "表格状态");
+
+    assert.deepEqual(review.statusCounts, {
+      notStarted: 1,
+      inProgress: 1,
+      partial: 1,
+      blocked: 1,
+      done: 4
+    });
+    assert.equal(review.reviewStatus, "blocked");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 在二级标题紧邻表格时仍分别解析当前节点与子计划", async () => {
+  // 标题上下无空行时，两区段的表格不能被拼成一张；当前节点完成也不能掩盖子计划的进行中和阻塞。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-adjacent-heading-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/result-doc/紧邻标题"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/status-doc"), { recursive: true });
+    await writeFile(join(root, "code-helper-docs/plan-doc/紧邻标题.md"), "# 计划\n", "utf8");
+    await writeFile(join(root, "code-helper-docs/result-doc/紧邻标题/实施记录.md"), "# 实施记录\n", "utf8");
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/紧邻标题-状态.md"),
+      [
+        "# 状态",
+        "## 当前执行节点",
+        "| 字段 | 内容 |",
+        "| --- | --- |",
+        "| 当前状态 | 已完成 |",
+        "## 子计划队列",
+        "| 子任务 | 描述 | 状态 |",
+        "| --- | --- | --- |",
+        "| 实现 | 正在执行 | 进行中 |"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const inProgressReview = await createCompletionReview(root, "紧邻标题");
+
+    assert.deepEqual(inProgressReview.statusCounts, {
+      notStarted: 0,
+      inProgress: 1,
+      partial: 0,
+      blocked: 0,
+      done: 1
+    });
+    assert.equal(inProgressReview.reviewStatus, "needs-work");
+
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/紧邻标题-状态.md"),
+      [
+        "# 状态",
+        "## 当前执行节点",
+        "| 字段 | 内容 |",
+        "| --- | --- |",
+        "| 当前状态 | 已完成 |",
+        "## 子计划队列",
+        "| 子任务 | 描述 | 状态 |",
+        "| --- | --- | --- |",
+        "| 验证 | 等待依赖 | 被阻塞 |"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const blockedReview = await createCompletionReview(root, "紧邻标题");
+    assert.equal(blockedReview.statusCounts.done, 1);
+    assert.equal(blockedReview.statusCounts.blocked, 1);
+    assert.equal(blockedReview.reviewStatus, "blocked");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

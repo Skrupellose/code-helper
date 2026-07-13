@@ -97,7 +97,9 @@ export async function createCompletionReview(projectRoot: string, featureName: s
     getManualTestDocumentPathCandidates(task, config.directories.resultDoc)
   );
   const combinedContent = [plan.content, result.content, status.content, manualTest.content].filter(Boolean).join("\n");
-  const statusCounts = countStatusMarkers(combinedContent);
+  // 完成结论只读取 status-doc 的结构化执行区段。计划说明、历史实施记录、状态枚举示例和
+  // 明确不做范围都不代表当前仍需执行的节点，不能参与 blocked / needs-work 判定。
+  const statusCounts = countExecutionStatusMarkers(status.content ?? "");
   const changedPaths = readGitChangedPaths(projectRoot);
   const hasCurrentExecutionNode = status.content?.includes("## 当前执行节点") === true;
   const hasSubPlanQueue = status.content?.includes("## 子计划队列") === true;
@@ -372,21 +374,183 @@ function toDocumentPresence(document: DocumentPresence & { content: string | und
  * 同时接受全角冒号「状态：」与半角冒号「状态:」，兼容手写与自动生成混用。
  * 这是启发式判断，最终仍以用户验收和 agent 的实现检查为准。
  */
-function countStatusMarkers(content: string): CompletionReview["statusCounts"] {
+function countExecutionStatusMarkers(content: string): CompletionReview["statusCounts"] {
+  const currentExecutionNode = extractMarkdownSection(content, "当前执行节点");
+  const subPlanQueue = extractMarkdownSection(content, "子计划队列");
+  // 两个区段必须分别解析再汇总。若直接拼接，当“子计划队列”标题上下没有空行时，
+  // 当前节点表与子计划表可能被误认为同一张连续表，从而复用错误的表头和列号。
+  return mergeStatusCounts(
+    countStructuredStatuses(currentExecutionNode),
+    countStructuredStatuses(subPlanQueue)
+  );
+}
+
+/**
+ * 汇总两个结构化区段的状态计数，不共享任何 Markdown 表格解析上下文。
+ */
+function mergeStatusCounts(
+  left: CompletionReview["statusCounts"],
+  right: CompletionReview["statusCounts"]
+): CompletionReview["statusCounts"] {
   return {
-    notStarted: countMatches(content, /状态[：:]未开始/gu),
-    inProgress: countMatches(content, /状态[：:]进行中/gu),
-    partial: countMatches(content, /状态[：:]部分完成/gu),
-    blocked: countMatches(content, /状态[：:]被阻塞/gu),
-    done: countMatches(content, /状态[：:]已完成/gu)
+    notStarted: left.notStarted + right.notStarted,
+    inProgress: left.inProgress + right.inProgress,
+    partial: left.partial + right.partial,
+    blocked: left.blocked + right.blocked,
+    done: left.done + right.done
   };
 }
 
 /**
- * 统计正则命中次数。
+ * 提取指定二级 Markdown 标题下的内容，遇到下一个同级或更高层级标题即停止。
+ * 旧文档在区段内使用普通段落，新文档使用表格；保留区段原文可同时兼容两种格式。
  */
-function countMatches(content: string, pattern: RegExp): number {
-  return [...content.matchAll(pattern)].length;
+function extractMarkdownSection(content: string, heading: string): string {
+  const lines = content.split(/\r?\n/gu);
+  const startIndex = lines.findIndex((line) => line.trim() === `## ${heading}`);
+
+  if (startIndex < 0) {
+    return "";
+  }
+
+  const sectionLines: string[] = [];
+  for (let index = startIndex + 1; index < lines.length; index += 1) {
+    if (/^#{1,2}\s+/u.test(lines[index].trim())) {
+      break;
+    }
+
+    sectionLines.push(lines[index]);
+  }
+
+  return sectionLines.join("\n");
+}
+
+/**
+ * 统计结构化执行区段里的某个状态。
+ *
+ * 兼容格式：
+ * 1. 旧文档的 `状态：进行中` / `状态:进行中`；
+ * 2. 当前节点表格的 `| 当前状态 | 进行中 |`；
+ * 3. 子计划表独立状态列中的 `| ... | 进行中 | ... |`。
+ *
+ * 表格逐单元格判断可以避免把“历史说明中曾经处于未开始”之类叙述误当成状态；
+ * 带括号补充说明（如“已完成（实现侧）”）仍按主状态识别。
+ */
+function countStructuredStatuses(content: string): CompletionReview["statusCounts"] {
+  const counts: CompletionReview["statusCounts"] = {
+    notStarted: 0,
+    inProgress: 0,
+    partial: 0,
+    blocked: 0,
+    done: 0
+  };
+  const lines = content.split(/\r?\n/gu);
+
+  for (let index = 0; index < lines.length;) {
+    const trimmedLine = lines[index].trim();
+
+    if (!isMarkdownTableLine(trimmedLine)) {
+      addExplicitStatusMarkers(counts, trimmedLine);
+      index += 1;
+      continue;
+    }
+
+    // 连续的表格行作为一张独立表解析。每张表自行定位表头，避免前一张表的“状态”列号
+    // 被错误套用到列结构不同的后一张表。
+    const tableRows: string[][] = [];
+    while (index < lines.length && isMarkdownTableLine(lines[index].trim())) {
+      tableRows.push(parseMarkdownTableRow(lines[index].trim()));
+      index += 1;
+    }
+    countMarkdownTableStatuses(counts, tableRows);
+  }
+
+  return counts;
+}
+
+/**
+ * 解析单张 Markdown 表中的状态。
+ * - 当前节点键值表只接受“当前状态”键对应的值；
+ * - 子计划表优先接受独立“状态”列；
+ * - 兼容项目既有规范，在“备注”列接受显式 `状态：...`；
+ * - “描述”“已完成”“未完成”等其它列即使出现状态词也不参与统计。
+ */
+function countMarkdownTableStatuses(
+  counts: CompletionReview["statusCounts"],
+  rows: string[][]
+): void {
+  if (rows.length === 0) {
+    return;
+  }
+
+  const header = rows[0];
+  const statusColumnIndex = header.findIndex((cell) => cell === "状态");
+  const remarkColumnIndex = header.findIndex((cell) => cell === "备注");
+
+  for (const cells of rows.slice(1)) {
+    if (cells.every((cell) => /^:?-{3,}:?$/u.test(cell))) {
+      continue;
+    }
+
+    const currentStatusIndex = cells.findIndex((cell) => cell === "当前状态");
+    if (currentStatusIndex >= 0) {
+      addStatusValue(counts, cells[currentStatusIndex + 1] ?? "");
+      continue;
+    }
+
+    if (statusColumnIndex >= 0) {
+      addStatusValue(counts, cells[statusColumnIndex] ?? "");
+      continue;
+    }
+
+    if (remarkColumnIndex >= 0) {
+      addExplicitStatusMarkers(counts, cells[remarkColumnIndex] ?? "");
+    }
+  }
+}
+
+/**
+ * 统计旧式显式状态标记。状态后允许句末，也允许全角/半角括号补充说明。
+ */
+function addExplicitStatusMarkers(counts: CompletionReview["statusCounts"], content: string): void {
+  for (const [label, key] of STATUS_LABELS) {
+    const matches = content.match(new RegExp(`状态[：:]\\s*${label}(?=$|[\\s。；;，,（(）)])`, "gu"));
+    counts[key] += matches?.length ?? 0;
+  }
+}
+
+/**
+ * 解析结构化状态单元格；允许 `已完成（实现侧）` 与 `已完成(实现侧)` 等补充说明。
+ */
+function addStatusValue(counts: CompletionReview["statusCounts"], value: string): void {
+  for (const [label, key] of STATUS_LABELS) {
+    if (new RegExp(`^${label}(?=$|[\\s（(])`, "u").test(value.trim())) {
+      counts[key] += 1;
+      return;
+    }
+  }
+}
+
+const STATUS_LABELS = [
+  ["未开始", "notStarted"],
+  ["进行中", "inProgress"],
+  ["部分完成", "partial"],
+  ["被阻塞", "blocked"],
+  ["已完成", "done"]
+] as const;
+
+/**
+ * 判断一行是否为 Markdown 管道表格行。
+ */
+function isMarkdownTableLine(line: string): boolean {
+  return line.startsWith("|") && line.endsWith("|");
+}
+
+/**
+ * 把 Markdown 表格行拆成单元格；当前协作文档不在单元格中使用转义管道符。
+ */
+function parseMarkdownTableRow(line: string): string[] {
+  return line.slice(1, -1).split("|").map((cell) => cell.trim());
 }
 
 /**

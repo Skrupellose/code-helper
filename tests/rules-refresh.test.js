@@ -12,7 +12,6 @@ import {
   normalizeRuleDocumentForCompare
 } from "../dist/fs-utils.js";
 import {
-  getLegacyRuleTemplateFingerprints,
   initializeProject,
   installRuleTemplates,
   refreshRuleTemplates,
@@ -68,27 +67,44 @@ function resolveLegacyRuleNameFromFixture(fixtureFileName, legacyKeys) {
   return undefined;
 }
 
-test("tests/fixtures/user-rules 中每个 fixture 的指纹落在 LEGACY 对应规则名下", async () => {
-  // 轻量防漂移：fixture 用于无指纹 state 升级路径，必须与 LEGACY 表可对上，否则历史升级会误判为用户改动。
-  const legacy = getLegacyRuleTemplateFingerprints();
-  const legacyKeys = Object.keys(legacy);
+test("tests/fixtures/user-rules 中每个 fixture 都能被历史指纹矩阵识别", async () => {
   const fixturesDir = join(process.cwd(), "tests/fixtures/user-rules");
   const fixtureFiles = (await readdir(fixturesDir)).filter((name) => name.endsWith(".md"));
-
   assert.ok(fixtureFiles.length > 0, "应至少存在一个历史规则 fixture");
 
   for (const fixtureFile of fixtureFiles) {
-    const ruleName = resolveLegacyRuleNameFromFixture(fixtureFile, legacyKeys);
-    assert.ok(ruleName, `无法从 fixture 文件名解析规则名：${fixtureFile}`);
+    const root = await mkdtemp(join(tmpdir(), "code-helper-rules-fixture-matrix-"));
 
-    const content = await readFile(join(fixturesDir, fixtureFile), "utf8");
-    const fingerprint = createRuleDocumentFingerprint(content);
-    const known = legacy[ruleName] ?? [];
+    try {
+      await writeFile(join(root, "AGENTS.md"), "# Agents\n", "utf8");
+      await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
 
-    assert.ok(
-      known.includes(fingerprint),
-      `fixture ${fixtureFile} 的指纹 ${fingerprint} 未登记在 LEGACY[${ruleName}] 中`
-    );
+      const config = await loadConfig(root);
+      const ruleNames = getRuleTemplates(config).map((template) => template.fileName);
+      const ruleName = resolveLegacyRuleNameFromFixture(fixtureFile, ruleNames);
+      assert.ok(ruleName, `无法从 fixture 文件名解析规则名：${fixtureFile}`);
+
+      const rulePath = join(root, config.directories.userRules, ruleName);
+      const currentTemplate = await readFile(rulePath, "utf8");
+      const historicalTemplate = await readFile(join(fixturesDir, fixtureFile), "utf8");
+      await writeFile(rulePath, historicalTemplate, "utf8");
+
+      // 模拟指纹机制上线前的项目，通过真实升级结果验证 fixture 已登记，
+      // 避免为测试对外暴露可篡改生产判定的指纹表引用。
+      const statePath = join(root, ".code-helper/state.json");
+      const state = JSON.parse(await readFile(statePath, "utf8"));
+      delete state.ruleTemplateFingerprints;
+      await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+
+      await updateProject(root);
+      assert.equal(
+        await readFile(rulePath, "utf8"),
+        currentTemplate,
+        `fixture ${fixtureFile} 未被历史指纹矩阵识别并升级`
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   }
 });
 

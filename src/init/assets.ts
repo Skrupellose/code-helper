@@ -82,14 +82,6 @@ const LEGACY_RULE_TEMPLATE_FINGERPRINTS: Readonly<Record<string, readonly string
   ]
 };
 
-/**
- * 只读导出历史内置规则指纹表，供测试断言 fixture 与 LEGACY 表不漂移。
- * 生产安装逻辑仍直接引用模块内常量；不要在运行时修改返回值。
- */
-export function getLegacyRuleTemplateFingerprints(): Readonly<Record<string, readonly string[]>> {
-  return LEGACY_RULE_TEMPLATE_FINGERPRINTS;
-}
-
 /** 判断 JSON 值是否为可安全合并的普通对象形状。 */
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

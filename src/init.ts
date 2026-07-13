@@ -1,5 +1,4 @@
 export {
-  getLegacyRuleTemplateFingerprints,
   installRuleTemplates,
   refreshRuleTemplates
 } from "./init/assets.js";

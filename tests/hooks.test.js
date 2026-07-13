@@ -239,6 +239,97 @@ test("renderGitHook 开发态 dist 分支先探测 PATH 上的 node", () => {
   assert.ok(hook.includes("npx --yes @skrupellose/code-helper check"));
 });
 
+test("Git hook 在 PATH 无 node 时进入 npx fallback", { skip: process.platform === "win32" }, async () => {
+  // 使用完全隔离的 PATH 和伪命令验证真实 shell 分支，避免误用宿主机的 node 或 npx。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-hooks-git-no-node-"));
+
+  try {
+    const fakeBin = join(root, "fake-bin");
+    const invocationLog = join(root, "invocation.log");
+    const hookPath = join(root, "pre-commit");
+    await mkdir(fakeBin, { recursive: true });
+    await mkdir(join(root, "dist"), { recursive: true });
+    await writeFile(join(root, "package.json"), '{"name":"@skrupellose/code-helper"}\n', "utf8");
+    await writeFile(join(root, "dist/index.js"), "// 仅用于触发开发态 dist 分支。\n", "utf8");
+    await writeFile(hookPath, renderGitHook(), "utf8");
+    await writeFile(
+      join(fakeBin, "grep"),
+      "#!/bin/sh\nexit 0\n",
+      "utf8"
+    );
+    await writeFile(
+      join(fakeBin, "npx"),
+      "#!/bin/sh\nprintf 'npx:%s\\n' \"$*\" >> \"$CODE_HELPER_HOOK_TEST_LOG\"\nexit 0\n",
+      "utf8"
+    );
+    await chmod(join(fakeBin, "grep"), 0o755);
+    await chmod(join(fakeBin, "npx"), 0o755);
+
+    const result = spawnSync("/bin/sh", [hookPath], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: fakeBin,
+        CODE_HELPER_HOOK_TEST_LOG: invocationLog
+      }
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(
+      await readFile(invocationLog, "utf8"),
+      "npx:--yes @skrupellose/code-helper check\n"
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Git hook 在 PATH 有 node 且 dist 存在时优先执行 dist", { skip: process.platform === "win32" }, async () => {
+  // 伪 node 与伪 npx 共存；日志必须只记录 node，证明 exec 已在 dist 分支终止后续 fallback。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-hooks-git-dist-"));
+
+  try {
+    const fakeBin = join(root, "fake-bin");
+    const invocationLog = join(root, "invocation.log");
+    const hookPath = join(root, "pre-commit");
+    await mkdir(fakeBin, { recursive: true });
+    await mkdir(join(root, "dist"), { recursive: true });
+    await writeFile(join(root, "package.json"), '{"name":"@skrupellose/code-helper"}\n', "utf8");
+    await writeFile(join(root, "dist/index.js"), "// 仅用于触发开发态 dist 分支。\n", "utf8");
+    await writeFile(hookPath, renderGitHook(), "utf8");
+    await writeFile(join(fakeBin, "grep"), "#!/bin/sh\nexit 0\n", "utf8");
+    await writeFile(
+      join(fakeBin, "node"),
+      "#!/bin/sh\nprintf 'node:%s\\n' \"$*\" >> \"$CODE_HELPER_HOOK_TEST_LOG\"\nexit 0\n",
+      "utf8"
+    );
+    await writeFile(
+      join(fakeBin, "npx"),
+      "#!/bin/sh\nprintf 'npx:%s\\n' \"$*\" >> \"$CODE_HELPER_HOOK_TEST_LOG\"\nexit 0\n",
+      "utf8"
+    );
+    await chmod(join(fakeBin, "grep"), 0o755);
+    await chmod(join(fakeBin, "node"), 0o755);
+    await chmod(join(fakeBin, "npx"), 0o755);
+
+    const result = spawnSync("/bin/sh", [hookPath], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: fakeBin,
+        CODE_HELPER_HOOK_TEST_LOG: invocationLog
+      }
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(await readFile(invocationLog, "utf8"), "node:./dist/index.js check\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("hook sample 模板与 render 函数同源", () => {
   // sample 禁止双份维护正文；agent 脚本应与 render 完全一致，git sample 正文应包含 renderGitHook 主体。
   const templates = getHookTemplates();
