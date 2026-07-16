@@ -1,6 +1,8 @@
 import type { SkillTemplate } from "./types.js";
 
 export const agentCollaborationSkillTemplate: SkillTemplate = {
+  name: "code-helper-agent-collaboration",
+  directoryName: "code-helper-agent-collaboration",
   fileName: "agent-collaboration.SKILL.md",
   content: `---
 name: code-helper-agent-collaboration

@@ -1,6 +1,8 @@
 import type { SkillTemplate } from "./types.js";
 
 export const planWorkbenchSkillTemplate: SkillTemplate = {
+  name: "code-helper-plan-workbench",
+  directoryName: "code-helper-plan-workbench",
   fileName: "plan-workbench.SKILL.md",
   content: `---
 name: code-helper-plan-workbench

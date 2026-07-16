@@ -1,10 +1,12 @@
 import type { SkillTemplate } from "./types.js";
 
 export const completionReviewSkillTemplate: SkillTemplate = {
+  name: "code-helper-completion-review",
+  directoryName: "code-helper-completion-review",
   fileName: "completion-review.SKILL.md",
   content: `---
 name: code-helper-completion-review
-description: 当 agent 完成小节点、识别到功能变更或项目结构变化、准备最终回复、提交前检查、切换任务、询问是否归档、询问是否更新记忆，或用户要求“检查是否完成”“继续下一个任务”“功能收尾”时必须使用。该 skill 要读取 status-doc、plan-doc、result-doc，判断当前节点是否完成、是否需要继续当前功能、是否需要询问更新长期记忆、是否需要询问归档，并引导选择下一步任务。
+description: 当 agent 完成实现、文档或功能变更节点后准备最终回复，或进行提交前检查、切换任务、询问是否归档、询问是否更新记忆，以及用户要求“检查是否完成”“继续下一个任务”“功能收尾”时必须使用。普通问答、只读 review 或没有产生实现/文档/功能变更的最终回复不触发。该 skill 要按 active、archived、mixed 生命周期读取任务文档并判断下一步。
 ---
 
 # Code Helper 完成检查
@@ -15,13 +17,15 @@ description: 当 agent 完成小节点、识别到功能变更或项目结构变
 
 ## 固定流程
 
-1. 先读取 code-helper-docs/status-doc/<中文功能名>-状态.md，确认当前执行节点、完成定义、验证方式和子计划队列。
-2. 再读取 code-helper-docs/plan-doc/<中文功能名>.md 和 code-helper-docs/result-doc/<中文功能名>/实施记录.md。
-3. 当前节点未完成时，继续当前功能；不要询问归档，不要引导新任务。
-4. 当前节点完成但功能整体未完成时，更新实施记录、计划文档状态和 status-doc 的下一个执行节点。
-5. 识别到功能变更、项目结构变化、测试策略变化、发布流程变化或稳定协作规则时，主动询问用户是否更新长期记忆。
-6. 只有功能整体完成并经用户确认后，才询问是否归档文档。
-7. 归档后再查看活动任务，并引导用户选择下一步。
+1. 先查看任务列表，区分 active、archived、mixed；目录生命周期优先于归档正文中的历史“下一步”。
+2. mixed 任务必须优先请求人工确认 active/archive 哪一侧为终态，不得因为没有纯 active 任务而只报告“没有活动任务”，也不得直接归档或切换任务。
+3. 有 active 任务时，读取 code-helper-docs/status-doc/<中文功能名>-状态.md，再读取对应 plan-doc 和 result-doc。
+4. 没有 active 且没有 mixed 任务时，不把空 archive 目录当成任务，也不为普通最终回复虚构完成检查；仅报告当前没有活动任务。用户明确查看 archived 任务时，说明它已结束，不重复询问记忆或归档。
+5. 当前节点未完成时，继续当前功能；不要询问归档，不要引导新任务。
+6. 当前节点完成但功能整体未完成时，更新实施记录、计划文档状态和 status-doc 的下一个执行节点。
+7. 识别到功能变更、项目结构变化、测试策略变化、发布流程变化或稳定协作规则时，先检查任务文档是否已记录“长期记忆已更新/已沉淀/无需更新”；已有明确结论时不重复询问。
+8. 只有 active 功能整体完成且尚未归档时，才询问是否归档文档。
+9. 归档后再查看活动任务，并引导用户选择下一步。
 
 ## 命令辅助
 

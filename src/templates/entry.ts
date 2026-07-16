@@ -26,7 +26,7 @@ export function renderEntryBlock(config: CodeHelperConfig): string {
       ? `- 文档归档：功能完成或手动移动到 archive 后，任务视为已结束，读取 \`${config.directories.userRules}/文档归档规范.md\`。`
       : undefined,
     config.features.completionReview.enabled
-      ? `- 功能完成检查：完成小节点、识别到功能变更、准备最终回复或切换任务前，读取 \`${config.directories.userRules}/功能完成检查规范.md\`，并按需运行 \`npx @skrupellose/code-helper finish\`。`
+      ? `- 功能完成检查：完成实现、文档或功能变更节点后准备最终回复，或切换任务前，读取 \`${config.directories.userRules}/功能完成检查规范.md\`，并按需运行 \`npx @skrupellose/code-helper finish\`；普通问答和只读 review 不触发。`
       : undefined,
     config.features.checks.enabled
       ? "- 规则检查：提交或阶段结束前运行 `npx @skrupellose/code-helper check`，确认协作文档结构仍完整。"

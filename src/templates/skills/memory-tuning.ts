@@ -1,6 +1,8 @@
 import type { SkillTemplate } from "./types.js";
 
 export const memoryTuningSkillTemplate: SkillTemplate = {
+  name: "code-helper-memory-tuning",
+  directoryName: "code-helper-memory-tuning",
   fileName: "memory-tuning.SKILL.md",
   content: `---
 name: code-helper-memory-tuning

@@ -9,12 +9,12 @@ import {
 import {
   listProjectSkillRegistrations,
   parseSkillRegistrationTargets,
-  registerProjectSkills,
+  registerProjectSkillsForTargets,
   resolveSkillRegistrationTargets,
   runSkillsAudit,
   runSkillsDoctor,
   type SkillRegistrationTarget,
-  unregisterProjectSkills
+  unregisterProjectSkillsForTargets
 } from "../../skills.js";
 import type { OperationResult } from "../../types.js";
 import { printHooksHelp, printSkillsHelp } from "../help.js";
@@ -31,8 +31,9 @@ import {
  * 功能管理菜单已经完成目标选择，这里按显式目标写入对应 agent 的项目级 skills。
  */
 export async function applyProjectSkills(projectRoot: string, targets: SkillRegistrationTarget[]): Promise<number> {
+  // 直接应用命令允许从关闭状态重新启用，但只有整批目标写入成功后才更新配置。
+  const operations = await registerProjectSkillsForTargets(projectRoot, targets, { respectFeatureToggle: false });
   await setFeatureEnabled(projectRoot, "skillRegistration", true);
-  const operations = (await Promise.all(targets.map((target) => registerProjectSkills(projectRoot, target)))).flat();
   const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
 
   printOperations(operations);
@@ -49,7 +50,7 @@ export async function removeProjectSkills(
   targets: SkillRegistrationTarget[],
   shouldDisableFeatureAfterRemove: boolean
 ): Promise<number> {
-  const operations = (await Promise.all(targets.map((target) => unregisterProjectSkills(projectRoot, target)))).flat();
+  const operations = await unregisterProjectSkillsForTargets(projectRoot, targets);
   const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
 
   if (shouldDisableFeatureAfterRemove) {
@@ -159,8 +160,9 @@ export async function runSkills(projectRoot: string, args: string[]): Promise<nu
       printNoInferredSkillTargets(projectRoot, "注册");
       return 0;
     }
+    // 显式 register 可以重新启用功能；配置写入必须晚于整批文件事务成功。
+    const operations = await registerProjectSkillsForTargets(projectRoot, targets, { respectFeatureToggle: false });
     await setFeatureEnabled(projectRoot, "skillRegistration", true);
-    const operations = (await Promise.all(targets.map((target) => registerProjectSkills(projectRoot, target)))).flat();
     const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
     printOperations(operations);
     printSkillRegistrationStatus(statuses);
@@ -173,7 +175,7 @@ export async function runSkills(projectRoot: string, args: string[]): Promise<nu
       printNoInferredSkillTargets(projectRoot, "取消注册");
       return 0;
     }
-    const operations = (await Promise.all(targets.map((target) => unregisterProjectSkills(projectRoot, target)))).flat();
+    const operations = await unregisterProjectSkillsForTargets(projectRoot, targets);
     if (rawTarget === undefined || rawTarget === "all") {
       await setFeatureEnabled(projectRoot, "skillRegistration", false);
     }

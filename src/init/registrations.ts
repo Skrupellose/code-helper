@@ -8,6 +8,7 @@ import {
   listProjectSkillRegistrations,
   listSupportedSkillRegistrationTargets,
   registerProjectSkills,
+  registerProjectSkillsForTargets,
   type SkillRegistrationTarget
 } from "../skills.js";
 import type { CodeHelperConfig, OperationResult } from "../types.js";
@@ -25,7 +26,6 @@ export async function updateExistingProjectSkillRegistrations(
   const registeredTargets = await listTargetsWithRegisteredCodeHelperSkills(projectRoot);
   const inferredTargets = getTargetsFromExistingEntryFiles(config);
   const targets = new Set<SkillRegistrationTarget>(registeredTargets);
-  const operations: OperationResult[] = [];
 
   if (config.features.skillRegistration.enabled) {
     for (const target of inferredTargets) {
@@ -43,11 +43,8 @@ export async function updateExistingProjectSkillRegistrations(
     ];
   }
 
-  for (const target of targets) {
-    operations.push(...(await registerProjectSkills(projectRoot, target, { respectFeatureToggle: false })));
-  }
-
-  return operations;
+  // update 可能同时刷新多个已有 agent 目标，复用批量事务避免其中一个失败后留下跨目标部分更新。
+  return registerProjectSkillsForTargets(projectRoot, [...targets], { respectFeatureToggle: false });
 }
 
 /**
@@ -177,11 +174,7 @@ export async function installProjectSkillRegistrations(
     }));
   }
 
-  for (const target of targets) {
-    operations.push(...(await registerProjectSkills(projectRoot, target)));
-  }
-
-  return operations;
+  return registerProjectSkillsForTargets(projectRoot, targets);
 }
 
 /**

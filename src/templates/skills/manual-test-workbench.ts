@@ -5,6 +5,8 @@ import type { SkillTemplate } from "./types.js";
  * CLI 的 manual-test 命令只负责创建基础模板，完整测试步骤由该 skill 结合上下文补全。
  */
 export const manualTestWorkbenchSkillTemplate: SkillTemplate = {
+  name: "code-helper-manual-test-workbench",
+  directoryName: "code-helper-manual-test-workbench",
   fileName: "manual-test-workbench.SKILL.md",
   content: `---
 name: code-helper-manual-test-workbench

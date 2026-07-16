@@ -23,6 +23,7 @@ import {
   runCodeHelperQuickUpgrade,
   runCli
 } from "../dist/cli.js";
+import { loadConfig, setFeatureEnabled } from "../dist/config.js";
 import { initializeProject } from "../dist/init.js";
 import { resolvePackageManagerSpawnCommand } from "../dist/cli/quick-upgrade.js";
 import { createPlanWorkbench } from "../dist/workflows.js";
@@ -571,6 +572,34 @@ test("sync-local 刷新 AGENTS 和三类项目级 skills 且不创建其他入�
     );
   } finally {
     console.log = originalLog;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("sync-local Skills 批量注册失败时保持 skillRegistration 配置关闭", async () => {
+  // 在 Claude Code 的受控 Skill 路径制造冲突，确认 sync-local 不会先行开启配置。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-cli-sync-local-atomic-config-"));
+  const errors = [];
+  const originalError = console.error;
+
+  try {
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
+    await setFeatureEnabled(root, "skillRegistration", false);
+    await mkdir(join(root, ".claude/skills"), { recursive: true });
+    await writeFile(join(root, ".claude/skills/code-helper-plan-workbench"), "路径冲突", "utf8");
+    console.error = (...args) => {
+      errors.push(args.join(" "));
+    };
+
+    const result = await runCli(["sync-local"], root);
+    const config = await loadConfig(root);
+
+    assert.equal(result, 1);
+    assert.equal(config.features.skillRegistration.enabled, false);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /ENOTDIR|not a directory/u);
+  } finally {
+    console.error = originalError;
     await rm(root, { recursive: true, force: true });
   }
 });

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 
+import { listTasks } from "../archive.js";
 import { projectPath, readTextIfExists } from "../fs-utils.js";
 import { runSkillsDoctor } from "./doctor.js";
 import { listProjectSkillRegistrations, type SkillRegistrationStatus } from "./registry.js";
@@ -31,17 +32,18 @@ export async function runSkillsAudit(projectRoot: string): Promise<SkillAuditRec
   const allStatuses = (
     await Promise.all(ALL_SKILL_REGISTRATION_TARGETS.map((target) => listProjectSkillRegistrations(projectRoot, target)))
   ).flat();
-  const registeredTargets = new Set(allStatuses.filter((status) => status.registered).map((status) => status.target));
+  const fullyRegisteredTargets = getFullyRegisteredTargets(allStatuses);
   const hasUserRules = await directoryExists(projectPath(projectRoot, "code-helper-docs/user-rules"));
   const hasPlanDocs = await directoryExists(projectPath(projectRoot, "code-helper-docs/plan-doc"));
   const hasManualTestDocs = await hasManualTestDocument(projectRoot);
-  const hasArchiveDocs =
-    (await directoryExists(projectPath(projectRoot, "code-helper-docs/plan-doc/archive"))) ||
-    (await directoryExists(projectPath(projectRoot, "code-helper-docs/result-doc/archive"))) ||
-    (await directoryExists(projectPath(projectRoot, "code-helper-docs/status-doc/archive")));
+  // init 会预建空 archive 目录；只有扫描到真实 archived / mixed 任务时，
+  // 才能说明项目已经使用归档能力，避免空目录让推荐条件永久为真。
+  const hasArchivedTasks = (await listTasks(projectRoot)).some(
+    (task) => task.status === "archived" || task.status === "mixed"
+  );
 
   for (const target of inferredTargets) {
-    if (!registeredTargets.has(target)) {
+    if (!fullyRegisteredTargets.has(target)) {
       recommendations.push({
         priority: "high",
         code: "missing-inferred-registration",
@@ -51,7 +53,7 @@ export async function runSkillsAudit(projectRoot: string): Promise<SkillAuditRec
     }
   }
 
-  if (hasUserRules && !isSkillRegistered(allStatuses, "code-helper-memory-tuning")) {
+  if (hasUserRules && !isSkillRegisteredInCompleteTarget(allStatuses, "code-helper-memory-tuning")) {
     recommendations.push({
       priority: "high",
       code: "missing-memory-skill",
@@ -60,7 +62,7 @@ export async function runSkillsAudit(projectRoot: string): Promise<SkillAuditRec
     });
   }
 
-  if (hasPlanDocs && !isSkillRegistered(allStatuses, "code-helper-plan-workbench")) {
+  if (hasPlanDocs && !isSkillRegisteredInCompleteTarget(allStatuses, "code-helper-plan-workbench")) {
     recommendations.push({
       priority: "medium",
       code: "missing-plan-skill",
@@ -69,7 +71,7 @@ export async function runSkillsAudit(projectRoot: string): Promise<SkillAuditRec
     });
   }
 
-  if (hasManualTestDocs && !isSkillRegistered(allStatuses, "code-helper-manual-test-workbench")) {
+  if (hasManualTestDocs && !isSkillRegisteredInCompleteTarget(allStatuses, "code-helper-manual-test-workbench")) {
     recommendations.push({
       priority: "medium",
       code: "missing-manual-test-skill",
@@ -78,7 +80,7 @@ export async function runSkillsAudit(projectRoot: string): Promise<SkillAuditRec
     });
   }
 
-  if (hasArchiveDocs && !isSkillRegistered(allStatuses, "code-helper-document-archive")) {
+  if (hasArchivedTasks && !isSkillRegisteredInCompleteTarget(allStatuses, "code-helper-document-archive")) {
     recommendations.push({
       priority: "medium",
       code: "missing-archive-skill",
@@ -113,10 +115,31 @@ export async function runSkillsAudit(projectRoot: string): Promise<SkillAuditRec
 }
 
 /**
- * 判断某个 code-helper skill 是否已经至少在一个目标中注册。
+ * 找出已经完整注册全部内置 Skills 的 agent 目标。
+ * 不能用“任一文件存在”代表目标已注册，否则 1/6 和跨目标错位都会被误判为健康。
  */
-function isSkillRegistered(statuses: SkillRegistrationStatus[], name: string): boolean {
-  return statuses.some((status) => status.name === name && status.registered);
+function getFullyRegisteredTargets(statuses: SkillRegistrationStatus[]): Set<SkillRegistrationStatus["target"]> {
+  const grouped = new Map<SkillRegistrationStatus["target"], SkillRegistrationStatus[]>();
+
+  for (const status of statuses) {
+    grouped.set(status.target, [...(grouped.get(status.target) ?? []), status]);
+  }
+
+  return new Set(
+    [...grouped.entries()]
+      .filter(([, targetStatuses]) => targetStatuses.length > 0 && targetStatuses.every((status) => status.registered))
+      .map(([target]) => target)
+  );
+}
+
+/**
+ * 只有某个完整注册目标中存在该 skill，才认为相关能力可稳定使用。
+ */
+function isSkillRegisteredInCompleteTarget(statuses: SkillRegistrationStatus[], name: string): boolean {
+  const fullyRegisteredTargets = getFullyRegisteredTargets(statuses);
+  return statuses.some(
+    (status) => fullyRegisteredTargets.has(status.target) && status.name === name && status.registered
+  );
 }
 
 /**

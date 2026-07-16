@@ -1,8 +1,8 @@
 import { join } from "node:path";
+import { parseDocument } from "yaml";
 
 import { projectPath, readTextIfExists } from "../fs-utils.js";
-import { getSkillTemplates } from "../templates.js";
-import { CODE_HELPER_SKILL_REGISTRATIONS } from "./registry.js";
+import { getSkillManifest } from "../templates.js";
 import { readDirectoryIfExists, readSkillDocumentIfExists } from "./shared.js";
 import {
   ALL_SKILL_REGISTRATION_TARGETS,
@@ -47,22 +47,40 @@ async function checkCodeHelperRegistration(
   target: SkillRegistrationTarget
 ): Promise<SkillDoctorIssue[]> {
   const issues: SkillDoctorIssue[] = [];
-  const templates = getSkillTemplates();
+  const manifest = getSkillManifest();
+  const registrations = await Promise.all(
+    manifest.map(async (skill) => {
+      const skillPath = getSkillFilePath(projectRoot, target, skill.directoryName);
 
-  for (const registration of CODE_HELPER_SKILL_REGISTRATIONS) {
-    const template = templates.find((item) => item.fileName === registration.templateFileName);
-    const skillPath = getSkillFilePath(projectRoot, target, registration.directoryName);
-    const existing = await readTextIfExists(skillPath);
+      return {
+        skill,
+        skillPath,
+        existing: await readTextIfExists(skillPath)
+      };
+    })
+  );
+  const hasAnyCodeHelperSkill = registrations.some((item) => item.existing !== undefined);
 
+  for (const { skill, skillPath, existing } of registrations) {
     if (existing === undefined) {
+      // 完全未使用该目标时保持安静；一旦出现任一内置 skill，就必须校验整套注册完整性。
+      if (hasAnyCodeHelperSkill) {
+        issues.push({
+          level: "error",
+          code: "missing-code-helper-skill",
+          message: `${formatSkillRegistrationTargetName(target)} 的 code-helper skills 注册不完整，缺少 ${skill.directoryName}。`,
+          path: skillPath,
+          suggestion: `运行 \`code-helper skills register ${target}\` 补齐全部 code-helper 管理的 skills。`
+        });
+      }
       continue;
     }
 
-    if (template !== undefined && existing !== template.content) {
+    if (existing !== skill.content) {
       issues.push({
         level: "warning",
         code: "outdated-code-helper-skill",
-        message: `${formatSkillRegistrationTargetName(target)} 中的 ${registration.directoryName} 与当前内置模板不一致。`,
+        message: `${formatSkillRegistrationTargetName(target)} 中的 ${skill.directoryName} 与当前内置模板不一致。`,
         path: skillPath,
         suggestion: `运行 \`code-helper skills register ${target}\` 刷新 code-helper 管理的 skill。`
       });
@@ -115,9 +133,9 @@ function checkSkillDocument(
   content: string
 ): SkillDoctorIssue[] {
   const issues: SkillDoctorIssue[] = [];
-  const frontmatter = parseSkillFrontmatter(content);
+  const frontmatterResult = parseSkillFrontmatter(content);
 
-  if (frontmatter === undefined) {
+  if (frontmatterResult.status === "missing") {
     issues.push({
       level: "error",
       code: "missing-frontmatter",
@@ -127,6 +145,19 @@ function checkSkillDocument(
     });
     return issues;
   }
+
+  if (frontmatterResult.status === "invalid") {
+    issues.push({
+      level: "error",
+      code: "invalid-frontmatter",
+      message: `${formatSkillRegistrationTargetName(target)} skill 的 YAML frontmatter 无法解析：${directoryName}（${frontmatterResult.message}）`,
+      path: skillPath,
+      suggestion: "修复 YAML 语法或将 name、description 调整为字符串字段后重新检查。"
+    });
+    return issues;
+  }
+
+  const frontmatter = frontmatterResult.value;
 
   if (frontmatter.name === undefined || frontmatter.name.trim() === "") {
     issues.push({
@@ -169,26 +200,75 @@ function checkSkillDocument(
   return issues;
 }
 
+type SkillFrontmatterParseResult =
+  | { status: "missing" }
+  | { status: "invalid"; message: string }
+  | { status: "valid"; value: { name?: string; description?: string } };
+
 /**
  * 解析 skill frontmatter 中的 name 和 description。
- * 这里只做轻量解析，避免为了静态检查引入 YAML 依赖。
+ * 使用标准 YAML 解析器兼容块字符串、引号、注释和 CRLF；解析或字段类型失败时
+ * 返回独立状态，避免损坏 YAML 被继续误报为 description 过短。
  */
-function parseSkillFrontmatter(content: string): { name?: string; description?: string } | undefined {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---/u.exec(content);
+function parseSkillFrontmatter(content: string): SkillFrontmatterParseResult {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(content);
 
   if (match === null) {
-    return undefined;
+    return { status: "missing" };
   }
 
-  const result: { name?: string; description?: string } = {};
+  const document = parseDocument(match[1], {
+    prettyErrors: false,
+    strict: true
+  });
 
-  for (const line of match[1].split(/\r?\n/u)) {
-    const field = /^(name|description):\s*(.*)$/u.exec(line);
+  if (document.errors.length > 0) {
+    return {
+      status: "invalid",
+      message: document.errors[0].message
+    };
+  }
 
-    if (field !== null) {
-      result[field[1] as "name" | "description"] = field[2].trim();
+  let value: unknown;
+
+  try {
+    value = document.toJS();
+  } catch (error) {
+    // YAML 别名展开限制等错误可能在转换阶段出现，也应归入可定位的 frontmatter 解析问题。
+    return {
+      status: "invalid",
+      message: error instanceof Error ? error.message : String(error)
+    };
+  }
+
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {
+      status: "invalid",
+      message: "frontmatter 顶层必须是键值对象"
+    };
+  }
+
+  const record = value as Record<string, unknown>;
+
+  if (record.name !== undefined && typeof record.name !== "string") {
+    return {
+      status: "invalid",
+      message: "name 必须是字符串"
+    };
+  }
+
+  if (record.description !== undefined && typeof record.description !== "string") {
+    return {
+      status: "invalid",
+      message: "description 必须是字符串"
+    };
+  }
+
+  return {
+    status: "valid",
+    value: {
+      name: record.name,
+      description: record.description
     }
-  }
-
-  return result;
+  };
 }

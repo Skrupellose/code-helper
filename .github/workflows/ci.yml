@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   verify:
-    name: Node.js ${{ matrix.node-version }}
+    name: Linux / Node.js ${{ matrix.node-version }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -37,6 +37,38 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Verify package contents
+        run: npm pack --dry-run
+
+  cross-platform-skills-smoke:
+    name: ${{ matrix.os }} / Node.js 22 Skills smoke
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build CLI
+        run: npm run build
+
+      - name: Run cross-platform Skills CLI smoke tests
+        run: node --test tests/skills-cli.test.js tests/package.test.js
 
       - name: Verify package contents
         run: npm pack --dry-run

@@ -142,7 +142,8 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
         return runNpmScripts(projectRoot, args);
       case "sync-local":
         // 本仓开发刷新：在当前目录执行，不向上解析其它已初始化项目
-        return runSyncLocal(projectRoot, args);
+        // 必须等待异步刷新完成，路径冲突等异常才能由统一 catch 转为稳定退出码。
+        return await runSyncLocal(projectRoot, args);
       case "check":
         return runCheck(commandProjectRoot, args);
       case "features":
@@ -158,7 +159,8 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
       case "tasks":
         return runTasks(commandProjectRoot, args);
       case "skills":
-        return runSkills(commandProjectRoot, args);
+        // 必须等待异步命令完成，才能让统一 catch 接住文件系统等失败并返回稳定退出码。
+        return await runSkills(commandProjectRoot, args);
       case "hooks":
         return runHooks(commandProjectRoot, args);
       case "help":

@@ -261,8 +261,218 @@ test("createCompletionReview 会把已归档任务识别为已结束", async () 
     assert.equal(review.documents.plan.exists, true);
     assert.match(review.documents.plan.relativePath, /archive/);
     assert.equal(review.shouldAskArchive, false);
+    assert.equal(review.shouldAskMemoryUpdate, false);
+    assert.equal(review.requiredConfirmations.length, 0);
+    assert.deepEqual(review.recommendations, [
+      "当前任务只存在于 archive 目录中，已视为结束任务；如需返工，请新建后续中文功能名或先明确恢复策略。"
+    ]);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 不会让归档正文中的历史下一步覆盖 archived 生命周期", async (t) => {
+  // 即使归档正文保留“下一步更新记忆”和旧未完成状态，目录生命周期仍必须判定任务已结束。
+  try {
+    execFileSync("git", ["--version"], { stdio: "ignore" });
+  } catch {
+    t.skip("当前环境缺少 git，跳过 git 变更检测测试。");
+    return;
+  }
+
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-archived-history-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await mkdir(join(root, "code-helper-docs/plan-doc/archive"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/result-doc/archive/历史归档"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/status-doc/archive"), { recursive: true });
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(
+      join(root, "code-helper-docs/plan-doc/archive/历史归档.md"),
+      "# 历史归档\n\n## 下一步建议\n\n下一步更新长期记忆。\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/result-doc/archive/历史归档/实施记录.md"),
+      "# 实施记录\n\n历史说明：状态：部分完成，仍需用户确认长期记忆。\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/archive/历史归档-状态.md"),
+      "# 状态\n\n## 当前执行节点\n\n状态：未开始\n\n## 子计划队列\n\n状态：被阻塞\n",
+      "utf8"
+    );
+    await writeFile(join(root, "src/change.ts"), "export const changed = true;\n", "utf8");
+    execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["add", "src/change.ts"], { cwd: root, stdio: "ignore" });
+
+    const review = await createCompletionReview(root, "历史归档");
+
+    assert.equal(review.taskStatus, "archived");
+    assert.equal(review.reviewStatus, "archived");
+    assert.equal(review.shouldAskMemoryUpdate, false);
+    assert.equal(review.shouldAskArchive, false);
+    assert.equal(review.shouldSelectNextTask, false);
+    assert.deepEqual(review.requiredConfirmations, []);
+    assert.equal(review.recommendations.some((item) => item.includes("更新长期记忆")), false);
+    assert.equal(review.recommendations.some((item) => item.includes("补齐")), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 已记录长期记忆处理结论时不再重复询问", async (t) => {
+  // active 完成任务仍可等待归档，但明确记录记忆已沉淀后不得再次产生记忆强制确认。
+  try {
+    execFileSync("git", ["--version"], { stdio: "ignore" });
+  } catch {
+    t.skip("当前环境缺少 git，跳过 git 变更检测测试。");
+    return;
+  }
+
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-memory-handled-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/result-doc/记忆已处理"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/status-doc"), { recursive: true });
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "code-helper-docs/plan-doc/记忆已处理.md"), "# 计划\n", "utf8");
+    await writeFile(
+      join(root, "code-helper-docs/result-doc/记忆已处理/实施记录.md"),
+      "# 实施记录\n\n长期记忆已沉淀到专题规则。\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/记忆已处理-状态.md"),
+      "# 状态\n\n## 当前执行节点\n\n状态：已完成\n\n## 子计划队列\n\n状态：已完成\n",
+      "utf8"
+    );
+    await writeFile(join(root, "src/change.ts"), "export const changed = true;\n", "utf8");
+    execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["add", "src/change.ts"], { cwd: root, stdio: "ignore" });
+
+    const review = await createCompletionReview(root, "记忆已处理");
+
+    assert.equal(review.reviewStatus, "ready-to-archive");
+    assert.equal(review.shouldAskMemoryUpdate, false);
+    assert.equal(review.shouldAskArchive, true);
+    assert.equal(review.requiredConfirmations.some((item) => item.includes("更新长期记忆")), false);
+    assert.ok(review.requiredConfirmations.some((item) => item.includes("归档当前任务文档")));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 历史待办表述不等于长期记忆已处理", async (t) => {
+  // “尚未更新/仍需确认/下一步更新”属于未处理反例，不能被完成表达正则误吞。
+  try {
+    execFileSync("git", ["--version"], { stdio: "ignore" });
+  } catch {
+    t.skip("当前环境缺少 git，跳过 git 变更检测测试。");
+    return;
+  }
+
+  const root = await mkdtemp(join(tmpdir(), "code-helper-completion-memory-pending-"));
+
+  try {
+    await initializeProject({ projectRoot: root });
+    await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/result-doc/记忆待处理"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/status-doc"), { recursive: true });
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(
+      join(root, "code-helper-docs/plan-doc/记忆待处理.md"),
+      "# 计划\n\n下一步更新长期记忆。\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/result-doc/记忆待处理/实施记录.md"),
+      "# 实施记录\n\n长期记忆尚未更新，仍需用户确认。\n",
+      "utf8"
+    );
+    await writeFile(
+      join(root, "code-helper-docs/status-doc/记忆待处理-状态.md"),
+      "# 状态\n\n## 当前执行节点\n\n状态：已完成\n\n## 子计划队列\n\n状态：已完成\n",
+      "utf8"
+    );
+    await writeFile(join(root, "src/change.ts"), "export const changed = true;\n", "utf8");
+    execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["add", "src/change.ts"], { cwd: root, stdio: "ignore" });
+
+    const review = await createCompletionReview(root, "记忆待处理");
+
+    assert.equal(review.shouldAskMemoryUpdate, true);
+    assert.ok(review.requiredConfirmations.some((item) => item.includes("更新长期记忆")));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createCompletionReview 长期记忆正负表达共存时始终以待办为准", async (t) => {
+  // 历史“已更新”和当前“尚未/仍需/下一步”可能顺序互换；判断不能依赖文本先后。
+  try {
+    execFileSync("git", ["--version"], { stdio: "ignore" });
+  } catch {
+    t.skip("当前环境缺少 git，跳过 git 变更检测测试。");
+    return;
+  }
+
+  const cases = [
+    {
+      name: "完成在前尚未在后",
+      content: "历史记录：长期记忆已更新。\n当前结论：长期记忆尚未更新，仍需用户确认。"
+    },
+    {
+      name: "尚未在前完成在后",
+      content: "当前结论：长期记忆尚未更新。\n历史记录：长期记忆已更新。"
+    },
+    {
+      name: "完成在前下一步在后",
+      content: "上一阶段已沉淀长期记忆。\n下一步更新长期记忆。"
+    },
+    {
+      name: "下一步在前完成在后",
+      content: "下一步需要更新长期记忆。\n历史记录：已经完成更新长期记忆。"
+    }
+  ];
+
+  for (const testCase of cases) {
+    const root = await mkdtemp(join(tmpdir(), "code-helper-completion-memory-conflict-"));
+
+    try {
+      await initializeProject({ projectRoot: root });
+      await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
+      await mkdir(join(root, `code-helper-docs/result-doc/${testCase.name}`), { recursive: true });
+      await mkdir(join(root, "code-helper-docs/status-doc"), { recursive: true });
+      await mkdir(join(root, "src"), { recursive: true });
+      await writeFile(join(root, `code-helper-docs/plan-doc/${testCase.name}.md`), "# 计划\n", "utf8");
+      await writeFile(
+        join(root, `code-helper-docs/result-doc/${testCase.name}/实施记录.md`),
+        `# 实施记录\n\n${testCase.content}\n`,
+        "utf8"
+      );
+      await writeFile(
+        join(root, `code-helper-docs/status-doc/${testCase.name}-状态.md`),
+        "# 状态\n\n## 当前执行节点\n\n状态：已完成\n\n## 子计划队列\n\n状态：已完成\n",
+        "utf8"
+      );
+      await writeFile(join(root, "src/change.ts"), "export const changed = true;\n", "utf8");
+      execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+      execFileSync("git", ["add", "src/change.ts"], { cwd: root, stdio: "ignore" });
+
+      const review = await createCompletionReview(root, testCase.name);
+
+      assert.equal(review.shouldAskMemoryUpdate, true, testCase.name);
+      assert.ok(
+        review.requiredConfirmations.some((item) => item.includes("更新长期记忆")),
+        testCase.name
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   }
 });
 

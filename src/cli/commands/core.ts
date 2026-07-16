@@ -10,7 +10,7 @@ import {
   listProjectSkillRegistrations,
   listSupportedSkillRegistrationTargets,
   parseSkillRegistrationTargets,
-  registerProjectSkills,
+  registerProjectSkillsForTargets,
   resolveSkillRegistrationTargets,
   type SkillRegistrationTarget
 } from "../../skills.js";
@@ -154,10 +154,13 @@ export async function runSyncLocal(projectRoot: string, args: string[] = []): Pr
   }
 
   const initializeResult = await initializeProject({ projectRoot, skillRegistrationTargets: [] });
-  await setFeatureEnabled(projectRoot, "skillRegistration", true);
-
   const targets = listSupportedSkillRegistrationTargets();
-  const skillOperations = (await Promise.all(targets.map((target) => registerProjectSkills(projectRoot, target)))).flat();
+  // sync-local 可以从关闭状态恢复本仓库的全部 Skills，但必须先完成整批文件事务；
+  // 若任一目标路径冲突，配置仍保持原状态，避免显示已启用却没有完整注册。
+  const skillOperations = await registerProjectSkillsForTargets(projectRoot, targets, {
+    respectFeatureToggle: false
+  });
+  await setFeatureEnabled(projectRoot, "skillRegistration", true);
   const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
   const initializeOperations = initializeResult.operations.filter((operation) =>
     !operation.message.includes("已跳过项目级 skills 注册")

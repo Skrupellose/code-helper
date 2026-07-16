@@ -1,19 +1,129 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { setFeatureEnabled } from "../dist/config.js";
+import { loadConfig, setFeatureEnabled } from "../dist/config.js";
+import { runCli } from "../dist/cli.js";
+import { writeText } from "../dist/fs-utils.js";
 import {
+  getSkillManifest,
   listProjectSkillRegistrations,
   parseSkillRegistrationTargets,
   registerProjectSkills,
+  registerProjectSkillsForTargets,
   resolveSkillRegistrationTargets,
   runSkillsAudit,
   runSkillsDoctor,
   unregisterProjectSkills
 } from "../dist/skills.js";
+
+const CODE_HELPER_SKILL_NAMES = getSkillManifest().map((skill) => skill.directoryName);
+
+/**
+ * 返回测试目标对应的项目级 Skills 根目录。
+ * 测试显式覆盖三类 agent，避免路径断言只在 Codex 目录下成立。
+ */
+function getTargetSkillsRoot(root, target) {
+  if (target === "codex") {
+    return join(root, ".agents/skills");
+  }
+
+  if (target === "claudecode") {
+    return join(root, ".claude/skills");
+  }
+
+  return join(root, ".github/skills");
+}
+
+/**
+ * 在测试项目 state.json 中追加受控 Skill 目录记录。
+ * 用于模拟未来版本从 manifest 移除 Skill 后的安全退休迁移。
+ */
+async function recordManagedSkillDirectories(root, target, directoryNames) {
+  const statePath = join(root, ".code-helper/state.json");
+  let state = {};
+
+  try {
+    state = JSON.parse(await readFile(statePath, "utf8"));
+  } catch {
+    // 旧项目可能尚未生成 state.json，测试从空状态开始即可。
+  }
+
+  state.managedSkillDirectories = {
+    ...(state.managedSkillDirectories ?? {}),
+    [target]: directoryNames
+  };
+  await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
+/**
+ * 写入带内容指纹的新版本受控 Skill 记录。
+ */
+async function recordManagedSkillFingerprints(root, target, records) {
+  const statePath = join(root, ".code-helper/state.json");
+  let state = {};
+
+  try {
+    state = JSON.parse(await readFile(statePath, "utf8"));
+  } catch {
+    // 测试允许从尚未初始化的空项目开始。
+  }
+
+  state.managedSkillRecords = {
+    ...(state.managedSkillRecords ?? {}),
+    [target]: Object.fromEntries(
+      Object.entries(records).map(([directoryName, content]) => [
+        directoryName,
+        {
+          contentFingerprint: createHash("sha256").update(content, "utf8").digest("hex")
+        }
+      ])
+    )
+  };
+  await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
+test("内置 Skill 单一 manifest 的名称、目录、模板文件和正文保持一致", () => {
+  const manifest = getSkillManifest();
+
+  assert.equal(manifest.length, 6);
+  assert.equal(new Set(manifest.map((skill) => skill.fileName)).size, manifest.length);
+  assert.equal(new Set(manifest.map((skill) => skill.directoryName)).size, manifest.length);
+  assert.equal(new Set(manifest.map((skill) => skill.name)).size, manifest.length);
+
+  for (const skill of manifest) {
+    assert.equal(skill.name, skill.directoryName);
+    assert.match(skill.directoryName, /^code-helper-[a-z0-9-]+$/u);
+    assert.match(skill.fileName, /\.SKILL\.md$/u);
+    assert.match(skill.content, new RegExp(`^---[\\s\\S]*?name: ${skill.name}\\n`, "u"));
+  }
+});
+
+test("getSkillManifest 返回运行时冻结清单，JavaScript 调用方无法污染后续结果", () => {
+  const manifest = getSkillManifest();
+  const originalName = manifest[0].name;
+  const originalLength = manifest.length;
+
+  assert.equal(Object.isFrozen(manifest), true);
+  assert.ok(manifest.every((skill) => Object.isFrozen(skill)));
+  assert.throws(
+    () => manifest.push(manifest[0]),
+    TypeError
+  );
+  assert.throws(
+    () => {
+      manifest[0].name = "code-helper-polluted";
+    },
+    TypeError
+  );
+
+  const nextManifest = getSkillManifest();
+  assert.equal(nextManifest.length, originalLength);
+  assert.equal(nextManifest[0].name, originalName);
+});
 
 test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", async () => {
   // 该测试确认 code-helper skills 只注册到当前项目的 .agents/skills。
@@ -112,6 +222,182 @@ test("registerProjectSkills 会尊重 skillRegistration 功能开关", async () 
   }
 });
 
+test("registerProjectSkills 路径冲突时不会留下单目标部分注册", async () => {
+  // 冲突位于内置清单后半段，用于确认前面的 Skills 不会先写入后残留。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-atomic-single-"));
+  const skillsRoot = getTargetSkillsRoot(root, "codex");
+
+  try {
+    await mkdir(skillsRoot, { recursive: true });
+    await writeFile(join(skillsRoot, "code-helper-document-archive"), "路径冲突", "utf8");
+
+    await assert.rejects(
+      () => registerProjectSkills(root),
+      /ENOTDIR|not a directory/u
+    );
+
+    // 先移除人为冲突，随后统一读取状态，确认冲突前排在清单前面的 Skills 也未被写入。
+    await rm(join(skillsRoot, "code-helper-document-archive"), { force: true });
+    const statuses = await listProjectSkillRegistrations(root);
+    assert.ok(statuses.every((status) => !status.registered));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("registerProjectSkills 当前文件截断后写入失败时会恢复整批原内容", async () => {
+  // 注入确定性的“先截断再抛错”写入器，避免依赖磁盘满、权限或平台特有文件系统行为。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-atomic-truncated-write-"));
+  const skillsRoot = getTargetSkillsRoot(root, "codex");
+  const firstPath = join(skillsRoot, CODE_HELPER_SKILL_NAMES[0], "SKILL.md");
+  const failingPath = join(skillsRoot, CODE_HELPER_SKILL_NAMES[1], "SKILL.md");
+  const firstOriginal = "# 第一项旧内容\n";
+  const failingOriginal = "# 第二项旧内容\n";
+
+  try {
+    await registerProjectSkills(root);
+    await writeFile(firstPath, firstOriginal, "utf8");
+    await writeFile(failingPath, failingOriginal, "utf8");
+
+    await assert.rejects(
+      () => registerProjectSkills(root, "codex", {
+        writeSkillFile: async (path, content) => {
+          if (path === failingPath) {
+            // 模拟 writeFile 已经把目标截断并写入部分内容，随后底层设备才报告失败。
+            await writeFile(path, content.slice(0, 12), "utf8");
+            throw new Error("模拟截断后写入失败");
+          }
+
+          await writeText(path, content);
+        }
+      }),
+      /模拟截断后写入失败/u
+    );
+
+    assert.equal(await readFile(firstPath, "utf8"), firstOriginal);
+    assert.equal(await readFile(failingPath, "utf8"), failingOriginal);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("skills register all 失败时由 CLI 统一捕获且不启用配置或写入其它目标", async () => {
+  // Claude Code 目标制造路径冲突；Codex 目标虽然排在前面，也不能被部分写入。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-cli-atomic-all-"));
+  const errors = [];
+  const originalError = console.error;
+
+  try {
+    await setFeatureEnabled(root, "skillRegistration", false);
+    const claudeSkillsRoot = getTargetSkillsRoot(root, "claudecode");
+    await mkdir(claudeSkillsRoot, { recursive: true });
+    await writeFile(join(claudeSkillsRoot, "code-helper-plan-workbench"), "路径冲突", "utf8");
+    console.error = (...items) => {
+      errors.push(items.join(" "));
+    };
+
+    const exitCode = await runCli(["skills", "register", "all"], root);
+    const config = await loadConfig(root);
+    const codexStatuses = await listProjectSkillRegistrations(root, "codex");
+    const githubStatuses = await listProjectSkillRegistrations(root, "githubcopilot");
+
+    assert.equal(exitCode, 1);
+    assert.equal(config.features.skillRegistration.enabled, false);
+    assert.ok(codexStatuses.every((status) => !status.registered));
+    assert.ok(githubStatuses.every((status) => !status.registered));
+    assert.equal(errors.length, 1);
+    assert.doesNotMatch(errors[0], /\n\s+at /u);
+    assert.match(errors[0], /ENOTDIR|not a directory/u);
+  } finally {
+    console.error = originalError;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("skills unregister all 单次写回会清空三类 managedSkillRecords 并保留用户 Skills", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-cli-unregister-all-"));
+  const logs = [];
+  const originalLog = console.log;
+
+  try {
+    console.log = (...items) => {
+      logs.push(items.join(" "));
+    };
+    assert.equal(await runCli(["skills", "register", "all"], root), 0);
+
+    for (const target of ["codex", "claudecode", "githubcopilot"]) {
+      const userDirectory = join(getTargetSkillsRoot(root, target), "code-helper-user-owned");
+      await mkdir(userDirectory, { recursive: true });
+      await writeFile(join(userDirectory, "SKILL.md"), `用户 ${target} Skill`, "utf8");
+    }
+
+    const exitCode = await runCli(["skills", "unregister", "all"], root);
+    const state = JSON.parse(await readFile(join(root, ".code-helper/state.json"), "utf8"));
+
+    assert.equal(exitCode, 0);
+    assert.deepEqual(state.managedSkillRecords, {});
+    for (const target of ["codex", "claudecode", "githubcopilot"]) {
+      assert.ok((await listProjectSkillRegistrations(root, target)).every((status) => !status.registered));
+      assert.equal(
+        await readFile(join(getTargetSkillsRoot(root, target), "code-helper-user-owned/SKILL.md"), "utf8"),
+        `用户 ${target} Skill`
+      );
+    }
+    assert.ok(logs.some((line) => line.includes("已取消注册")));
+  } finally {
+    console.log = originalLog;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("skills unregister all 状态读取失败时不删除已注册或用户 Skills", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-cli-unregister-all-failure-"));
+  const errors = [];
+  const originalError = console.error;
+  const originalLog = console.log;
+
+  try {
+    console.log = () => {};
+    assert.equal(await runCli(["skills", "register", "all"], root), 0);
+    const userDirectory = join(getTargetSkillsRoot(root, "codex"), "code-helper-user-owned");
+    await mkdir(userDirectory, { recursive: true });
+    await writeFile(join(userDirectory, "SKILL.md"), "用户内容", "utf8");
+    await rm(join(root, ".code-helper/state.json"), { force: true });
+    await mkdir(join(root, ".code-helper/state.json"), { recursive: true });
+    console.error = (...items) => {
+      errors.push(items.join(" "));
+    };
+
+    const exitCode = await runCli(["skills", "unregister", "all"], root);
+
+    assert.equal(exitCode, 1);
+    assert.ok((await listProjectSkillRegistrations(root, "codex")).every((status) => status.registered));
+    assert.ok((await listProjectSkillRegistrations(root, "claudecode")).every((status) => status.registered));
+    assert.ok((await listProjectSkillRegistrations(root, "githubcopilot")).every((status) => status.registered));
+    assert.equal(await readFile(join(userDirectory, "SKILL.md"), "utf8"), "用户内容");
+    assert.equal(errors.length, 1);
+  } finally {
+    console.error = originalError;
+    console.log = originalLog;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("registerProjectSkillsForTargets 会完整注册多目标事务", async () => {
+  // 成功路径确认批量事务仍按目标输出完整的 6 项操作。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-atomic-success-"));
+
+  try {
+    const operations = await registerProjectSkillsForTargets(root, ["codex", "claudecode"]);
+
+    assert.equal(operations.length, 12);
+    assert.ok((await listProjectSkillRegistrations(root, "codex")).every((status) => status.registered));
+    assert.ok((await listProjectSkillRegistrations(root, "claudecode")).every((status) => status.registered));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("unregisterProjectSkills 只删除 code-helper 管理的项目级 skills", async () => {
   // 该测试避免取消注册时误删用户自己的 Codex 项目级 skills。
   const root = await mkdtemp(join(tmpdir(), "code-helper-skills-unregister-"));
@@ -151,6 +437,189 @@ test("unregisterProjectSkills 不会删除用户自己的 Claude Code skills", a
     assert.ok(operations.every((operation) => operation.action === "updated"));
     assert.ok(statuses.every((status) => !status.registered));
     assert.match(userSkill, /name: user-skill/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("unregisterProjectSkills 会清理三类目标中缺失或损坏 SKILL.md 的精确受控目录", async () => {
+  for (const target of ["codex", "claudecode", "githubcopilot"]) {
+    const root = await mkdtemp(join(tmpdir(), `code-helper-skills-unregister-damaged-${target}-`));
+    const skillsRoot = getTargetSkillsRoot(root, target);
+    const missingSkillDirectory = join(skillsRoot, CODE_HELPER_SKILL_NAMES[0]);
+    const damagedSkillDirectory = join(skillsRoot, CODE_HELPER_SKILL_NAMES[1]);
+    const userDirectory = join(skillsRoot, "code-helper-user-owned");
+
+    try {
+      await registerProjectSkills(root, target);
+      await rm(join(missingSkillDirectory, "SKILL.md"), { force: true });
+      await writeFile(join(missingSkillDirectory, "用户附件.txt"), "应随受控目录清理", "utf8");
+      await writeFile(join(damagedSkillDirectory, "SKILL.md"), "损坏内容", "utf8");
+      await mkdir(userDirectory, { recursive: true });
+      await writeFile(join(userDirectory, "SKILL.md"), "用户自定义内容", "utf8");
+
+      await unregisterProjectSkills(root, target);
+
+      await assert.rejects(() => readFile(join(missingSkillDirectory, "用户附件.txt"), "utf8"), /ENOENT/u);
+      await assert.rejects(() => readFile(join(damagedSkillDirectory, "SKILL.md"), "utf8"), /ENOENT/u);
+      assert.equal(await readFile(join(userDirectory, "SKILL.md"), "utf8"), "用户自定义内容");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("registerProjectSkills 只清理指纹匹配且已从 manifest 退休的目录", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-retired-cleanup-"));
+  const skillsRoot = getTargetSkillsRoot(root, "codex");
+  const retiredName = "code-helper-retired-example";
+  const userName = "code-helper-user-owned";
+
+  try {
+    await registerProjectSkills(root);
+    await mkdir(join(skillsRoot, retiredName), { recursive: true });
+    const retiredContent = "旧版受控 Skill";
+    await writeFile(join(skillsRoot, retiredName, "SKILL.md"), retiredContent, "utf8");
+    await mkdir(join(skillsRoot, userName), { recursive: true });
+    await writeFile(join(skillsRoot, userName, "SKILL.md"), "用户自定义 Skill", "utf8");
+    await recordManagedSkillFingerprints(root, "codex", { [retiredName]: retiredContent });
+
+    const operations = await registerProjectSkills(root);
+    const state = JSON.parse(await readFile(join(root, ".code-helper/state.json"), "utf8"));
+
+    assert.ok(operations.some((operation) => operation.message.includes("退休项目级 skill")));
+    await assert.rejects(() => readFile(join(skillsRoot, retiredName, "SKILL.md"), "utf8"), /ENOENT/u);
+    assert.equal(await readFile(join(skillsRoot, userName, "SKILL.md"), "utf8"), "用户自定义 Skill");
+    assert.deepEqual(Object.keys(state.managedSkillRecords.codex), CODE_HELPER_SKILL_NAMES);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("旧项目无受控记录时不会按 code-helper 前缀猜测并删除退休目录", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-retired-legacy-safe-"));
+  const skillsRoot = getTargetSkillsRoot(root, "codex");
+  const unknownLegacyName = "code-helper-unknown-legacy";
+
+  try {
+    await mkdir(join(skillsRoot, unknownLegacyName), { recursive: true });
+    await writeFile(join(skillsRoot, unknownLegacyName, "SKILL.md"), "归属未知，必须保留", "utf8");
+
+    await registerProjectSkills(root);
+
+    assert.equal(
+      await readFile(join(skillsRoot, unknownLegacyName, "SKILL.md"), "utf8"),
+      "归属未知，必须保留"
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("旧版仅目录名 state 不足以证明退休目录所有权", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-retired-legacy-state-"));
+  const skillsRoot = getTargetSkillsRoot(root, "codex");
+  const retiredName = "code-helper-retired-example";
+
+  try {
+    await registerProjectSkills(root);
+    await mkdir(join(skillsRoot, retiredName), { recursive: true });
+    await writeFile(join(skillsRoot, retiredName, "SKILL.md"), "用户后来同名重建", "utf8");
+    await recordManagedSkillDirectories(root, "codex", [...CODE_HELPER_SKILL_NAMES, retiredName]);
+
+    const operations = await registerProjectSkills(root);
+
+    assert.equal(await readFile(join(skillsRoot, retiredName, "SKILL.md"), "utf8"), "用户后来同名重建");
+    assert.equal(operations.some((operation) => operation.path.includes(retiredName)), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("退休 Skill 指纹不匹配时保留同名用户内容和所有权记录", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-retired-user-recreated-"));
+  const skillsRoot = getTargetSkillsRoot(root, "codex");
+  const retiredName = "code-helper-retired-example";
+
+  try {
+    await registerProjectSkills(root);
+    await mkdir(join(skillsRoot, retiredName), { recursive: true });
+    await writeFile(join(skillsRoot, retiredName, "SKILL.md"), "用户后来同名重建", "utf8");
+    await recordManagedSkillFingerprints(root, "codex", { [retiredName]: "旧版受控正文" });
+
+    const operations = await registerProjectSkills(root);
+    const state = JSON.parse(await readFile(join(root, ".code-helper/state.json"), "utf8"));
+
+    assert.equal(await readFile(join(skillsRoot, retiredName, "SKILL.md"), "utf8"), "用户后来同名重建");
+    assert.ok(operations.some(
+      (operation) => operation.path.includes(retiredName) && operation.action === "skipped"
+    ));
+    assert.ok(state.managedSkillRecords.codex[retiredName]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("退休 Skill 缺少 SKILL.md 时只清理空目录，非空目录保留", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-retired-empty-boundary-"));
+  const skillsRoot = getTargetSkillsRoot(root, "codex");
+  const emptyRetiredName = "code-helper-retired-empty";
+  const nonEmptyRetiredName = "code-helper-retired-non-empty";
+
+  try {
+    await registerProjectSkills(root);
+    await mkdir(join(skillsRoot, emptyRetiredName), { recursive: true });
+    await mkdir(join(skillsRoot, nonEmptyRetiredName), { recursive: true });
+    await writeFile(join(skillsRoot, nonEmptyRetiredName, "用户文件.txt"), "必须保留", "utf8");
+    await recordManagedSkillFingerprints(root, "codex", {
+      [emptyRetiredName]: "旧版空目录对应正文",
+      [nonEmptyRetiredName]: "旧版非空目录对应正文"
+    });
+
+    const operations = await registerProjectSkills(root);
+    const state = JSON.parse(await readFile(join(root, ".code-helper/state.json"), "utf8"));
+
+    await assert.rejects(() => readFile(join(skillsRoot, emptyRetiredName, "SKILL.md"), "utf8"), /ENOENT/u);
+    assert.equal(await readFile(join(skillsRoot, nonEmptyRetiredName, "用户文件.txt"), "utf8"), "必须保留");
+    assert.ok(operations.some(
+      (operation) => operation.path.includes(emptyRetiredName) && operation.action === "updated"
+    ));
+    assert.ok(operations.some(
+      (operation) => operation.path.includes(nonEmptyRetiredName) && operation.action === "skipped"
+    ));
+    assert.equal(state.managedSkillRecords.codex[emptyRetiredName], undefined);
+    assert.ok(state.managedSkillRecords.codex[nonEmptyRetiredName]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("unregisterProjectSkills 会校验退休指纹并保留未记录用户目录", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-retired-unregister-"));
+  const skillsRoot = getTargetSkillsRoot(root, "githubcopilot");
+  const retiredName = "code-helper-retired-example";
+  const userName = "code-helper-user-owned";
+  const outsideSentinel = join(root, ".github/code-helper-越界");
+
+  try {
+    await registerProjectSkills(root, "githubcopilot");
+    const retiredContent = "退休受控正文";
+    await mkdir(join(skillsRoot, retiredName), { recursive: true });
+    await writeFile(join(skillsRoot, retiredName, "SKILL.md"), retiredContent, "utf8");
+    await mkdir(join(skillsRoot, userName), { recursive: true });
+    await writeFile(join(skillsRoot, userName, "SKILL.md"), "用户内容", "utf8");
+    await mkdir(outsideSentinel, { recursive: true });
+    await writeFile(join(outsideSentinel, "保留.txt"), "越界保护", "utf8");
+    await recordManagedSkillFingerprints(root, "githubcopilot", {
+      [retiredName]: retiredContent,
+      "../code-helper-越界": "越界内容"
+    });
+
+    await unregisterProjectSkills(root, "githubcopilot");
+
+    await assert.rejects(() => readFile(join(skillsRoot, retiredName, "SKILL.md"), "utf8"), /ENOENT/u);
+    assert.equal(await readFile(join(skillsRoot, userName, "SKILL.md"), "utf8"), "用户内容");
+    assert.equal(await readFile(join(outsideSentinel, "保留.txt"), "utf8"), "越界保护");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -215,6 +684,71 @@ test("runSkillsDoctor 会发现缺失 SKILL.md 和 description 过短", async ()
   }
 });
 
+test("runSkillsDoctor 接受合法 YAML 多行 description、引号、注释和 CRLF", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-doctor-yaml-valid-"));
+  const skillPath = join(root, ".agents/skills/yaml-valid/SKILL.md");
+
+  try {
+    await mkdir(join(skillPath, ".."), { recursive: true });
+    await writeFile(
+      skillPath,
+      [
+        "---",
+        "# 合法注释不能影响字段解析",
+        'name: "yaml-valid"',
+        "description: >",
+        "  当用户需要验证合法 YAML frontmatter 时使用，",
+        "  支持折叠多行描述和常见引号写法。",
+        "---",
+        "## 说明",
+        "",
+        "正文内容。",
+        ""
+      ].join("\r\n"),
+      "utf8"
+    );
+
+    const issues = await runSkillsDoctor(root);
+
+    assert.ok(!issues.some((issue) => issue.path === skillPath));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("runSkillsDoctor 将 YAML 解析和字段类型错误报告为 invalid-frontmatter", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-doctor-yaml-invalid-"));
+  const syntaxPath = join(root, ".agents/skills/yaml-syntax/SKILL.md");
+  const typePath = join(root, ".agents/skills/yaml-type/SKILL.md");
+
+  try {
+    await mkdir(join(syntaxPath, ".."), { recursive: true });
+    await mkdir(join(typePath, ".."), { recursive: true });
+    await writeFile(
+      syntaxPath,
+      "---\nname: yaml-syntax\ndescription: [未闭合\n---\n## 说明\n",
+      "utf8"
+    );
+    await writeFile(
+      typePath,
+      "---\nname: yaml-type\ndescription:\n  - 第一项\n  - 第二项\n---\n## 说明\n",
+      "utf8"
+    );
+
+    const issues = await runSkillsDoctor(root);
+    const invalidIssues = issues.filter((issue) => issue.code === "invalid-frontmatter");
+
+    assert.equal(invalidIssues.length, 2);
+    assert.ok(invalidIssues.some((issue) => issue.path === syntaxPath && issue.message.includes("无法解析")));
+    assert.ok(invalidIssues.some((issue) => issue.path === typePath && issue.message.includes("description 必须是字符串")));
+    assert.ok(!issues.some(
+      (issue) => issue.code === "weak-skill-description" && (issue.path === syntaxPath || issue.path === typePath)
+    ));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("runSkillsDoctor 会把 skills 根目录中的普通文件识别为结构问题", async () => {
   // 该测试覆盖用户误把普通文件放进 skills 根目录时的兼容行为。
   const root = await mkdtemp(join(tmpdir(), "code-helper-skills-doctor-file-"));
@@ -251,6 +785,65 @@ test("runSkillsDoctor 会发现过期的 code-helper skill", async () => {
   }
 });
 
+test("runSkillsDoctor 会在三类 agent 目标只注册 1/6 时报告其余缺项", async () => {
+  // 三类目标分别验证，防止完整性检查只对某一种项目目录生效。
+  for (const target of ["codex", "claudecode", "githubcopilot"]) {
+    const root = await mkdtemp(join(tmpdir(), `code-helper-skills-doctor-one-${target}-`));
+
+    try {
+      await registerProjectSkills(root, target);
+      const skillsRoot = getTargetSkillsRoot(root, target);
+
+      for (const skillName of CODE_HELPER_SKILL_NAMES.slice(1)) {
+        await rm(join(skillsRoot, skillName), { recursive: true, force: true });
+      }
+
+      const issues = await runSkillsDoctor(root);
+      const missingIssues = issues.filter(
+        (issue) => issue.code === "missing-code-helper-skill" && issue.path.startsWith(skillsRoot)
+      );
+
+      assert.equal(missingIssues.length, 5);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("runSkillsDoctor 会在注册 5/6 时准确报告唯一缺项", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-doctor-five-"));
+  const missingName = "code-helper-completion-review";
+
+  try {
+    await registerProjectSkills(root);
+    await rm(join(getTargetSkillsRoot(root, "codex"), missingName), { recursive: true, force: true });
+
+    const missingIssues = (await runSkillsDoctor(root)).filter(
+      (issue) => issue.code === "missing-code-helper-skill"
+    );
+
+    assert.equal(missingIssues.length, 1);
+    assert.match(missingIssues[0].message, new RegExp(missingName, "u"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("runSkillsDoctor 会把完整 6/6 注册判断为健康", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-doctor-complete-"));
+
+  try {
+    await registerProjectSkills(root);
+
+    const issues = await runSkillsDoctor(root);
+
+    assert.ok(!issues.some((issue) => issue.code === "missing-code-helper-skill"));
+    assert.ok(!issues.some((issue) => issue.level === "error"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("runSkillsAudit 会根据项目入口推荐缺失注册", async () => {
   // 该测试确认 audit 只输出建议，不直接创建项目级 skills。
   const root = await mkdtemp(join(tmpdir(), "code-helper-skills-audit-"));
@@ -266,6 +859,97 @@ test("runSkillsAudit 会根据项目入口推荐缺失注册", async () => {
     assert.ok(recommendations.some((item) => item.code === "missing-inferred-registration"));
     assert.ok(recommendations.some((item) => item.code === "missing-memory-skill"));
     assert.ok(recommendations.some((item) => item.code === "missing-manual-test-skill"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("runSkillsAudit 不会把初始化预建的空 archive 目录当成归档任务", async () => {
+  // init 会创建三类 archive 目录；目录为空时不应触发 document-archive skill 推荐。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-audit-empty-archive-"));
+
+  try {
+    await mkdir(join(root, "code-helper-docs/plan-doc/archive"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/result-doc/archive"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/status-doc/archive"), { recursive: true });
+
+    const recommendations = await runSkillsAudit(root);
+
+    assert.equal(recommendations.some((item) => item.code === "missing-archive-skill"), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("runSkillsAudit 发现实际 archived 任务时会推荐归档 skill", async () => {
+  // 任一真实归档任务文档即可证明项目使用了归档生命周期，不要求三类文档同时存在。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-audit-archived-task-"));
+
+  try {
+    await mkdir(join(root, "code-helper-docs/plan-doc/archive"), { recursive: true });
+    await writeFile(join(root, "code-helper-docs/plan-doc/archive/真实归档任务.md"), "# 真实归档任务\n", "utf8");
+
+    const recommendations = await runSkillsAudit(root);
+
+    assert.ok(recommendations.some((item) => item.code === "missing-archive-skill"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("内置完成检查与归档 skill 描述会收窄触发和手工测试条件", async () => {
+  // 注册输出直接来自模板源，可防止后续又恢复普通最终回复、空目录或无条件手工测试触发。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-trigger-boundary-"));
+
+  try {
+    await registerProjectSkills(root);
+    const completionSkill = await readFile(
+      join(root, ".agents/skills/code-helper-completion-review/SKILL.md"),
+      "utf8"
+    );
+    const archiveSkill = await readFile(
+      join(root, ".agents/skills/code-helper-document-archive/SKILL.md"),
+      "utf8"
+    );
+
+    assert.match(completionSkill, /完成实现、文档或功能变更节点后准备最终回复/u);
+    assert.match(completionSkill, /普通问答、只读 review.*不触发/u);
+    assert.match(completionSkill, /mixed 任务必须优先/u);
+    assert.match(completionSkill, /没有 active 且没有 mixed 任务时/u);
+    assert.match(completionSkill, /仅报告当前没有活动任务/u);
+    assert.match(archiveSkill, /初始化预建的空 archive 目录不触发/u);
+    assert.match(archiveSkill, /仅当任务涉及页面、可视化、浏览器真实链路、人工业务验收/u);
+    assert.match(archiveSkill, /纯逻辑任务以自动化测试/u);
+    assert.doesNotMatch(archiveSkill, /确认 实施记录\.md、手工测试\.md 和 status-doc/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("runSkillsAudit 不会把跨目标错位的部分 Skills 拼成完整注册", async () => {
+  // Codex 保留 1/6、Claude Code 保留另外 5/6；全局名称虽齐全，但两个目标都不可独立使用。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-audit-misaligned-"));
+
+  try {
+    await writeFile(join(root, "AGENTS.md"), "# Agents\n", "utf8");
+    await writeFile(join(root, "CLAUDE.md"), "# Claude\n", "utf8");
+    await registerProjectSkillsForTargets(root, ["codex", "claudecode"]);
+
+    const codexRoot = getTargetSkillsRoot(root, "codex");
+    const claudeRoot = getTargetSkillsRoot(root, "claudecode");
+    for (const skillName of CODE_HELPER_SKILL_NAMES.slice(1)) {
+      await rm(join(codexRoot, skillName), { recursive: true, force: true });
+    }
+    await rm(join(claudeRoot, CODE_HELPER_SKILL_NAMES[0]), { recursive: true, force: true });
+
+    const recommendations = await runSkillsAudit(root);
+    const missingTargets = recommendations.filter((item) => item.code === "missing-inferred-registration");
+
+    assert.equal(missingTargets.length, 2);
+    assert.ok(missingTargets.some((item) => item.message.includes("Codex")));
+    assert.ok(missingTargets.some((item) => item.message.includes("Claude Code")));
+    assert.ok(recommendations.some((item) => item.code === "doctor-has-findings" && item.priority === "high"));
+    assert.ok(!recommendations.some((item) => item.code === "skills-healthy"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

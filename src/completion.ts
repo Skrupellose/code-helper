@@ -112,7 +112,12 @@ export async function createCompletionReview(projectRoot: string, featureName: s
     hasCurrentExecutionNode,
     hasSubPlanQueue
   });
-  const shouldAskMemoryUpdate = detectMemoryUpdateNeed(changedPaths, combinedContent);
+  const memoryUpdateHandled = detectMemoryUpdateHandled(combinedContent);
+  // archived 已由目录生命周期确认结束，mixed 需先解决文档冲突；两者都不能被 Git 变更
+  // 或归档正文中的历史“下一步”重新拉回长期记忆确认流程。
+  const shouldAskMemoryUpdate = task.status === "active"
+    && !memoryUpdateHandled
+    && detectMemoryUpdateNeed(changedPaths, combinedContent);
   // 仅 pure ready-to-archive 或明确的 mixed 结论才提示归档整理；mixed 文档不全时仍为 missing-docs，不误导归档。
   const shouldAskArchive = reviewStatus === "ready-to-archive" || reviewStatus === "mixed";
   // 只有纯 active 且文档/状态齐全的 ready-to-archive 才引导切换下一任务；mixed 必须先整理冲突。
@@ -670,6 +675,39 @@ function detectMemoryUpdateNeed(changedPaths: string[], content: string): boolea
 }
 
 /**
+ * 判断任务文档是否已经记录长期记忆处理结论。
+ *
+ * 这里只接受明确的完成或无需处理表达，不把“尚未更新”“仍需确认”“下一步更新”
+ * 等历史待办当成已处理。这样 active 任务完成后可以停止重复询问，archived 任务也不会
+ * 因旧计划中的历史说明重新进入确认流程。
+ */
+function detectMemoryUpdateHandled(content: string): boolean {
+  const pendingPatterns = [
+    /长期记忆(?:尚未|还未|未)(?:完成)?(?:更新|沉淀|处理)/u,
+    /(?:尚未|还未|未)(?:完成)?(?:更新|沉淀|处理)(?:了)?长期记忆/u,
+    /长期记忆(?:仍需|还需|需要)(?:用户)?(?:确认|更新|沉淀|处理)/u,
+    /(?:仍需|还需|需要)(?:用户)?确认(?:是否)?(?:更新|沉淀|处理)?长期记忆/u,
+    /(?:仍需|还需|需要)(?:更新|沉淀|处理)长期记忆/u,
+    /下一步(?:是|为|需|需要)?(?:更新|沉淀|处理)长期记忆/u
+  ];
+  const handledPatterns = [
+    /长期记忆(?:已|已经)(?:完成)?(?:更新|沉淀|处理)/u,
+    /(?:已|已经)(?:完成)?(?:更新|沉淀|处理)(?:了)?长期记忆/u,
+    /长期记忆(?:无需|不需要|不再需要)(?:更新|沉淀|处理)?/u,
+    /(?:无需|不需要|不再需要)(?:更新|沉淀|处理)?长期记忆/u,
+    /(?:决定|确认)(?:本轮)?不(?:更新|沉淀|处理)长期记忆/u
+  ];
+
+  // 历史完成记录与当前待办可能同时存在。只要正文仍有明确“尚未、仍需、下一步”
+  // 表达，就按当前未处理判断，不依赖两段文字出现顺序，避免旧“已更新”覆盖新待办。
+  if (pendingPatterns.some((pattern) => pattern.test(content))) {
+    return false;
+  }
+
+  return handledPatterns.some((pattern) => pattern.test(content));
+}
+
+/**
  * 生成 agent 和用户都能直接执行的下一步建议。
  */
 function buildRecommendations(input: {
@@ -720,6 +758,9 @@ function buildRecommendations(input: {
 
   if (input.reviewStatus === "archived") {
     recommendations.push("当前任务只存在于 archive 目录中，已视为结束任务；如需返工，请新建后续中文功能名或先明确恢复策略。");
+    // archived 是终态。归档正文中即使还保留历史“下一步”、缺少新版结构区段，
+    // 也不能再附加活动任务式的补文档、更新节点、记忆确认或归档建议。
+    return recommendations;
   }
 
   if (!input.hasCurrentExecutionNode) {
