@@ -55,6 +55,11 @@ interface SkillRegistrationSnapshot {
   targetPath: string;
   existing: string | undefined;
   content: string;
+  /**
+   * 标记本轮写入是否已经完整成功。
+   * 回滚时只有“原文件不存在且写入从未成功”的快照，才允许把 ENOTDIR 视为目标目录从未创建。
+   */
+  writeCompleted: boolean;
 }
 
 /**
@@ -94,7 +99,8 @@ export async function registerProjectSkillsForTargets(
         target,
         targetPath,
         existing: await readTextIfExists(targetPath),
-        content: skill.content
+        content: skill.content,
+        writeCompleted: false
       });
     }
   }
@@ -118,6 +124,7 @@ export async function registerProjectSkillsForTargets(
       // 若等写入成功后再记录快照，当前文件将无法恢复。
       changedSnapshots.push(snapshot);
       await writeSkillFile(snapshot.targetPath, snapshot.content);
+      snapshot.writeCompleted = true;
       operations.push({
         path: snapshot.targetPath,
         action: snapshot.existing === undefined ? "created" : "updated",
@@ -317,13 +324,18 @@ export async function listProjectSkillRegistrations(
  * 先显式确认目录为空，再使用跨平台可靠的 rmdir 删除；目录不存在或在检查后被写入时保持现状，
  * 避免误删用户自定义 skills。权限、路径形态或设备异常必须继续抛出，不能掩盖注册回滚失败。
  */
-async function removeEmptyDirectory(path: string): Promise<void> {
+async function removeEmptyDirectory(
+  path: string,
+  options: { allowNotDirectory?: boolean } = {}
+): Promise<void> {
   let entries: string[];
 
   try {
     entries = await readdir(path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    const code = (error as NodeJS.ErrnoException).code;
+
+    if (code === "ENOENT" || (code === "ENOTDIR" && options.allowNotDirectory === true)) {
       return;
     }
 
@@ -339,7 +351,11 @@ async function removeEmptyDirectory(path: string): Promise<void> {
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
 
-    if (code === "ENOENT" || code === "ENOTEMPTY") {
+    if (
+      code === "ENOENT" ||
+      code === "ENOTEMPTY" ||
+      (code === "ENOTDIR" && options.allowNotDirectory === true)
+    ) {
       return;
     }
 
@@ -546,16 +562,71 @@ async function rollbackSkillRegistration(
   projectRoot: string,
   changedSnapshots: SkillRegistrationSnapshot[]
 ): Promise<void> {
+  const rollbackErrors: unknown[] = [];
+
   for (const snapshot of [...changedSnapshots].reverse()) {
     if (snapshot.existing === undefined) {
-      await rm(snapshot.targetPath, { force: true });
-      await removeEmptyDirectory(dirname(snapshot.targetPath));
-      await removeEmptyDirectory(projectPath(projectRoot, getProjectSkillsDirectory(snapshot.target)));
-      await removeEmptyDirectory(projectPath(projectRoot, dirname(getProjectSkillsDirectory(snapshot.target))));
+      const allowNotDirectory = !snapshot.writeCompleted;
+      const cleanupSteps = [
+        async (): Promise<void> => {
+          try {
+            await rm(snapshot.targetPath, { force: true });
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOTDIR" && allowNotDirectory) {
+              return;
+            }
+
+            throw error;
+          }
+        },
+        async (): Promise<void> => {
+          await removeEmptyDirectory(dirname(snapshot.targetPath), { allowNotDirectory });
+        },
+        async (): Promise<void> => {
+          await removeEmptyDirectory(projectPath(projectRoot, getProjectSkillsDirectory(snapshot.target)));
+        },
+        async (): Promise<void> => {
+          await removeEmptyDirectory(projectPath(projectRoot, dirname(getProjectSkillsDirectory(snapshot.target))));
+        }
+      ];
+
+      // 单个快照的各清理步骤也要尽力执行，避免一个异常阻止后续受控目录恢复。
+      for (const cleanupStep of cleanupSteps) {
+        try {
+          await cleanupStep();
+        } catch (error) {
+          rollbackErrors.push(
+            new Error(
+              `回滚新建 Skill 失败：${snapshot.targetPath}：${
+                error instanceof Error ? error.message : String(error)
+              }`,
+              { cause: error }
+            )
+          );
+        }
+      }
       continue;
     }
 
-    await writeText(snapshot.targetPath, snapshot.existing);
+    try {
+      await writeText(snapshot.targetPath, snapshot.existing);
+    } catch (error) {
+      rollbackErrors.push(
+        new Error(
+          `恢复 Skill 原内容失败：${snapshot.targetPath}：${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          { cause: error }
+        )
+      );
+    }
+  }
+
+  if (rollbackErrors.length > 0) {
+    throw new AggregateError(
+      rollbackErrors,
+      `项目级 Skills 回滚未完整完成，共 ${rollbackErrors.length} 个错误`
+    );
   }
 }
 
