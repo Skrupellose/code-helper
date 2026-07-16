@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, readdir, rm } from "node:fs/promises";
+import { lstat, readdir, rm, rmdir } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 
 import { loadConfig } from "../config.js";
@@ -125,8 +125,7 @@ export async function registerProjectSkillsForTargets(
       });
     }
   } catch (error) {
-    await rollbackSkillRegistration(projectRoot, changedSnapshots);
-    throw error;
+    await rollbackSkillRegistrationAfterFailure(projectRoot, changedSnapshots, error);
   }
 
   const currentRecords = Object.fromEntries(
@@ -147,8 +146,7 @@ export async function registerProjectSkillsForTargets(
     // 若状态写入失败，回滚本轮 Skill 文件，避免出现已注册但无法追踪退休生命周期的状态。
     await writeManagedSkillRecords(projectRoot, stagedManagedRecords);
   } catch (error) {
-    await rollbackSkillRegistration(projectRoot, changedSnapshots);
-    throw error;
+    await rollbackSkillRegistrationAfterFailure(projectRoot, changedSnapshots, error);
   }
 
   const retirementResult = await removeRetiredManagedSkillDirectories(
@@ -316,17 +314,36 @@ export async function listProjectSkillRegistrations(
 
 /**
  * 删除空目录。
- * 目录不存在或非空时保持现状，避免误删用户自定义 skills。
+ * 先显式确认目录为空，再使用跨平台可靠的 rmdir 删除；目录不存在或在检查后被写入时保持现状，
+ * 避免误删用户自定义 skills。权限、路径形态或设备异常必须继续抛出，不能掩盖注册回滚失败。
  */
 async function removeEmptyDirectory(path: string): Promise<void> {
-  try {
-    const entries = await readdir(path);
+  let entries: string[];
 
-    if (entries.length === 0) {
-      await rm(path, { recursive: false, force: true });
+  try {
+    entries = await readdir(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
     }
-  } catch {
-    // 目录不存在或不可删除时不处理，取消注册不应影响用户文件。
+
+    throw error;
+  }
+
+  if (entries.length > 0) {
+    return;
+  }
+
+  try {
+    await rmdir(path);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+
+    if (code === "ENOENT" || code === "ENOTEMPTY") {
+      return;
+    }
+
+    throw error;
   }
 }
 
@@ -540,4 +557,29 @@ async function rollbackSkillRegistration(
 
     await writeText(snapshot.targetPath, snapshot.existing);
   }
+}
+
+/**
+ * 注册失败后执行事务回滚。
+ * 若回滚自身也失败，同时保留原始注册错误和回滚错误，避免任一故障被另一个故障掩盖。
+ */
+async function rollbackSkillRegistrationAfterFailure(
+  projectRoot: string,
+  changedSnapshots: SkillRegistrationSnapshot[],
+  registrationError: unknown
+): Promise<never> {
+  try {
+    await rollbackSkillRegistration(projectRoot, changedSnapshots);
+  } catch (rollbackError) {
+    const registrationMessage =
+      registrationError instanceof Error ? registrationError.message : String(registrationError);
+    const rollbackMessage = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+
+    throw new AggregateError(
+      [registrationError, rollbackError],
+      `项目级 Skills 注册失败：${registrationMessage}；回滚未完整完成：${rollbackMessage}`
+    );
+  }
+
+  throw registrationError;
 }

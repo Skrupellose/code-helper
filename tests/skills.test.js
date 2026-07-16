@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -276,6 +276,42 @@ test("registerProjectSkills 当前文件截断后写入失败时会恢复整批�
 
     assert.equal(await readFile(firstPath, "utf8"), firstOriginal);
     assert.equal(await readFile(failingPath, "utf8"), failingOriginal);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("registerProjectSkills 回滚会删除空目录并保留并发写入的用户内容", async () => {
+  // 该用例同时锁定 Windows 空目录删除和回滚期间目录变为非空时的用户内容保护。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-atomic-empty-directory-"));
+  const skillsRoot = getTargetSkillsRoot(root, "codex");
+  const emptyDirectory = join(skillsRoot, CODE_HELPER_SKILL_NAMES[0]);
+  const userOwnedDirectory = join(skillsRoot, CODE_HELPER_SKILL_NAMES[1]);
+  const userOwnedFile = join(userOwnedDirectory, "用户附件.txt");
+  const failingPath = join(skillsRoot, CODE_HELPER_SKILL_NAMES[2], "SKILL.md");
+
+  try {
+    await assert.rejects(
+      () => registerProjectSkills(root, "codex", {
+        writeSkillFile: async (path, content) => {
+          if (path === failingPath) {
+            throw new Error("模拟后续 Skill 写入失败");
+          }
+
+          await writeText(path, content);
+
+          if (path === join(userOwnedDirectory, "SKILL.md")) {
+            // 模拟注册尚未结束时外部进程写入同目录，回滚只能删除受控 SKILL.md。
+            await writeFile(userOwnedFile, "用户内容", "utf8");
+          }
+        }
+      }),
+      /模拟后续 Skill 写入失败/u
+    );
+
+    await assert.rejects(() => stat(emptyDirectory), /ENOENT/u);
+    await assert.rejects(() => stat(join(userOwnedDirectory, "SKILL.md")), /ENOENT/u);
+    assert.equal(await readFile(userOwnedFile, "utf8"), "用户内容");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
