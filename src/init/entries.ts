@@ -17,11 +17,19 @@ export async function applyExistingEntryFiles(projectRoot: string, config: CodeH
 /**
  * 根据当前真实存在的入口文件推断 agent 目标。
  */
-export function getTargetsFromExistingEntryFiles(config: CodeHelperConfig): SkillRegistrationTarget[] {
+export function getTargetsFromExistingEntryFiles(
+  config: CodeHelperConfig,
+  knownTargets: SkillRegistrationTarget[] = []
+): SkillRegistrationTarget[] {
   const targets: SkillRegistrationTarget[] = [];
 
   if (config.entryFiles.agents) {
-    targets.push("codex");
+    // AGENTS.md 是 Codex 与 Grok Build 的共享入口。已有受控注册时延续其真实目标，
+    // 避免 Grok-only 项目在 update 时被静默扩展为 Codex；无历史状态的旧项目仍保持 Codex 默认。
+    const knownSharedEntryTargets = knownTargets.filter(
+      (target): target is "codex" | "grok" => target === "codex" || target === "grok"
+    );
+    targets.push(...(knownSharedEntryTargets.length > 0 ? knownSharedEntryTargets : ["codex" as const]));
   }
 
   if (config.entryFiles.claude) {
@@ -33,6 +41,27 @@ export function getTargetsFromExistingEntryFiles(config: CodeHelperConfig): Skil
   }
 
   return targets;
+}
+
+/**
+ * 使用已有受控注册消解初始化推断中 AGENTS.md 的 Codex / Grok Build 歧义。
+ * 只收窄共享入口的两个目标，不改变 Claude Code 和 GitHub Copilot 的独立推断。
+ */
+export function disambiguateSharedAgentsTargets(
+  inferredTargets: SkillRegistrationTarget[],
+  knownTargets: SkillRegistrationTarget[]
+): SkillRegistrationTarget[] {
+  const knownSharedEntryTargets = knownTargets.filter(
+    (target): target is "codex" | "grok" => target === "codex" || target === "grok"
+  );
+  const isKnownGrokOnly = knownSharedEntryTargets.includes("grok") && !knownSharedEntryTargets.includes("codex");
+
+  if (!isKnownGrokOnly) {
+    return [...inferredTargets];
+  }
+
+  // Grok-only 受控状态证明 AGENTS.md 归属 Grok，只移除由共享入口带来的 Codex 猜测。
+  return inferredTargets.filter((target) => target !== "codex");
 }
 
 /**
@@ -72,13 +101,14 @@ export async function detectEntryFiles(
   const copilotExists = (await readTextIfExists(projectPath(projectRoot, ".github/copilot-instructions.md"))) !== undefined;
 
   if (agentsExists || claudeExists || copilotExists) {
-    config.entryFiles.agents = agentsExists || targets.includes("codex");
+    // Grok Build 与 Codex 共用 AGENTS.md 入口；目标状态仍由各自 Skills 目录独立记录。
+    config.entryFiles.agents = agentsExists || targets.includes("codex") || targets.includes("grok");
     config.entryFiles.claude = claudeExists || targets.includes("claudecode");
     config.entryFiles.copilot = copilotExists || targets.includes("githubcopilot");
     return;
   }
 
-  config.entryFiles.agents = targets.includes("codex");
+  config.entryFiles.agents = targets.includes("codex") || targets.includes("grok");
   config.entryFiles.claude = targets.includes("claudecode");
   config.entryFiles.copilot = targets.includes("githubcopilot");
 }

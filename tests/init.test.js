@@ -68,7 +68,8 @@ test("init raw mode 目标多选默认不勾选任何 agent", () => {
     [
       ["codex", false],
       ["claudecode", false],
-      ["githubcopilot", false]
+      ["githubcopilot", false],
+      ["grok", false]
     ]
   );
 });
@@ -155,7 +156,7 @@ test("init 文本兜底菜单空输入重试，0 才显式取消", () => {
   });
   assert.deepEqual(resolveInitTextTargetPromptAnswer("all"), {
     action: "select",
-    targets: ["codex", "claudecode", "githubcopilot"]
+    targets: ["codex", "claudecode", "githubcopilot", "grok"]
   });
   assert.deepEqual(resolveInitTextTargetPromptAnswer("unknown"), { action: "retry", targets: [] });
 });
@@ -171,8 +172,13 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
     const agents = await readFile(join(root, "AGENTS.md"), "utf8");
     const config = await readFile(join(root, ".code-helper/config.json"), "utf8");
     const codexSkill = await readFile(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
+    const reviewFixSkill = await readFile(join(root, ".agents/skills/code-helper-review-fix/SKILL.md"), "utf8");
     const codexHook = await readFile(join(root, ".codex/hooks.json"), "utf8");
     const managedBlock = extractManagedBlock(agents);
+    const gitCommitRule = await readFile(
+      join(root, "code-helper-docs/user-rules/Git提交信息格式规范.md"),
+      "utf8"
+    );
 
     assert.ok(result.operations.some((operation) => operation.path.endsWith("项目记忆规则优化.md")));
     assert.match(agents, /用户已有规则/);
@@ -182,9 +188,15 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
     assert.match(managedBlock, /自定义规则应写在本区块外/);
     assert.match(managedBlock, /手工测试生成/);
     assert.match(managedBlock, /code-helper-manual-test-workbench/);
+    assert.match(managedBlock, /代码审查与修复/);
+    assert.match(managedBlock, /code-helper-review-fix/);
+    assert.match(managedBlock, /Git 提交信息格式规范/u);
+    assert.match(managedBlock, /Git提交信息格式规范\.md/u);
     assert.match(config, /"gitHooks":/);
     assert.match(config, /"agentHooks": \{\n      "enabled": true\n    \}/);
     assert.match(codexSkill, /name: code-helper-memory-tuning/);
+    assert.match(reviewFixSkill, /name: code-helper-review-fix/);
+    assert.match(gitCommitRule, /scope 必填/u);
     assert.match(codexHook, /agent-finish-check\.mjs/);
     await assert.rejects(
       () => stat(join(root, ".git/hooks/pre-commit")),
@@ -361,6 +373,88 @@ test("code-helper init githubcopilot 会补齐 Copilot instructions", async () =
   }
 });
 
+test("code-helper init grok 会复用 AGENTS 入口并注册原生 Grok Skills", async () => {
+  // Grok Build 与 Codex 共用 AGENTS.md，但显式 Grok 目标只写入 .grok/skills，且本轮不安装 Grok Hook。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-init-grok-"));
+
+  try {
+    const result = await runCliSilently(["init", "grok-build"], root);
+    const agents = await readFile(join(root, "AGENTS.md"), "utf8");
+    const grokSkill = await readFile(join(root, ".grok/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
+
+    assert.equal(result.exitCode, 0);
+    assert.match(agents, /code-helper:start/);
+    assert.match(grokSkill, /name: code-helper-memory-tuning/);
+    await assert.rejects(() => stat(join(root, ".agents/skills")), /ENOENT/u);
+    await assert.rejects(() => stat(join(root, "CLAUDE.md")), /ENOENT/u);
+    await assert.rejects(() => stat(join(root, ".grok/hooks")), /ENOENT/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Grok-only 项目再次 init 不会把共享 AGENTS 入口误判为 Codex", async () => {
+  // 首次显式选择已写入受控注册状态，后续无 target init 必须延续 Grok-only。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-reinit-grok-only-"));
+
+  try {
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: ["grok"] });
+    await initializeProject({ projectRoot: root });
+
+    assert.match(
+      await readFile(join(root, ".grok/skills/code-helper-memory-tuning/SKILL.md"), "utf8"),
+      /name: code-helper-memory-tuning/
+    );
+    await assert.rejects(() => stat(join(root, ".agents/skills")), /ENOENT/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("initializeProject 会从已有 .grok 资产推断 Grok，但不会从 AGENTS 单独推断", async () => {
+  // `.grok/config.toml` 是明确的 Grok 使用证据；AGENTS.md 本身仍只保守推断既有 Codex 目标。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-init-existing-grok-"));
+
+  try {
+    await mkdir(join(root, ".grok"), { recursive: true });
+    await writeFile(join(root, ".grok/config.toml"), "# Grok project config\n", "utf8");
+    await initializeProject({ projectRoot: root });
+
+    assert.match(await readFile(join(root, "AGENTS.md"), "utf8"), /code-helper:start/);
+    assert.match(
+      await readFile(join(root, ".grok/skills/code-helper-memory-tuning/SKILL.md"), "utf8"),
+      /name: code-helper-memory-tuning/
+    );
+    await assert.rejects(() => stat(join(root, ".agents/skills")), /ENOENT/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Codex-only 项目新增 .grok 资产后 init 会保留 Codex 并启用 Grok", async () => {
+  // 已有 Codex 状态只能消解 AGENTS.md 的归属，不能覆盖后续出现的独立 `.grok` 证据。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-init-codex-add-grok-"));
+
+  try {
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: ["codex"] });
+    await mkdir(join(root, ".grok"), { recursive: true });
+    await writeFile(join(root, ".grok/config.toml"), "# Grok Build project\n", "utf8");
+
+    await initializeProject({ projectRoot: root });
+
+    assert.match(
+      await readFile(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"), "utf8"),
+      /name: code-helper-memory-tuning/
+    );
+    assert.match(
+      await readFile(join(root, ".grok/skills/code-helper-memory-tuning/SKILL.md"), "utf8"),
+      /name: code-helper-memory-tuning/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("initializeProject 会自动维护已有 Copilot instructions", async () => {
   // 已有 GitHub Copilot 入口时，init 应自动识别目标并只维护受控区块。
   const root = await mkdtemp(join(tmpdir(), "code-helper-init-existing-copilot-"));
@@ -392,8 +486,8 @@ test("initializeProject 会自动维护已有 Copilot instructions", async () =>
   }
 });
 
-test("code-helper init all 会补齐三类 agent 入口", async () => {
-  // 显式选择 all 时，Codex、Claude Code 和 GitHub Copilot 入口都必须被维护。
+test("code-helper init all 会补齐四类 agent 资产", async () => {
+  // 显式选择 all 时，三个入口及 Grok Build 原生 Skills 都必须被维护。
   const root = await mkdtemp(join(tmpdir(), "code-helper-init-all-"));
 
   try {
@@ -402,11 +496,13 @@ test("code-helper init all 会补齐三类 agent 入口", async () => {
     const agents = await readFile(join(root, "AGENTS.md"), "utf8");
     const claude = await readFile(join(root, "CLAUDE.md"), "utf8");
     const copilot = await readFile(join(root, ".github/copilot-instructions.md"), "utf8");
+    const grokSkill = await readFile(join(root, ".grok/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
 
     assert.equal(result.exitCode, 0);
     assert.match(agents, /code-helper:start/);
     assert.match(claude, /code-helper:start/);
     assert.match(copilot, /code-helper:start/);
+    assert.match(grokSkill, /name: code-helper-memory-tuning/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -591,6 +687,60 @@ test("updateProject 刷新已有 Codex skills 且不创建未使用 agent 入口
     await assert.rejects(
       () => stat(join(root, ".github/copilot-instructions.md")),
       /ENOENT/
+    );
+    await assert.rejects(() => stat(join(root, ".grok/skills")), /ENOENT/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("updateProject 只刷新已注册 Grok Skills，不因空 .grok 资产自动开启", async () => {
+  // update 必须以现有受控注册为准；仅有用户自己的 `.grok` 配置时不能静默创建 code-helper Skills。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-update-grok-"));
+
+  try {
+    await mkdir(join(root, ".grok"), { recursive: true });
+    await writeFile(join(root, ".grok/config.toml"), "# user config\n", "utf8");
+    await updateProject(root);
+    await assert.rejects(
+      () => stat(join(root, ".grok/skills/code-helper-memory-tuning/SKILL.md")),
+      /ENOENT/u
+    );
+
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: ["grok"] });
+    // 删除整个物理目录，确认 update 仍能依据 state 中的受控注册恢复 Grok，而不是改猜 Codex。
+    await rm(join(root, ".grok/skills"), { recursive: true, force: true });
+    const result = await updateProject(root);
+
+    assert.ok(result.operations.some((operation) => operation.message.includes("已注册 Grok Build 项目级 skill")));
+    assert.match(
+      await readFile(join(root, ".grok/skills/code-helper-memory-tuning/SKILL.md"), "utf8"),
+      /name: code-helper-memory-tuning/
+    );
+    await assert.rejects(() => stat(join(root, ".agents/skills")), /ENOENT/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("updateProject 保留 Codex 与 Grok Build 的共享入口双目标", async () => {
+  // 共享 AGENTS.md 不能把已明确注册的双目标收窄成单一目标。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-update-codex-grok-"));
+
+  try {
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: ["codex", "grok"] });
+    await writeFile(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"), "old codex", "utf8");
+    await writeFile(join(root, ".grok/skills/code-helper-memory-tuning/SKILL.md"), "old grok", "utf8");
+
+    await updateProject(root);
+
+    assert.match(
+      await readFile(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"), "utf8"),
+      /name: code-helper-memory-tuning/
+    );
+    assert.match(
+      await readFile(join(root, ".grok/skills/code-helper-memory-tuning/SKILL.md"), "utf8"),
+      /name: code-helper-memory-tuning/
     );
   } finally {
     await rm(root, { recursive: true, force: true });

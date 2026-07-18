@@ -11,6 +11,7 @@ import {
 } from "./assets.js";
 import {
   applyExistingEntryFiles,
+  disambiguateSharedAgentsTargets,
   detectEntryFiles,
   installEntryDocuments
 } from "./entries.js";
@@ -18,6 +19,7 @@ import { migrateLegacyAgentWorkspace } from "./migrations.js";
 import {
   installProjectAgentHooks,
   installProjectSkillRegistrations,
+  listKnownSkillRegistrationTargets,
   resolveAgentHookTargets,
   updateExistingHooks,
   updateExistingProjectSkillRegistrations
@@ -43,13 +45,20 @@ export async function initializeProject(options: InitializeOptions): Promise<Ini
 
   const config = await loadConfig(options.projectRoot);
   const operations: OperationResult[] = [];
-  const skillRegistrationTargets = options.skillRegistrationTargets
+  const inferredSkillRegistrationTargets = options.skillRegistrationTargets
     ?? await resolveSkillRegistrationTargets(options.projectRoot);
+  // 再次 init 时优先延续受控注册的共享入口目标，防止 Grok-only 项目因 AGENTS.md 被扩展为 Codex。
+  const skillRegistrationTargets = options.skillRegistrationTargets === undefined
+    ? disambiguateSharedAgentsTargets(
+      inferredSkillRegistrationTargets,
+      await listKnownSkillRegistrationTargets(options.projectRoot)
+    )
+    : inferredSkillRegistrationTargets;
   const agentHookTargets = resolveAgentHookTargets(skillRegistrationTargets);
 
   await detectEntryFiles(options.projectRoot, config, skillRegistrationTargets);
 
-  // 首次 init 且存在可装 Agent hooks 的目标（codex/claudecode）时默认打开开关并安装；
+  // 首次 init 且存在可装 Agent hooks 的目标（codex/claudecode）时默认打开开关并安装；Grok Build 本轮不安装 Hook。
   // 已有配置则尊重用户对 agentHooks 的开关（关闭后再次 init 不会强制重开）。
   // `hooks install` CLI 仍可单独安装并 setFeatureEnabled(true)，不依赖此处逻辑。
   if (agentHookTargets.length > 0 && !hadExistingConfig) {

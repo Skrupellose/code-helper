@@ -4,6 +4,7 @@ import { documentArchiveSkillTemplate } from "./skills/document-archive.js";
 import { manualTestWorkbenchSkillTemplate } from "./skills/manual-test-workbench.js";
 import { memoryTuningSkillTemplate } from "./skills/memory-tuning.js";
 import { planWorkbenchSkillTemplate } from "./skills/plan-workbench.js";
+import { reviewFixSkillTemplate } from "./skills/review-fix.js";
 import type { SkillTemplate } from "./skills/types.js";
 
 /**
@@ -19,6 +20,7 @@ const CODE_HELPER_SKILL_MANIFEST: readonly Readonly<SkillTemplate>[] = Object.fr
     memoryTuningSkillTemplate,
     planWorkbenchSkillTemplate,
     manualTestWorkbenchSkillTemplate,
+    reviewFixSkillTemplate,
     documentArchiveSkillTemplate,
     completionReviewSkillTemplate
   ].map((skill) => Object.freeze({ ...skill }))

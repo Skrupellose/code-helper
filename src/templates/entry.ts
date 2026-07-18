@@ -7,6 +7,7 @@ import type { CodeHelperConfig } from "../types.js";
 export function renderEntryBlock(config: CodeHelperConfig): string {
   const enabledRules = [
     "- Agent 协作规范：开始新需求、迁移、重构或反馈修复时，读取 `code-helper-docs/user-rules/Agent协作规范.md`；主会话只做协调、分配、审阅和同步，具体执行任务必须交给子代理；被明确派发的执行子代理直接完成任务，不再二次转派。",
+    `- Git 提交信息格式规范：准备提交、整理提交历史、生成版本发布提交或执行 revert 时，读取 \`${config.directories.userRules}/Git提交信息格式规范.md\`；scope 必填。`,
     config.features.memoryTuning.enabled
       ? `- 项目记忆规则优化：整理或更新 \`AGENTS.md\` / \`CLAUDE.md\` / \`.github/copilot-instructions.md\` 时，读取 \`${config.directories.userRules}/项目记忆规则优化.md\`。`
       : undefined,
@@ -22,6 +23,9 @@ export function renderEntryBlock(config: CodeHelperConfig): string {
     config.features.testingPolicy.enabled
       ? "- 手工测试生成：需要生成验收清单、页面/可视化/浏览器链路或回归测试步骤时，使用 `code-helper-manual-test-workbench`，并把完整步骤写入 result-doc 下的 `手工测试.md`。"
       : undefined,
+    config.features.skillRegistration.enabled
+      ? "- 代码审查与修复：要求 review、代码审查、检查最近改动、按 findings 修复或复审时，使用 `code-helper-review-fix`；默认只读审查，只有用户明确授权后才修改。"
+      : undefined,
     config.features.documentArchive.enabled
       ? `- 文档归档：功能完成或手动移动到 archive 后，任务视为已结束，读取 \`${config.directories.userRules}/文档归档规范.md\`。`
       : undefined,
@@ -35,7 +39,7 @@ export function renderEntryBlock(config: CodeHelperConfig): string {
       ? "- Agent hooks：需要在 agent 生命周期中提醒完成检查时，参考 `.code-helper/hooks/` 下的 agent hook 模板。"
       : undefined,
     config.features.skillRegistration.enabled
-      ? "- Skills 管理：需要让 Codex、Claude Code 或 GitHub Copilot 在当前项目自动发现 code-helper skills 时，执行 `npx @skrupellose/code-helper skills register`。"
+      ? "- Skills 管理：需要让 Codex、Claude Code、GitHub Copilot 或 Grok Build 在当前项目自动发现 code-helper skills 时，执行 `npx @skrupellose/code-helper skills register`。"
       : undefined
   ].filter((line): line is string => line !== undefined);
 

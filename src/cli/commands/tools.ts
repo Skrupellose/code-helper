@@ -257,7 +257,7 @@ function printNoInferredSkillTargets(projectRoot: string, actionLabel: string): 
     {
       path: projectRoot,
       action: "skipped",
-      message: `未识别到明确的 agent 工具，已跳过项目级 skills ${actionLabel}；请显式传入 codex、claudecode、githubcopilot 或 all。`
+      message: `未识别到明确的 agent 工具，已跳过项目级 skills ${actionLabel}；请显式传入 codex、claudecode、githubcopilot、grok 或 all。`
     }
   ]);
 }

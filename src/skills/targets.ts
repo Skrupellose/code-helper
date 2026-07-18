@@ -5,9 +5,9 @@ import { directoryExists } from "./shared.js";
 
 /**
  * 当前支持的项目级 skill 注册目标。
- * codex 写入 `.agents/skills`，claudecode 写入 `.claude/skills`，githubcopilot 写入 `.github/skills`。
+ * codex 写入 `.agents/skills`，claudecode 写入 `.claude/skills`，githubcopilot 写入 `.github/skills`，grok 写入 `.grok/skills`。
  */
-export type SkillRegistrationTarget = "codex" | "claudecode" | "githubcopilot";
+export type SkillRegistrationTarget = "codex" | "claudecode" | "githubcopilot" | "grok";
 
 /**
  * 所有支持的注册目标。
@@ -16,7 +16,8 @@ export type SkillRegistrationTarget = "codex" | "claudecode" | "githubcopilot";
 export const ALL_SKILL_REGISTRATION_TARGETS: SkillRegistrationTarget[] = [
   "codex",
   "claudecode",
-  "githubcopilot"
+  "githubcopilot",
+  "grok"
 ];
 
 /**
@@ -36,6 +37,12 @@ const CLAUDE_CODE_PROJECT_SKILLS_DIRECTORY = ".claude/skills";
  * 该目录遵循 GitHub 当前 skills 目录约定，只在当前仓库内生效。
  */
 const GITHUB_COPILOT_PROJECT_SKILLS_DIRECTORY = ".github/skills";
+
+/**
+ * Grok Build 项目级 Skills 根目录。
+ * Grok Build 也兼容读取 Claude Code 资产，但 code-helper 使用原生目录保持显式目标可独立管理。
+ */
+const GROK_PROJECT_SKILLS_DIRECTORY = ".grok/skills";
 
 /**
  * 返回当前支持的项目级 skills 注册目标。
@@ -62,11 +69,15 @@ export function parseSkillRegistrationTargets(value: string | undefined): SkillR
     return ["githubcopilot"];
   }
 
+  if (value === "grok" || value === "grok-build") {
+    return ["grok"];
+  }
+
   if (value === "all") {
     return [...ALL_SKILL_REGISTRATION_TARGETS];
   }
 
-  throw new Error(`不支持的 skills 注册目标：${value}。当前支持 codex、claudecode、githubcopilot 或 all。`);
+  throw new Error(`不支持的 skills 注册目标：${value}。当前支持 codex、claudecode、githubcopilot、grok 或 all。`);
 }
 
 /**
@@ -79,6 +90,7 @@ export async function resolveSkillRegistrationTargets(projectRoot: string): Prom
   const copilotInstructionsExists =
     (await readTextIfExists(projectPath(projectRoot, ".github/copilot-instructions.md"))) !== undefined;
   const copilotSkillsExists = await directoryExists(projectPath(projectRoot, ".github/skills"));
+  const grokAssetsExist = await directoryExists(projectPath(projectRoot, ".grok"));
   const targets: SkillRegistrationTarget[] = [];
 
   if (agentsExists) {
@@ -93,6 +105,11 @@ export async function resolveSkillRegistrationTargets(projectRoot: string): Prom
     targets.push("githubcopilot");
   }
 
+  // AGENTS.md 同时被 Codex 和 Grok Build 读取，不能仅凭该入口静默启用 Grok；只有 `.grok` 资产才作为 Grok 推断证据。
+  if (grokAssetsExist) {
+    targets.push("grok");
+  }
+
   return targets;
 }
 
@@ -101,8 +118,8 @@ export async function resolveSkillRegistrationTargets(projectRoot: string): Prom
  * 这个函数让公开 API 即使传入非字面量字符串也能得到明确错误。
  */
 export function assertSupportedTarget(target: SkillRegistrationTarget): void {
-  if (target !== "codex" && target !== "claudecode" && target !== "githubcopilot") {
-    throw new Error(`不支持的 skills 注册目标：${target}。当前支持 codex、claudecode 或 githubcopilot。`);
+  if (target !== "codex" && target !== "claudecode" && target !== "githubcopilot" && target !== "grok") {
+    throw new Error(`不支持的 skills 注册目标：${target}。当前支持 codex、claudecode、githubcopilot 或 grok。`);
   }
 }
 
@@ -118,7 +135,11 @@ export function getProjectSkillsDirectory(target: SkillRegistrationTarget): stri
     return CLAUDE_CODE_PROJECT_SKILLS_DIRECTORY;
   }
 
-  return GITHUB_COPILOT_PROJECT_SKILLS_DIRECTORY;
+  if (target === "githubcopilot") {
+    return GITHUB_COPILOT_PROJECT_SKILLS_DIRECTORY;
+  }
+
+  return GROK_PROJECT_SKILLS_DIRECTORY;
 }
 
 /**
@@ -140,5 +161,9 @@ export function formatSkillRegistrationTargetName(target: SkillRegistrationTarge
     return "Claude Code";
   }
 
-  return "GitHub Copilot";
+  if (target === "githubcopilot") {
+    return "GitHub Copilot";
+  }
+
+  return "Grok Build";
 }
