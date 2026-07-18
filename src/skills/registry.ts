@@ -195,7 +195,7 @@ export async function registerProjectSkillsForTargets(
 
 /**
  * 注册 code-helper 内置 skills 到单个 agent 目标。
- * 保留原公共 API，并复用批量事务保证单目标六个内置 Skills 也具备原子性。
+ * 保留原公共 API，并复用批量事务保证单目标全部内置 Skills 也具备原子性。
  */
 export async function registerProjectSkills(
   projectRoot: string,

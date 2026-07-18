@@ -48,7 +48,7 @@ export async function runInit(projectRoot: string, args: string[] = [], options:
 
   if (positionalArgs.length > 1) {
     console.error(
-      "init 只接受一个可选 agent 目标，以及可选 --refresh-rules。用法：code-helper init [all|codex|claudecode|githubcopilot] [--refresh-rules]"
+      "init 只接受一个可选 agent 目标，以及可选 --refresh-rules。用法：code-helper init [all|codex|claudecode|githubcopilot|grok] [--refresh-rules]"
     );
     return 1;
   }
@@ -145,7 +145,7 @@ export async function runNpmScripts(projectRoot: string, args: string[] = []): P
 /**
  * 本仓库开发后的本地刷新命令。
  * 它先用空目标刷新受控入口、规则模板和 `.code-helper/skills`，避免顺带创建其他 agent 入口或安装 hooks；
- * 再显式注册全部项目级 skills，保持 Codex、Claude Code 和 GitHub Copilot 看到的 skill 内容一致。
+ * 再显式注册全部项目级 skills，保持 Codex、Claude Code、GitHub Copilot 和 Grok Build 看到的 skill 内容一致。
  */
 export async function runSyncLocal(projectRoot: string, args: string[] = []): Promise<number> {
   if (args.length > 0) {
@@ -299,8 +299,8 @@ async function resolveInitSkillRegistrationTargets(projectRoot: string): Promise
     }
   }
 
-  console.log("未发现 AGENTS.md、CLAUDE.md 或 GitHub Copilot 入口；非交互模式不会默认全量安装项目级 skills 或 Agent hooks。");
-  console.log("如需应用能力，请改用 `code-helper init codex|claudecode|githubcopilot|all`，或先创建对应入口文件后再运行 init。");
+  console.log("未发现 AGENTS.md、CLAUDE.md、GitHub Copilot 入口或 .grok 资产；非交互模式不会默认全量安装项目级 skills 或 Agent hooks。");
+  console.log("如需应用能力，请改用 `code-helper init codex|claudecode|githubcopilot|grok|all`，或先创建对应入口文件后再运行 init。");
   return [];
 }
 
@@ -316,9 +316,10 @@ async function askTextInitTargetMenu(
     console.log("1. Codex");
     console.log("2. Claude Code");
     console.log("3. GitHub Copilot");
+    console.log("4. Grok Build");
     console.log("A. 全部");
     console.log("0. 取消选择并跳过项目级 skills 与 Agent hooks");
-    console.log("可输入多个编号或名称，例如：1,2 或 codex,claudecode。");
+    console.log("可输入多个编号或名称，例如：1,4 或 codex,grok。");
 
     const answer = await askQuestionOrDefault(rl, "请选择 agent 工具：", INIT_TARGET_TEXT_MENU_CLOSED);
 
@@ -440,6 +441,11 @@ export function parseInitTargetSelection(value: string): SkillRegistrationTarget
 
     if (token === "3") {
       targets.add("githubcopilot");
+      continue;
+    }
+
+    if (token === "4") {
+      targets.add("grok");
       continue;
     }
 

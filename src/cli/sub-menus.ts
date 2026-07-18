@@ -28,6 +28,8 @@ export const SKILL_MENU_ITEMS: SubMenuItem[] = [
   { value: "8", label: "取消注册全部" },
   { value: "9", label: "Skills 质量检查" },
   { value: "10", label: "Skills 建议分析" },
+  // 新目标追加新编号，避免改变既有脚本或用户习惯中的历史编号。
+  { value: "11", label: "仅注册 Grok Build" },
   { value: "0", label: "返回" }
 ];
 

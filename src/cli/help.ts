@@ -15,11 +15,11 @@ export function printFeatureHelp(): void {
 export function printSkillsHelp(): void {
   console.log("用法：");
   console.log("  code-helper skills list");
-  console.log("  code-helper skills register [all|codex|claudecode|githubcopilot]");
-  console.log("  code-helper skills unregister [all|codex|claudecode|githubcopilot]");
+  console.log("  code-helper skills register [all|codex|claudecode|githubcopilot|grok]");
+  console.log("  code-helper skills unregister [all|codex|claudecode|githubcopilot|grok]");
   console.log("  code-helper skills doctor");
   console.log("  code-helper skills audit");
-  console.log("说明：register/unregister 不带 target 时按当前项目已有 AGENTS.md / CLAUDE.md / GitHub Copilot 入口自动选择目标；无法识别时会跳过，请显式传 target。");
+  console.log("说明：register/unregister 不带 target 时按当前项目已有 AGENTS.md / CLAUDE.md / GitHub Copilot 入口或 .grok 资产自动选择目标；仅有 AGENTS.md 时不会额外推断 Grok Build，无法识别时请显式传 target。");
 }
 
 /**
@@ -43,7 +43,7 @@ export function printHelp(): void {
 用法：
   code-helper                         打开交互菜单
   code-helper init [target] [--refresh-rules]
-                                      初始化项目规则和工作区，可指定 all|codex|claudecode|githubcopilot；
+                                      初始化项目规则和工作区，可指定 all|codex|claudecode|githubcopilot|grok；
                                       --refresh-rules 强制覆盖内置规则全文（危险，会丢掉用户改动）
   code-helper update [--refresh-rules]
                                       按当前项目已启用能力刷新 code-helper 本地资产；

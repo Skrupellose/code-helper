@@ -11,6 +11,7 @@ import {
   registerProjectSkillsForTargets,
   type SkillRegistrationTarget
 } from "../skills.js";
+import { readManagedSkillRecords } from "../skills/state.js";
 import type { CodeHelperConfig, OperationResult } from "../types.js";
 import { getTargetsFromExistingEntryFiles } from "./entries.js";
 import { statIfExists } from "./migrations.js";
@@ -23,9 +24,9 @@ export async function updateExistingProjectSkillRegistrations(
   projectRoot: string,
   config: CodeHelperConfig
 ): Promise<OperationResult[]> {
-  const registeredTargets = await listTargetsWithRegisteredCodeHelperSkills(projectRoot);
-  const inferredTargets = getTargetsFromExistingEntryFiles(config);
-  const targets = new Set<SkillRegistrationTarget>(registeredTargets);
+  const knownTargets = await listKnownSkillRegistrationTargets(projectRoot);
+  const inferredTargets = getTargetsFromExistingEntryFiles(config, knownTargets);
+  const targets = new Set<SkillRegistrationTarget>(knownTargets);
 
   if (config.features.skillRegistration.enabled) {
     for (const target of inferredTargets) {
@@ -129,13 +130,15 @@ async function installGitHookIfRepositoryExists(
 /**
  * 找出当前项目已经存在 code-helper 受控 skills 的目标。
  */
-async function listTargetsWithRegisteredCodeHelperSkills(projectRoot: string): Promise<SkillRegistrationTarget[]> {
+export async function listKnownSkillRegistrationTargets(projectRoot: string): Promise<SkillRegistrationTarget[]> {
   const targets: SkillRegistrationTarget[] = [];
+  const managedRecords = await readManagedSkillRecords(projectRoot);
 
   for (const target of listSupportedSkillRegistrationTargets()) {
     const statuses = await listProjectSkillRegistrations(projectRoot, target);
+    const hasManagedRecords = Object.keys(managedRecords[target] ?? {}).length > 0;
 
-    if (statuses.some((status) => status.registered)) {
+    if (hasManagedRecords || statuses.some((status) => status.registered)) {
       targets.push(target);
     }
   }
@@ -159,7 +162,7 @@ export async function installProjectSkillRegistrations(
       {
         path: projectPath(projectRoot, `${config.directories.workspace}/skills`),
         action: "skipped",
-        message: "未识别到明确的 agent 工具，已跳过项目级 skills 注册；请在交互式 init 中选择目标，或执行 `code-helper init codex|claudecode|githubcopilot|all`。"
+        message: "未识别到明确的 agent 工具，已跳过项目级 skills 注册；请在交互式 init 中选择目标，或执行 `code-helper init codex|claudecode|githubcopilot|grok|all`。"
       }
     ];
   }
@@ -180,7 +183,7 @@ export async function installProjectSkillRegistrations(
 /**
  * 根据 init 确定的同一批 agent 目标安装对应 Agent hooks。
  * 与 skills 对齐：关闭 agentHooks 开关时只展示跳过结果，不写入配置、不强制重新打开开关。
- * 当前只有 Codex 和 Claude Code 有项目级 Agent hook 配置；GitHub Copilot skills 不触发 Git hook 或其他 hook。
+ * 当前只有 Codex 和 Claude Code 有项目级 Agent hook 配置；GitHub Copilot 与 Grok Build skills 不触发 Git hook 或其他 hook。
  * 注意：本函数只在 init 路径使用；`hooks install` 命令路径由 CLI 先安装再 setFeatureEnabled，可直接应用能力。
  */
 export async function installProjectAgentHooks(
@@ -236,7 +239,7 @@ export async function installProjectAgentHooks(
 
 /**
  * 从 skills 目标映射出支持 Agent hook 的目标。
- * GitHub Copilot 只支持项目级 skills 注册，不在这里映射为 Git hook。
+ * GitHub Copilot 与 Grok Build 本轮只支持项目级 skills 注册，不在这里映射为 Git hook。
  */
 export function resolveAgentHookTargets(targets: SkillRegistrationTarget[]): Array<Exclude<HookInstallTarget, "git">> {
   return targets.filter((target): target is Exclude<HookInstallTarget, "git"> =>
