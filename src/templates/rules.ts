@@ -235,6 +235,176 @@ ${entryFiles.map((file) => `- ${file}`).join("\n")}
 18. 如果“必须确认事项”包含更新长期记忆、归档文档或选择下一个任务，agent 必须在最终回复中明确提出对应问题；用户确认前不得自动执行。`
     },
     {
+      fileName: "Git提交信息格式规范.md",
+      content: `# Git 提交信息格式规范
+
+## 功能描述
+
+统一项目 Git 提交信息格式，使提交历史便于阅读、检索、审查、回滚和版本发布，并为后续接入提交校验或自动生成变更日志保留兼容基础。
+
+## 调用时机
+
+- 准备执行 git commit 前
+- 为当前改动拟定或审查提交信息时
+- 拆分、合并或整理多个提交时
+- 提交版本号变更或准备版本发布时
+- 创建 breaking change、关联 issue 或回滚提交时
+- 审查 PR 的提交历史是否清晰时
+
+## 调用入口文件
+
+${entryFiles.map((file) => `- ${file}`).join("\n")}
+
+## 规则
+
+### 1. 基本格式
+
+普通提交统一使用：
+
+\`<type>(<scope>): <subject>\`
+
+Breaking change 提交统一使用：
+
+\`<type>(<scope>)!: <subject>\`
+
+1. type 必填，使用小写英文。
+2. scope 必填，使用小写英文或 kebab-case，表示主要影响领域。
+3. 普通提交不能带感叹号；breaking change 必须在 type 和 scope 后增加感叹号。
+4. subject 必填，默认使用简洁中文；命令、API、包名和平台名保留原始英文。
+5. 冒号后必须有一个半角空格。
+6. type 和 scope 使用英文，subject 和 body 默认使用中文。
+
+### 2. Type 列表
+
+| Type | 使用场景 |
+|---|---|
+| feat | 新增用户可感知的功能或能力 |
+| fix | 修复缺陷、回归或错误行为 |
+| docs | 只修改 README、指南或规则文档 |
+| refactor | 不改变外部行为的代码重构 |
+| test | 新增、修复或调整测试 |
+| perf | 性能优化 |
+| build | 构建脚本、打包配置或依赖构建方式变更 |
+| ci | 持续集成或发布流水线配置变更 |
+| chore | 版本号、依赖维护、仓库配置等非功能变更 |
+| style | 仅格式、缩进或无行为影响的代码样式调整 |
+| revert | 手工组织的回滚提交 |
+
+版本发布不新增 release type，统一使用 \`chore(release)\`。
+
+### 3. Scope 规则
+
+1. scope 必填，必须对应本次提交的主要影响领域。
+2. 推荐 scope：cli、init、skills、hooks、checks、templates、docs、readme、ci、release、deps。
+3. scope 使用小写英文或 kebab-case，不使用文件路径、中文、逗号拼接或临时任务名。
+4. 跨多个领域时选择最主要且可稳定识别的领域；如果无法确定，应先拆分提交，不能省略 scope。
+5. 新 scope 应对应稳定模块或长期领域，不能为单次提交随意造词。
+
+### 4. Subject 规则
+
+1. 默认使用中文，采用“新增、修复、优化、调整、重构、更新、移除、发布”等直接表达。
+2. 一句话说明结果，避免“处理问题”“更新代码”“review fix”等模糊描述。
+3. 不以句号、感叹号或省略号结尾。
+4. 建议不超过 50 个字符，最多不超过 72 个字符。
+5. 不写文件清单，不重复堆叠无意义信息。
+6. 一个提交只描述一个可独立理解、独立验证和独立回滚的逻辑变更。
+
+示例：
+
+- \`feat(skills): 支持 Grok Build 原生 Skills\`
+- \`fix(cli): 修复取消菜单后进程未退出\`
+- \`docs(readme): 补充跨平台安装说明\`
+
+### 5. Body 规则
+
+简单且可从 subject 完整理解的提交可以省略 body。以下情况必须写 body：
+
+- 跨模块修改
+- 修复原因不直观
+- 存在兼容性或迁移边界
+- 修改发布、回滚、安全或跨平台逻辑
+- breaking change
+- subject 无法说明关键设计取舍
+
+subject 与 body 之间空一行。body 优先说明为什么修改、采用什么方案、重要边界和验证方式；不要直接复制 git diff 文件列表，必要时使用简短项目符号。
+
+### 6. Footer 与 Issue
+
+任何 footer 前都必须与上一段空一行：有 body 时与 body 空一行，没有 body 时与 subject 空一行。关联 issue 时使用：
+
+- \`Refs #123\`：仅关联
+- \`Closes #123\`：合并后应关闭
+- \`Fixes #123\`：明确修复该 issue
+
+没有对应 issue 时不得编造编号。多人协作可保留 Git 标准 footer：\`Co-authored-by: Name <email>\`。
+
+### 7. Breaking Change
+
+破坏现有 CLI 参数、公共 API、配置结构、生成目录、持久化状态或兼容行为时，必须同时：
+
+1. 在 type 和 scope 后增加感叹号。
+2. 编写独立 body，说明变更原因和主要行为变化。
+3. 在 footer 中增加 \`BREAKING CHANGE:\`。
+4. 在 footer 说明受影响用户、迁移方式和兼容边界。
+
+Breaking change 的 body 必填，\`BREAKING CHANGE:\` footer 不能替代 body。即使项目仍处于 0.x，也不能省略 breaking change 标识。
+
+示例：
+
+    feat(cli)!: 调整 init 的默认目标推断
+
+    无明确入口的新项目不再自动选择 agent，避免静默安装非预期资产。
+
+    BREAKING CHANGE: 新项目必须显式选择 agent 目标；自动化脚本应传入明确目标。
+
+### 8. 版本发布提交
+
+版本提交统一使用：
+
+\`chore(release): 发布 <version>\`
+
+版本提交原则上只包含 package.json、锁文件中的对应版本，以及明确属于该版本的发布说明或元数据。功能实现和缺陷修复应先作为独立提交完成，不与版本号提交混合。
+
+body 可以记录关键验证命令和结论。发布 workflow 不自动修改版本号或创建 tag 时，提交信息不能暗示尚未完成的远端发布已经成功。
+
+### 9. Merge 提交
+
+1. 托管平台自动生成的 merge commit 可以保留平台默认格式。
+2. 不手工创建无上下文的 Merge branch 提交。
+3. 使用 squash merge 时，最终 subject 必须符合本规范并包含必填 scope。
+4. PR 包含多个独立逻辑主题时，应在合并前整理提交，不依赖 merge message 掩盖混乱历史。
+
+### 10. Revert 提交
+
+优先使用 \`git revert\`，保留 Git 自动生成的 \`Revert "<原提交 subject>"\` 和 \`This reverts commit <sha>.\`，不要手工删除原提交 SHA。
+
+若必须手工组织回滚提交，使用 \`revert(<scope>): 撤销<原变更摘要>\`，并在 footer 中记录 \`Reverts: <commit-sha>\`。
+
+### 11. 提交拆分
+
+1. 不把功能、无关修复、文档整理和版本发布塞入同一个提交。
+2. 能够独立验证和独立回滚的变更，应拆为独立提交。
+3. 测试与其直接验证的实现通常放在同一提交。
+4. 纯文档补充可独立使用 docs type。
+5. 当前工作树包含多个逻辑主题时，提交前必须按主题暂存和复核。
+
+### 12. 自动校验边界
+
+1. 项目未引入 commitlint、Husky 或 conventional-changelog 时，本规范作为人工和 agent 提交前检查依据，不假设自动校验已经存在。
+2. 后续引入自动校验时，优先用 commitlint 校验 header 结构、type 和必填 scope。
+3. 提交格式校验使用 commit-msg hook，不复用功能完成检查或其它 Git hook 职责。
+4. CI 可以校验 PR 提交或 squash 标题，但不得自动重写用户提交。
+5. 自动规则必须与本专题文档保持一致。
+
+### 13. 反例
+
+- \`更新代码\`：缺少 type 和 scope，无法判断改动目的。
+- \`fix: 修复版本缓存\`：缺少必填 scope。
+- \`feat(cli,skills): 增加功能。\`：scope 拼接多个领域，subject 以句号结尾。
+- \`Release 0.1.8\`：版本提交格式不统一。
+- \`feat(cli): 更新功能和修复问题\`：主题模糊且混合多个逻辑变更。`
+    },
+    {
       fileName: "Agent协作规范.md",
       content: `# Agent 协作规范
 

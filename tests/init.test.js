@@ -175,6 +175,10 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
     const reviewFixSkill = await readFile(join(root, ".agents/skills/code-helper-review-fix/SKILL.md"), "utf8");
     const codexHook = await readFile(join(root, ".codex/hooks.json"), "utf8");
     const managedBlock = extractManagedBlock(agents);
+    const gitCommitRule = await readFile(
+      join(root, "code-helper-docs/user-rules/Git提交信息格式规范.md"),
+      "utf8"
+    );
 
     assert.ok(result.operations.some((operation) => operation.path.endsWith("项目记忆规则优化.md")));
     assert.match(agents, /用户已有规则/);
@@ -186,10 +190,13 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
     assert.match(managedBlock, /code-helper-manual-test-workbench/);
     assert.match(managedBlock, /代码审查与修复/);
     assert.match(managedBlock, /code-helper-review-fix/);
+    assert.match(managedBlock, /Git 提交信息格式规范/u);
+    assert.match(managedBlock, /Git提交信息格式规范\.md/u);
     assert.match(config, /"gitHooks":/);
     assert.match(config, /"agentHooks": \{\n      "enabled": true\n    \}/);
     assert.match(codexSkill, /name: code-helper-memory-tuning/);
     assert.match(reviewFixSkill, /name: code-helper-review-fix/);
+    assert.match(gitCommitRule, /scope 必填/u);
     assert.match(codexHook, /agent-finish-check\.mjs/);
     await assert.rejects(
       () => stat(join(root, ".git/hooks/pre-commit")),

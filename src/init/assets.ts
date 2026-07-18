@@ -22,8 +22,8 @@ import { renderEntryFileList } from "./entries.js";
  */
 export interface InstallRuleTemplatesOptions {
   /**
-   * 为 true 时强制用当前内置模板整文件覆盖（仅内置模板文件名）。
-   * 危险：会丢弃用户在这些文件上的自定义改动；message 必须写清。
+   * 为 true 时强制用当前内置模板整文件覆盖已证明归属的受控规则。
+   * 危险：会丢弃这些受控规则上的用户自定义改动；未知同名文件必须保留并提示。
    */
   refreshRules?: boolean;
 }
@@ -174,7 +174,8 @@ export async function createDirectories(
  * 1. 文件不存在 → 写入完整模板（created）
  * 2. 文件是未改动的内置规则（忽略「调用入口文件」差异后与模板正文一致）→ 整文件写为当前模板（updated）
  * 3. 用户改过正文 → 只 upsert「调用入口文件」小节，保留用户改动
- * 4. refreshRules / force → 对内置文件名强制整文件覆盖（绝不碰用户自建的其它 md）
+ * 4. refreshRules / force → 只有 state 或已知历史指纹能证明归属时才整文件覆盖
+ * 5. 新增内置规则与未知用户文件同名 → 保留用户文件，不能把“同名”当作所有权证据
  */
 export async function installRuleTemplates(
   projectRoot: string,
@@ -203,9 +204,24 @@ export async function installRuleTemplates(
     }
 
     const nextTemplateContent = ensureTrailingNewline(template.content);
+    const existingFingerprint = createRuleDocumentFingerprint(existing, entrySectionTitle);
+    const persistedFingerprint = persistedFingerprints[template.fileName];
+    const matchesKnownLegacyTemplate =
+      LEGACY_RULE_TEMPLATE_FINGERPRINTS[template.fileName]?.includes(existingFingerprint) === true;
+    const hasPersistedOwnershipRecord = persistedFingerprint !== undefined;
 
-    // 强制刷新：仅覆盖内置模板列表中的同名文件。
+    // 强制刷新也必须先证明文件归属：state 记录证明该路径曾由 code-helper 管理，
+    // 历史指纹则兼容指纹机制上线前的真实内置模板。文件名相同本身不是所有权证据。
     if (forceRefresh) {
+      if (!hasPersistedOwnershipRecord && !matchesKnownLegacyTemplate) {
+        operations.push({
+          path: targetPath,
+          action: "skipped",
+          message: "同名规则缺少受控指纹，强制刷新已跳过并逐字保留现有文件"
+        });
+        continue;
+      }
+
       if (existing === nextTemplateContent || ensureTrailingNewline(existing) === nextTemplateContent) {
         operations.push({
           path: targetPath,
@@ -223,11 +239,6 @@ export async function installRuleTemplates(
       });
       continue;
     }
-
-    const existingFingerprint = createRuleDocumentFingerprint(existing, entrySectionTitle);
-    const persistedFingerprint = persistedFingerprints[template.fileName];
-    const matchesKnownLegacyTemplate =
-      LEGACY_RULE_TEMPLATE_FINGERPRINTS[template.fileName]?.includes(existingFingerprint) === true;
 
     // 磁盘正文匹配当前模板或上次记录的模板指纹时，均可确认用户没有改过正文。
     // 后者是跨版本升级的关键：即使新版模板正文已变化，原样旧模板仍会被安全识别。
@@ -254,10 +265,20 @@ export async function installRuleTemplates(
       continue;
     }
 
-    // 用户改过正文：只同步调用入口小节，绝不覆盖自定义段落。
-    operations.push(
-      await upsertMarkdownSection(targetPath, entrySectionTitle, entrySectionBody, template.content)
+    // 用户改过正文或新增内置规则与未知用户文件同名时，只同步入口小节。
+    // 未知同名文件给出明确提示，避免用户误以为它已被认领为内置规则。
+    const preservedOperation = await upsertMarkdownSection(
+      targetPath,
+      entrySectionTitle,
+      entrySectionBody,
+      template.content
     );
+    operations.push({
+      ...preservedOperation,
+      message: hasPersistedOwnershipRecord
+        ? "已保留用户修改，仅同步调用入口小节"
+        : "同名规则缺少受控指纹，已保留正文并仅同步调用入口小节"
+    });
   }
 
   return operations;
@@ -265,7 +286,8 @@ export async function installRuleTemplates(
 
 /**
  * 仅刷新内置专题规则模板（不触碰用户自建 md）。
- * force=true 时整文件覆盖内置规则；否则对未改动规则做安全刷新，改动过的只更新入口小节。
+ * force=true 时也只整文件覆盖能由 state 或历史指纹证明归属的规则；
+ * 否则对未改动规则做安全刷新，改动过的只更新入口小节。
  */
 export async function refreshRuleTemplates(
   projectRoot: string,
@@ -333,12 +355,34 @@ export async function writeStateFile(projectRoot: string, config: CodeHelperConf
   const targetPath = projectPath(projectRoot, `${config.directories.workspace}/state.json`);
   const packageVersion = await getCurrentPackageVersion();
   const existingState = await readPersistedStateObject(projectRoot, config);
-  const ruleTemplateFingerprints = Object.fromEntries(
-    getRuleTemplates(config).map((template) => [
-      template.fileName,
-      createRuleDocumentFingerprint(template.content)
-    ])
-  );
+  const persistedFingerprints = await readPersistedRuleTemplateFingerprints(projectRoot, config);
+  const ownedRuleTemplateFingerprints: Array<[string, string]> = [];
+
+  // 只为能证明归属的规则续写 state：已有 state、已知历史正文或当前模板正文都可信。
+  // 未知同名用户文件不能因一次 update 就被登记为内置资产，否则后续 force 会错误覆盖。
+  for (const template of getRuleTemplates(config)) {
+    const rulePath = projectPath(projectRoot, join(config.directories.userRules, template.fileName));
+    const existing = await readTextIfExists(rulePath);
+
+    if (existing === undefined) {
+      continue;
+    }
+
+    const existingFingerprint = createRuleDocumentFingerprint(existing);
+    const hasPersistedOwnershipRecord = persistedFingerprints[template.fileName] !== undefined;
+    const matchesKnownLegacyTemplate =
+      LEGACY_RULE_TEMPLATE_FINGERPRINTS[template.fileName]?.includes(existingFingerprint) === true;
+    const matchesCurrentTemplate = isUnmodifiedBuiltinRuleDocument(existing, template.content);
+
+    if (hasPersistedOwnershipRecord || matchesKnownLegacyTemplate || matchesCurrentTemplate) {
+      ownedRuleTemplateFingerprints.push([
+        template.fileName,
+        createRuleDocumentFingerprint(template.content)
+      ]);
+    }
+  }
+
+  const ruleTemplateFingerprints = Object.fromEntries(ownedRuleTemplateFingerprints);
   const state = {
     ...existingState,
     initializedAt: new Date().toISOString(),

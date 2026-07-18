@@ -7,6 +7,7 @@ import type { CodeHelperConfig } from "../types.js";
 export function renderEntryBlock(config: CodeHelperConfig): string {
   const enabledRules = [
     "- Agent 协作规范：开始新需求、迁移、重构或反馈修复时，读取 `code-helper-docs/user-rules/Agent协作规范.md`；主会话只做协调、分配、审阅和同步，具体执行任务必须交给子代理；被明确派发的执行子代理直接完成任务，不再二次转派。",
+    `- Git 提交信息格式规范：准备提交、整理提交历史、生成版本发布提交或执行 revert 时，读取 \`${config.directories.userRules}/Git提交信息格式规范.md\`；scope 必填。`,
     config.features.memoryTuning.enabled
       ? `- 项目记忆规则优化：整理或更新 \`AGENTS.md\` / \`CLAUDE.md\` / \`.github/copilot-instructions.md\` 时，读取 \`${config.directories.userRules}/项目记忆规则优化.md\`。`
       : undefined,
