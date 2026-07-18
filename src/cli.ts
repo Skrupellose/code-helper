@@ -485,6 +485,9 @@ async function runSkillMenu(
     case "10":
       await runMenuAction("Skills 建议分析", () => runSkills(projectRoot, ["audit"]));
       return true;
+    case "11":
+      await runMenuAction("注册 Grok Build 项目级 skills", () => runSkills(projectRoot, ["register", "grok"]));
+      return true;
     case "0":
       console.log("已返回主菜单。");
       return false;

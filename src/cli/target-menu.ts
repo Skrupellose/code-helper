@@ -51,7 +51,7 @@ export async function selectSkillTargetsForMenu(
 
 /**
  * 选择 Agent hooks 应用或取消的 agent 工具目标。
- * GitHub Copilot 没有可安装的 Agent hook，因此只把 Codex 和 Claude Code 列为可选项。
+ * GitHub Copilot 与 Grok Build 本轮没有可安装的 Agent hook，因此只把 Codex 和 Claude Code 列为可选项。
  */
 export async function selectAgentHookTargetsForMenu(
   projectRoot: string,
@@ -62,7 +62,7 @@ export async function selectAgentHookTargetsForMenu(
   const inferredHookTargets = toAgentHookTargets(inferredSkillTargets);
 
   if (inferredSkillTargets.length > 0 && inferredHookTargets.length === 0) {
-    console.log("当前项目只识别到 GitHub Copilot；GitHub Copilot 不支持 Agent hook，请选择 Codex 或 Claude Code。");
+    console.log("当前项目识别到的 agent 工具不支持 code-helper Agent hook，请选择 Codex 或 Claude Code。");
   }
 
   if (canUseInteractiveKeys(input, output)) {
@@ -123,6 +123,11 @@ export function parseSkillTargetMenuSelection(
       continue;
     }
 
+    if (token === "4") {
+      targets.add("grok");
+      continue;
+    }
+
     for (const target of parseSkillRegistrationTargets(token)) {
       targets.add(target);
     }
@@ -133,7 +138,7 @@ export function parseSkillTargetMenuSelection(
 
 /**
  * 解析功能管理中 Agent hook 目标文本。
- * GitHub Copilot 没有 Agent hook 安装位置，因此输入相关别名时直接给出清晰错误。
+ * GitHub Copilot 与 Grok Build 没有 Agent hook 安装位置，因此输入相关别名时直接给出清晰错误。
  */
 export function parseAgentHookTargetMenuSelection(
   value: string,
@@ -169,6 +174,10 @@ export function parseAgentHookTargetMenuSelection(
 
     if (token === "3" || token === "githubcopilot" || token === "github-copilot" || token === "copilot" || token === "github") {
       throw new Error("GitHub Copilot 不支持 Agent hook，请选择 Codex、Claude Code 或全部可用 Agent hooks。");
+    }
+
+    if (token === "4" || token === "grok" || token === "grok-build") {
+      throw new Error("Grok Build Agent hook 不在当前支持范围，请选择 Codex、Claude Code 或全部可用 Agent hooks。");
     }
 
     throw new Error(`不支持的 Agent hook 目标：${token}。当前支持 codex、claudecode 或 all。`);
@@ -211,6 +220,7 @@ function buildSkillTargetSelectOptions(
     { value: "codex", label: "Codex" },
     { value: "claudecode", label: "Claude Code" },
     { value: "githubcopilot", label: "GitHub Copilot" },
+    { value: "grok", label: "Grok Build" },
     { value: "all", label: "全部" },
     { value: "0", label: "返回" }
   );
@@ -220,7 +230,7 @@ function buildSkillTargetSelectOptions(
 
 /**
  * raw mode 菜单中的 Agent hook 目标选项。
- * 默认项只包含支持 Agent hook 的目标，自动忽略 GitHub Copilot。
+ * 默认项只包含支持 Agent hook 的目标，自动忽略 GitHub Copilot 与 Grok Build。
  */
 function buildAgentHookTargetSelectOptions(
   inferredSkillTargets: SkillRegistrationTarget[]
@@ -247,7 +257,7 @@ function buildAgentHookTargetSelectOptions(
 
 /**
  * 非 raw mode 终端中的 Skills 目标菜单。
- * 除数字外也支持输入 codex、claudecode、githubcopilot、all 和 default。
+ * 除数字外也支持输入 codex、claudecode、githubcopilot、grok、all 和 default。
  */
 async function askTextSkillTargetMenu(
   rl: MenuReadline,
@@ -261,16 +271,17 @@ async function askTextSkillTargetMenu(
   console.log("1. Codex");
   console.log("2. Claude Code");
   console.log("3. GitHub Copilot");
+  console.log("4. Grok Build");
   console.log("A. 全部");
   console.log("0. 返回");
-  console.log("可输入编号或名称，例如：1、codex、githubcopilot、all。");
+  console.log("可输入编号或名称，例如：1、codex、grok、all。");
 
   return askQuestionOrDefault(rl, "请选择 agent 工具：", "0");
 }
 
 /**
  * 非 raw mode 终端中的 Agent hook 目标菜单。
- * 菜单不列出 GitHub Copilot，避免用户误以为它支持 Agent hook。
+ * 菜单不列出 GitHub Copilot 与 Grok Build，避免用户误以为它们支持 Agent hook。
  */
 async function askTextAgentHookTargetMenu(
   rl: MenuReadline,
@@ -287,7 +298,7 @@ async function askTextAgentHookTargetMenu(
   console.log("2. Claude Code");
   console.log("A. 全部可用 Agent hooks");
   console.log("0. 返回");
-  console.log("GitHub Copilot 不支持 Agent hook，因此不在这里安装或取消。");
+  console.log("GitHub Copilot 与 Grok Build 不在当前 Agent hook 支持范围，因此不在这里安装或取消。");
   console.log("可输入编号或名称，例如：1、codex、claudecode、all。");
 
   return askQuestionOrDefault(rl, "请选择 agent 工具：", "0");
@@ -343,7 +354,7 @@ function resolveAgentHookTargetMenuAnswer(
 
 /**
  * 从 Skills 目标中过滤出支持 Agent hook 的目标。
- * GitHub Copilot 只支持项目级 Skills，不映射到任何 hook。
+ * GitHub Copilot 与 Grok Build 本轮只支持项目级 Skills，不映射到任何 hook。
  */
 function toAgentHookTargets(
   targets: SkillRegistrationTarget[]

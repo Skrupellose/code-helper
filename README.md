@@ -94,7 +94,7 @@ npx @skrupellose/code-helper@latest update
 | `code-helper-docs/plan-doc/`      | 任务计划文档                |
 | `code-helper-docs/result-doc/`    | 执行记录和手工测试文档           |
 | `code-helper-docs/status-doc/`    | 当前任务状态记录              |
-| `AGENTS.md`                       | Codex 项目入口文档          |
+| `AGENTS.md`                       | Codex / Grok Build 项目入口文档 |
 | `CLAUDE.md`                       | Claude Code 项目入口文档    |
 | `.github/copilot-instructions.md` | GitHub Copilot 项目入口文档 |
 
@@ -131,13 +131,16 @@ npx @skrupellose/code-helper skills register
 npx @skrupellose/code-helper skills register codex
 npx @skrupellose/code-helper skills register claudecode
 npx @skrupellose/code-helper skills register githubcopilot
+npx @skrupellose/code-helper skills register grok
 npx @skrupellose/code-helper hooks install codex
 npx @skrupellose/code-helper hooks install claudecode
 ```
 
-`skills register` 会把 code-helper 的项目级 skills 注册到对应 agent 工具目录。不带 target 时，会按当前项目已有入口文件推断目标；传 `all` 时强制注册 Codex、Claude Code 和 GitHub Copilot 三类目标。
+`skills register` 会把 code-helper 的项目级 skills 注册到对应 agent 工具目录：Codex 使用 `.agents/skills`，Claude Code 使用 `.claude/skills`，GitHub Copilot 使用 `.github/skills`，Grok Build 使用原生 `.grok/skills`。`grok-build` 也可作为 `grok` 的 CLI 别名。
 
-`hooks install` 只安装指定目标的 hook。Git hook 需要显式执行 `hooks install git`，初始化不会自动安装 Git hook。
+不带 target 时，会按当前项目已有资产推断目标。`AGENTS.md` 同时可被 Codex 与 Grok Build 读取，因此只有该文件时不会自动启用 Grok；存在 `.grok` 资产或显式选择 `grok` 时才注册 Grok。传 `all` 时强制注册全部四类目标。Grok Build 兼容读取 Claude Code 资产，但 code-helper 仍以用户显式选择的原生目标和目录为准，不假设同名 Skill 的发现优先级。
+
+`hooks install` 只安装指定目标的 hook。Git hook 需要显式执行 `hooks install git`，初始化不会自动安装 Git hook；Grok Build Hook 不在当前支持范围。
 
 ## 本地验证
 

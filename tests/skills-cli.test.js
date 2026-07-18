@@ -40,13 +40,14 @@ async function runCapturedCli(args, projectRoot) {
 }
 
 /**
- * 返回三类 agent 的项目级 Skills 根目录。
+ * 返回四类 agent 的项目级 Skills 根目录。
  */
 function getSkillsRoots(projectRoot) {
   return [
     join(projectRoot, ".agents/skills"),
     join(projectRoot, ".claude/skills"),
-    join(projectRoot, ".github/skills")
+    join(projectRoot, ".github/skills"),
+    join(projectRoot, ".grok/skills")
   ];
 }
 
@@ -69,7 +70,7 @@ test("runCli skills register/list/unregister all 成功、重复且保留用户�
     assert.match(firstRegister.stdout, /created/u);
     assert.match(secondRegister.stdout, /skipped/u);
     assert.equal(list.exitCode, 0);
-    assert.equal((list.stdout.match(/已注册/gu) ?? []).length, SKILL_NAMES.length * 3);
+    assert.equal((list.stdout.match(/已注册/gu) ?? []).length, SKILL_NAMES.length * 4);
 
     const unregister = await runCapturedCli(["skills", "unregister", "all"], root);
     const config = await loadConfig(root);

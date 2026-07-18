@@ -22,6 +22,9 @@ export function renderEntryBlock(config: CodeHelperConfig): string {
     config.features.testingPolicy.enabled
       ? "- 手工测试生成：需要生成验收清单、页面/可视化/浏览器链路或回归测试步骤时，使用 `code-helper-manual-test-workbench`，并把完整步骤写入 result-doc 下的 `手工测试.md`。"
       : undefined,
+    config.features.skillRegistration.enabled
+      ? "- 代码审查与修复：要求 review、代码审查、检查最近改动、按 findings 修复或复审时，使用 `code-helper-review-fix`；默认只读审查，只有用户明确授权后才修改。"
+      : undefined,
     config.features.documentArchive.enabled
       ? `- 文档归档：功能完成或手动移动到 archive 后，任务视为已结束，读取 \`${config.directories.userRules}/文档归档规范.md\`。`
       : undefined,
@@ -35,7 +38,7 @@ export function renderEntryBlock(config: CodeHelperConfig): string {
       ? "- Agent hooks：需要在 agent 生命周期中提醒完成检查时，参考 `.code-helper/hooks/` 下的 agent hook 模板。"
       : undefined,
     config.features.skillRegistration.enabled
-      ? "- Skills 管理：需要让 Codex、Claude Code 或 GitHub Copilot 在当前项目自动发现 code-helper skills 时，执行 `npx @skrupellose/code-helper skills register`。"
+      ? "- Skills 管理：需要让 Codex、Claude Code、GitHub Copilot 或 Grok Build 在当前项目自动发现 code-helper skills 时，执行 `npx @skrupellose/code-helper skills register`。"
       : undefined
   ].filter((line): line is string => line !== undefined);
 

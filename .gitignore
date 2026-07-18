@@ -9,6 +9,7 @@ CLAUDE.md
 .codex/
 .agents/
 .claude/
+.grok/
 .code-helper/
 code-helper-docs/
 .github/skills/
