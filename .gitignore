@@ -2,6 +2,9 @@ node_modules/
 dist/
 example/
 
+# 本地分享材料（PPT / 演示沙箱），不进入公开仓库
+share-code-helper/
+
 # code-helper local collaboration state.
 # These files are useful on the maintainer machine but should not be published in the public repository.
 AGENTS.md
