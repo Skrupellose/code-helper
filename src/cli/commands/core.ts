@@ -241,6 +241,7 @@ function shouldSkipVersionCommandLatestLookup(env: NodeJS.ProcessEnv): boolean {
 /**
  * 为 version 命令生成简短更新提示。
  * 交互菜单的版本提醒走 stderr；version 命令本身是显式查询，因此可以把附加信息写到 stdout。
+ * 产品口径优先推荐 npx @skrupellose/code-helper@latest，npm i -D 仅为可选本地依赖路径。
  */
 function formatVersionCommandUpdateHint(currentVersion: string, latestVersion: string): string[] {
   if (compareVersions(currentVersion, latestVersion) >= 0) {
@@ -249,8 +250,10 @@ function formatVersionCommandUpdateHint(currentVersion: string, latestVersion: s
 
   return [
     "可更新到 npm latest：",
-    "  npm i -D @skrupellose/code-helper@latest",
-    "  npx code-helper update"
+    // 始终最新：直接拉取并执行最新包的 update，不依赖本地是否已装开发依赖。
+    "  npx @skrupellose/code-helper@latest update",
+    // 可选：项目已 npm i -D 时，可先升本地依赖再跑短命令刷新。
+    "若已安装本地开发依赖，也可升级依赖后执行：npx code-helper update"
   ];
 }
 
