@@ -286,6 +286,8 @@ function createVersionUpdateState(currentVersion: string, latestVersion: string)
 /**
  * 生成版本落后时的升级提示文案。
  * 调用方负责决定输出到 stderr 还是 stdout；交互提醒必须写 stderr，避免污染脚本和 hook 协议。
+ * 优先给出 npx @latest 路径，供没有 package.json 的项目直接刷新。
+ * 主菜单「安装或升级到最新版本」适用于存在 package.json 的 Node 项目，并会安装或升级本地开发依赖。
  */
 export function formatOutdatedVersionMessage(currentVersion: string, latestVersion: string): string[] {
   if (compareVersions(currentVersion, latestVersion) >= 0) {
@@ -294,7 +296,10 @@ export function formatOutdatedVersionMessage(currentVersion: string, latestVersi
 
   return [
     `发现 code-helper 新版本：${latestVersion}（当前 ${currentVersion}）`,
-    "主菜单顶部可选择“更新到最新版本”：会升级 npm 包并刷新当前项目 code-helper 入口、Skills 和 Hooks。"
+    // 优先路径：始终通过 @latest 拉取最新包并刷新项目，不依赖本地 devDependency。
+    "优先执行：npx @skrupellose/code-helper@latest update",
+    // 可选路径：存在 package.json 时，快捷项会先安装或升级本地开发依赖，再调用新版 update。
+    "若当前 Node 项目存在 package.json，也可使用主菜单顶部「安装或升级到最新版本」快捷项安装或升级本地开发依赖，再调用新版 update。"
   ];
 }
 

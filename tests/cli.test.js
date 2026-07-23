@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import {
+  buildInteractiveMenuState,
   buildMainMenuSelectOptions,
   buildSubMenuSelectOptions,
   formatMainMenuGroupTitle,
@@ -12,6 +13,7 @@ import {
   formatMainMenuTextItemLines,
   formatSubMenuTextLines,
   formatVersionUpgradeSelectItemLabel,
+  formatVersionUpgradeTextItemLines,
   getApplyMenuItems,
   getHooksMenuItems,
   getMainMenuGroups,
@@ -21,7 +23,8 @@ import {
   parseSkillTargetMenuSelection,
   resolveCodeHelperUpdateCommand,
   runCodeHelperQuickUpgrade,
-  runCli
+  runCli,
+  runInteractiveMenu
 } from "../dist/cli.js";
 import { loadConfig, setFeatureEnabled } from "../dist/config.js";
 import { initializeProject } from "../dist/init.js";
@@ -108,19 +111,79 @@ test("主菜单 raw mode 选项包含不可选分组和功能说明", () => {
   assert.ok(options.some((option) => option.value === "0" && option.label.includes("0. 退出")));
 });
 
-test("检测到新版本时主菜单顶部出现独立快捷升级项", () => {
-  // 快捷升级项只由版本状态触发，不写入普通 MAIN_MENU_GROUPS 分组。
+test("存在 package.json 且检测到新版本时主菜单顶部出现独立快捷升级项", async () => {
+  // 快捷升级项需要写入本地开发依赖，仅在 Node 项目且版本落后时展示。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-cli-menu-upgrade-"));
   const versionUpdate = { currentVersion: "0.1.3", latestVersion: "0.1.4", outdated: true };
   const groups = getMainMenuGroups();
-  const options = buildMainMenuSelectOptions(versionUpdate);
-  const quickUpgradeIndex = options.findIndex((option) => option.label.includes("更新到最新版本"));
-  const firstGroupIndex = options.findIndex((option) => option.label === "【项目准备】");
 
-  assert.equal(groups.flatMap((group) => group.items).some((item) => item.name.includes("更新到最新版本")), false);
-  assert.equal(quickUpgradeIndex, 0);
-  assert.equal(quickUpgradeIndex < firstGroupIndex, true);
-  assert.match(options[quickUpgradeIndex].label, /升级 npm 包并刷新当前项目 code-helper 入口、Skills 和 Hooks/);
-  assert.match(formatVersionUpgradeSelectItemLabel(versionUpdate), /0\.1\.3 -> 0\.1\.4/);
+  try {
+    await writeFile(join(root, "package.json"), "{}\n", "utf8");
+    const menuState = await buildInteractiveMenuState(root, versionUpdate);
+    const quickUpgradeIndex = menuState.menuOptions.findIndex((option) => option.label.includes("安装或升级到最新版本"));
+    const firstGroupIndex = menuState.menuOptions.findIndex((option) => option.label === "【项目准备】");
+
+    assert.equal(groups.flatMap((group) => group.items).some((item) => item.name.includes("安装或升级到最新版本")), false);
+    assert.equal(menuState.versionUpdate, versionUpdate);
+    assert.equal(quickUpgradeIndex, 0);
+    assert.equal(quickUpgradeIndex < firstGroupIndex, true);
+    assert.match(menuState.menuOptions[quickUpgradeIndex].label, /安装或升级本地开发依赖，再调用新版 update/);
+    assert.match(formatVersionUpgradeSelectItemLabel(versionUpdate), /0\.1\.3 -> 0\.1\.4/);
+    assert.match(
+      formatVersionUpgradeTextItemLines(versionUpdate).join("\n"),
+      /安装或升级到最新版本[\s\S]*安装或升级本地开发依赖，再调用新版 update/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("没有 package.json 或版本未落后时主菜单不展示快捷升级项", async () => {
+  // 无 package.json 时快捷升级不可执行；版本未落后时也没有安装或升级的必要。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-cli-menu-no-upgrade-"));
+  const outdatedVersion = { currentVersion: "0.1.3", latestVersion: "0.1.4", outdated: true };
+
+  try {
+    const missingPackageState = await buildInteractiveMenuState(root, outdatedVersion);
+    assert.equal(missingPackageState.versionUpdate, undefined);
+    assert.equal(missingPackageState.menuOptions.some((option) => option.value === "__quick_upgrade_code_helper__"), false);
+
+    await writeFile(join(root, "package.json"), "{}\n", "utf8");
+    const currentVersionState = await buildInteractiveMenuState(root, {
+      currentVersion: "0.1.4",
+      latestVersion: "0.1.4",
+      outdated: false
+    });
+    assert.equal(currentVersionState.versionUpdate, undefined);
+    assert.equal(currentVersionState.menuOptions.some((option) => option.value === "__quick_upgrade_code_helper__"), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("菜单状态构建异常时不创建 readline", async () => {
+  // 文件系统异常可能在检查 package.json 时抛出；readline 必须在状态构建成功后才创建。
+  const expectedError = new Error("模拟 package.json 状态检查失败");
+  let readlineCreated = false;
+
+  await assert.rejects(
+    () => runInteractiveMenu(
+      process.cwd(),
+      { currentVersion: "0.1.3", latestVersion: "0.1.4", outdated: true },
+      {
+        buildMenuState: async () => {
+          throw expectedError;
+        },
+        createReadline: () => {
+          readlineCreated = true;
+          throw new Error("状态构建失败后不应创建 readline");
+        }
+      }
+    ),
+    expectedError
+  );
+
+  assert.equal(readlineCreated, false);
 });
 
 test("主菜单布局格式区分标题、功能名和说明", () => {
@@ -211,10 +274,13 @@ test("快捷升级会先执行 npm install 再运行新版 code-helper update", 
   // 未声明包管理器且没有锁文件时，快捷升级默认走 npm；安装成功后必须启动项目里的新版 CLI 执行 update。
   const root = await mkdtemp(join(tmpdir(), "code-helper-cli-quick-upgrade-"));
   const calls = [];
+  const logs = [];
   const originalLog = console.log;
 
   try {
-    console.log = () => {};
+    console.log = (...args) => {
+      logs.push(args.join(" "));
+    };
     await writeFile(join(root, "package.json"), JSON.stringify({ devDependencies: {} }, null, 2), "utf8");
 
     const exitCode = await runCodeHelperQuickUpgrade(root, {
@@ -235,6 +301,9 @@ test("快捷升级会先执行 npm install 再运行新版 code-helper update", 
       ["install", "npm", ["install", "-D", "@skrupellose/code-helper@latest"], root],
       ["update", "npx", ["--yes", "@skrupellose/code-helper", "update"], root]
     ]);
+    assert.match(logs[0], /准备安装或升级本地开发依赖/);
+    assert.match(logs[1], /本地开发依赖安装或升级成功，开始调用新版 code-helper update/);
+    assert.match(logs[2], /新版 code-helper update 已完成/);
   } finally {
     console.log = originalLog;
     await rm(root, { recursive: true, force: true });

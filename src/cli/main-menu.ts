@@ -105,7 +105,7 @@ export function formatMainMenuTextItemLines(item: MainMenuItem): string[] {
  * 该项不属于 MAIN_MENU_GROUPS，避免被误认为普通项目准备动作。
  */
 export function formatVersionUpgradeSelectItemLabel(versionUpdate: VersionUpdateState): string {
-  return `  U. ${padMenuText("更新到最新版本", MAIN_MENU_NAME_COLUMN_WIDTH)} 升级 npm 包并刷新当前项目 code-helper 入口、Skills 和 Hooks（${versionUpdate.currentVersion} -> ${versionUpdate.latestVersion}）`;
+  return `  U. ${padMenuText("安装或升级到最新版本", MAIN_MENU_NAME_COLUMN_WIDTH)} 安装或升级本地开发依赖，再调用新版 update 刷新入口、Skills 和 Hooks（${versionUpdate.currentVersion} -> ${versionUpdate.latestVersion}）`;
 }
 
 /**
@@ -114,8 +114,8 @@ export function formatVersionUpgradeSelectItemLabel(versionUpdate: VersionUpdate
  */
 export function formatVersionUpgradeTextItemLines(versionUpdate: VersionUpdateState): string[] {
   return [
-    "  U. 更新到最新版本",
-    `      升级 npm 包并刷新当前项目 code-helper 入口、Skills 和 Hooks（${versionUpdate.currentVersion} -> ${versionUpdate.latestVersion}）`
+    "  U. 安装或升级到最新版本",
+    `      安装或升级本地开发依赖，再调用新版 update 刷新入口、Skills 和 Hooks（${versionUpdate.currentVersion} -> ${versionUpdate.latestVersion}）`
   ];
 }
 

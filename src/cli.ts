@@ -64,6 +64,7 @@ import {
 } from "./cli/commands/tools.js";
 import { printHelp } from "./cli/help.js";
 import { isFatalInteractiveMenuError } from "./cli/menu-errors.js";
+import { pathExists, projectPath } from "./fs-utils.js";
 import { resolveInitializedProjectRoot } from "./project-root.js";
 
 export {
@@ -178,9 +179,40 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
  * 快捷升级成功后需要清空 versionUpdate 并重建 menuOptions，
  * 否则下一轮循环仍会显示“有更新”入口（文本菜单与 raw 菜单共用此状态）。
  */
-interface InteractiveMenuState {
+export interface InteractiveMenuState {
   versionUpdate?: VersionUpdateState;
   menuOptions: ReturnType<typeof buildMainMenuSelectOptions>;
+}
+
+/**
+ * 交互菜单初始化依赖。
+ * 仅用于隔离“先构建状态、后创建 readline”的资源生命周期测试，生产调用使用默认实现。
+ */
+export interface InteractiveMenuDependencies {
+  buildMenuState?: (
+    projectRoot: string,
+    versionUpdate?: VersionUpdateState
+  ) => Promise<InteractiveMenuState>;
+  createReadline?: () => ReturnType<typeof createInterface>;
+}
+
+/**
+ * 构建交互菜单使用的版本状态与选项。
+ * 快捷升级会写入 package.json，因此仅在项目存在该文件且确有新版时展示；
+ * raw mode 与文本菜单共用过滤后的 versionUpdate，避免一侧仍暴露不可执行入口。
+ */
+export async function buildInteractiveMenuState(
+  projectRoot: string,
+  versionUpdate?: VersionUpdateState
+): Promise<InteractiveMenuState> {
+  const canQuickUpgrade = versionUpdate?.outdated === true
+    && await pathExists(projectPath(projectRoot, "package.json"));
+  const menuVersionUpdate = canQuickUpgrade ? versionUpdate : undefined;
+
+  return {
+    versionUpdate: menuVersionUpdate,
+    menuOptions: buildMainMenuSelectOptions(menuVersionUpdate)
+  };
 }
 
 /**
@@ -188,18 +220,18 @@ interface InteractiveMenuState {
  * 使用 Node 内置 readline，减少首版运行依赖和安装体积。
  * 菜单循环内业务错误只提示并继续，避免一次动作失败就结束整个会话。
  * 主菜单 Esc（TerminalCancelError）仅取消本次选择并回到菜单，不退出进程。
+ * 主菜单仅含项目准备与工具设置；任务推进/维护走 agent skills 与 CLI 子命令。
  */
-async function runInteractiveMenu(
+export async function runInteractiveMenu(
   projectRoot: string,
   versionUpdate?: VersionUpdateState,
-  inputBasePath = projectRoot
+  dependencies: InteractiveMenuDependencies = {}
 ): Promise<number> {
-  const rl = createInterface({ input, output });
-  // 循环内可变：升级成功后刷新顶部快捷升级项
-  const menuState: InteractiveMenuState = {
-    versionUpdate,
-    menuOptions: buildMainMenuSelectOptions(versionUpdate)
-  };
+  const buildMenuState = dependencies.buildMenuState ?? buildInteractiveMenuState;
+  const createReadline = dependencies.createReadline ?? (() => createInterface({ input, output }));
+  // 状态构建可能因文件系统错误失败，必须在创建 readline 前完成，避免异常路径遗留输入监听。
+  const menuState = await buildMenuState(projectRoot, versionUpdate);
+  const rl = createReadline();
 
   try {
     let shouldExit = false;
@@ -260,7 +292,7 @@ async function runInteractiveMenuIteration(options: {
   switch (menuAnswer) {
     case QUICK_UPGRADE_MENU_VALUE: {
       // 仅在升级成功时刷新菜单状态；失败时保留“有更新”入口便于重试
-      const upgradeExitCode = await runMenuAction("更新到最新版本", () => runCodeHelperQuickUpgrade(projectRoot));
+      const upgradeExitCode = await runMenuAction("安装或升级到最新版本", () => runCodeHelperQuickUpgrade(projectRoot));
 
       if (upgradeExitCode === 0) {
         menuState.versionUpdate = undefined;
