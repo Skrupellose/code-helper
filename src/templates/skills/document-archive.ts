@@ -43,6 +43,8 @@ description: 当用户要求归档功能文档、结束一个功能、查看任�
 
 ## 边界规则
 
+- \`code-helper-docs/completion-record/\` 中的完成记录创建即为 recorded 终态，不属于活动任务，也不需要再次归档。
+- 只有 plan/status/result 计划任务进入 active、archived、mixed 生命周期；不得因为完成记录缺少计划或状态文档而补齐三件套。
 - 归档不覆盖已有 archive 目标。
 - 空 archive 目录不代表存在归档任务，也不应单独触发本 skill。
 - 已归档 status-doc 不再作为当前任务入口。

@@ -95,8 +95,9 @@ async function recordManagedSkillFingerprints(root, target, records) {
 test("内置 Skill 单一 manifest 的名称、目录、模板文件和正文保持一致", () => {
   const manifest = getSkillManifest();
 
-  assert.equal(manifest.length, 7);
+  assert.equal(manifest.length, 8);
   assert.ok(manifest.some((skill) => skill.name === "code-helper-review-fix"));
+  assert.ok(manifest.some((skill) => skill.name === "code-helper-completion-record"));
   assert.equal(new Set(manifest.map((skill) => skill.fileName)).size, manifest.length);
   assert.equal(new Set(manifest.map((skill) => skill.directoryName)).size, manifest.length);
   assert.equal(new Set(manifest.map((skill) => skill.name)).size, manifest.length);
@@ -144,6 +145,10 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
       join(root, ".agents/skills/code-helper-completion-review/SKILL.md"),
       "utf8"
     );
+    const completionRecordSkill = await readFile(
+      join(root, ".agents/skills/code-helper-completion-record/SKILL.md"),
+      "utf8"
+    );
     const collaborationSkill = await readFile(
       join(root, ".agents/skills/code-helper-agent-collaboration/SKILL.md"),
       "utf8"
@@ -162,11 +167,27 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
     assert.ok(secondOperations.every((operation) => operation.action === "skipped"));
     assert.ok(statuses.every((status) => status.registered));
     assert.match(completionSkill, /name: code-helper-completion-review/);
+    assert.match(completionSkill, /可独立验收的逻辑交付点/);
+    assert.match(completionSkill, /微型步骤不单独触发/);
+    assert.match(completionSkill, /真实功能变更在最终回复前仍必须触发/);
+    assert.match(completionSkill, /计划跟踪、直接执行和 recorded 完成记录/);
+    assert.match(completionSkill, /不得返回 missing-docs/);
+    assert.match(completionRecordSkill, /name: code-helper-completion-record/);
+    assert.match(completionRecordSkill, /code-helper-kind: completion-record/);
+    assert.match(completionRecordSkill, /不创建 plan-doc、status-doc、result-doc 或手工测试文档/);
+    assert.match(completionRecordSkill, /不为倒写文档派子代理/);
     // 新增协作 skill 必须能被注册，并包含对子代理协作边界的明确说明。
     assert.match(collaborationSkill, /name: code-helper-agent-collaboration/);
-    assert.match(collaborationSkill, /子代理/);
+    assert.match(collaborationSkill, /T0\/T1 允许主会话直办，T2 建议分发，T3 强制实现与复核隔离/);
+    assert.match(collaborationSkill, /主会话始终可以直接进行只读证据核验和非变更型验证/);
+    assert.match(collaborationSkill, /当前 agent 工具没有可调用的子代理能力，按等级降级/);
     assert.match(collaborationSkill, /你现在是执行子代理/);
-    assert.match(collaborationSkill, /不再套用“主会话必须派发子代理”的职责/);
+    assert.match(collaborationSkill, /默认委派深度为 1/);
+    assert.match(collaborationSkill, /执行子代理不得自行二次转派/);
+    assert.match(collaborationSkill, /同一基线、同一工作树状态和同一验证命令默认只执行一次/);
+    assert.match(collaborationSkill, /验证回执：精确命令、工作目录、退出码、结果摘要、共享副作用资源和未验证范围/);
+    assert.match(collaborationSkill, /等待或调用超时只表示本次等待结束，不等于子代理失败/);
+    assert.match(collaborationSkill, /没有中断能力：把旧任务标记为.*superseded/s);
     assert.match(manualTestSkill, /name: code-helper-manual-test-workbench/);
     assert.match(manualTestSkill, /manual-test.*只负责生成结构化模板/s);
     assert.match(manualTestSkill, /测试环境、前置数据、操作步骤、预期结果、回归范围和阻塞记录/);
@@ -178,6 +199,8 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
     assert.match(reviewFixSkill, /不要创建.*代码审查\.md/s);
     assert.match(reviewFixSkill, /不自动提交、推送、归档、发布或更新长期记忆/);
     assert.match(reviewFixSkill, /Codex、Claude、Grok、GitHub Copilot/);
+    assert.match(reviewFixSkill, /按项目 Agent 协作规范的 T0-T3 风险等级决定直办、建议分发或强制实现与复核隔离/);
+    assert.match(reviewFixSkill, /同一基线下已经有有效回执的相同命令不机械重复/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1135,11 +1158,14 @@ test("内置完成检查与归档 skill 描述会收窄触发和手工测试条�
       "utf8"
     );
 
-    assert.match(completionSkill, /完成实现、文档或功能变更节点后准备最终回复/u);
-    assert.match(completionSkill, /普通问答、只读 review.*不触发/u);
+    assert.match(completionSkill, /完成可独立验收的逻辑交付点并准备最终回复/u);
+    assert.match(completionSkill, /微型步骤不单独触发/u);
+    assert.match(completionSkill, /真实功能变更在最终回复前仍必须触发/u);
     assert.match(completionSkill, /mixed 任务必须优先/u);
-    assert.match(completionSkill, /没有 active 且没有 mixed 任务时/u);
-    assert.match(completionSkill, /仅报告当前没有活动任务/u);
+    assert.match(completionSkill, /没有对应任务文档的是直接执行/u);
+    assert.match(completionSkill, /普通轻量任务直接总结/u);
+    assert.match(completionSkill, /已经存在 completion-record 时，只确认其为 recorded 终态/u);
+    assert.match(completionSkill, /不要求补齐过程文档、归档或选择下一任务/u);
     assert.match(archiveSkill, /初始化预建的空 archive 目录不触发/u);
     assert.match(archiveSkill, /仅当任务涉及页面、可视化、浏览器真实链路、人工业务验收/u);
     assert.match(archiveSkill, /纯逻辑任务以自动化测试/u);
@@ -1171,6 +1197,49 @@ test("内置 review-fix skill 会保持只读审查、授权修复和逐项复�
     assert.match(reviewFixSkill, /用户另行明确授权记录本次 review：只记录审查结论和 findings，不因此获得任何代码修改权限/u);
     assert.match(reviewFixSkill, /没有记录授权时，findings 只保留在当前对话，不写入任何过程文档/u);
     assert.match(reviewFixSkill, /不自动提交、推送、归档、发布或更新长期记忆/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("内置协作 skills 会限制 Agent 与复审预算并展示统一进度摘要", async () => {
+  // 该测试锁定本轮效率优化，避免后续重新引入无上限分发、多轮全量复审或隐藏进度。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-collaboration-budget-"));
+
+  try {
+    await registerProjectSkills(root);
+    const collaborationSkill = await readFile(
+      join(root, ".agents/skills/code-helper-agent-collaboration/SKILL.md"),
+      "utf8"
+    );
+    const reviewFixSkill = await readFile(
+      join(root, ".agents/skills/code-helper-review-fix/SKILL.md"),
+      "utf8"
+    );
+    const planSkill = await readFile(
+      join(root, ".agents/skills/code-helper-plan-workbench/SKILL.md"),
+      "utf8"
+    );
+    const completionSkill = await readFile(
+      join(root, ".agents/skills/code-helper-completion-review/SKILL.md"),
+      "utf8"
+    );
+
+    assert.match(collaborationSkill, /单节点默认最多触发 4 个子代理任务/u);
+    assert.match(collaborationSkill, /T2 默认使用一个执行子代理/u);
+    assert.match(collaborationSkill, /T3 默认使用一个实现子代理和一个独立复核子代理/u);
+    assert.match(collaborationSkill, /默认只进行一轮独立复审/u);
+    assert.match(collaborationSkill, /领域名称或代码中出现.*不能单独判定为 T3/su);
+    assert.match(collaborationSkill, /原始完成定义满足且当前阻断项关闭后，必须停止自动扩修/u);
+    assert.doesNotMatch(collaborationSkill, /\| T3 \| 涉及安全、权限、用户数据/u);
+    assert.match(reviewFixSkill, /范围分类.*当前阻断.*当前非阻断.*后续优化/su);
+    assert.match(reviewFixSkill, /逐项复审只核对原 finding、修复直接影响路径和最小回归面/u);
+    assert.match(reviewFixSkill, /当前非阻断和后续优化未经用户明确纳入时，不自动延长当前节点/u);
+    assert.match(planSkill, /## 进度摘要/u);
+    assert.match(planSkill, /完成定义进度/u);
+    assert.match(planSkill, /Agent 使用/u);
+    assert.match(completionSkill, /最终回复前输出紧凑进度摘要/u);
+    assert.match(completionSkill, /“剩余门禁”只列当前阻断/u);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

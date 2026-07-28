@@ -55,6 +55,8 @@ node .code-helper\\hooks\\agent-finish-check.mjs
 - hook 不自动更新长期记忆。
 - hook 不自动归档文档。
 - hook 不自动提交代码。
+- 没有活动计划任务时，hook 会提示直接执行分流：普通轻量任务直接总结；只有已经完成且具有复盘价值时才生成 completion-record。
+- hook 不要求直接执行任务倒写或补齐 plan/status/result；仍有后续阶段、阻塞或跨会话恢复需求时才升级为计划跟踪。
 - agent 仍需要根据输出主动询问用户是否更新记忆、归档或选择下一任务。
 
 ## code-helper 安装命令

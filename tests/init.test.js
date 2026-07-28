@@ -10,6 +10,9 @@ import { setFeatureEnabled } from "../dist/config.js";
 import { initializeProject, updateProject } from "../dist/init.js";
 import { runChecks } from "../dist/checks.js";
 import { runCli } from "../dist/cli.js";
+import { agentCollaborationSkillTemplate } from "../dist/templates/skills/agent-collaboration.js";
+import { completionRecordSkillTemplate } from "../dist/templates/skills/completion-record.js";
+import { completionReviewSkillTemplate } from "../dist/templates/skills/completion-review.js";
 import {
   buildInitTargetMultiSelectOptions,
   resolveInitMultiSelectTargetPromptResult,
@@ -173,10 +176,38 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
     const config = await readFile(join(root, ".code-helper/config.json"), "utf8");
     const codexSkill = await readFile(join(root, ".agents/skills/code-helper-memory-tuning/SKILL.md"), "utf8");
     const reviewFixSkill = await readFile(join(root, ".agents/skills/code-helper-review-fix/SKILL.md"), "utf8");
+    const collaborationSkill = await readFile(
+      join(root, ".agents/skills/code-helper-agent-collaboration/SKILL.md"),
+      "utf8"
+    );
+    const completionReviewSkill = await readFile(
+      join(root, ".agents/skills/code-helper-completion-review/SKILL.md"),
+      "utf8"
+    );
+    const completionRecordSkill = await readFile(
+      join(root, ".agents/skills/code-helper-completion-record/SKILL.md"),
+      "utf8"
+    );
     const codexHook = await readFile(join(root, ".codex/hooks.json"), "utf8");
     const managedBlock = extractManagedBlock(agents);
     const gitCommitRule = await readFile(
       join(root, "code-helper-docs/user-rules/Git提交信息格式规范.md"),
+      "utf8"
+    );
+    const completionRecordRule = await readFile(
+      join(root, "code-helper-docs/user-rules/完成记录规范.md"),
+      "utf8"
+    );
+    const collaborationRule = await readFile(
+      join(root, "code-helper-docs/user-rules/Agent协作规范.md"),
+      "utf8"
+    );
+    const planRule = await readFile(
+      join(root, "code-helper-docs/user-rules/项目计划管理规范.md"),
+      "utf8"
+    );
+    const completionRule = await readFile(
+      join(root, "code-helper-docs/user-rules/功能完成检查规范.md"),
       "utf8"
     );
 
@@ -196,7 +227,33 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
     assert.match(config, /"agentHooks": \{\n      "enabled": true\n    \}/);
     assert.match(codexSkill, /name: code-helper-memory-tuning/);
     assert.match(reviewFixSkill, /name: code-helper-review-fix/);
+    // 首次初始化必须注册当前模板原文，并建立协作分级、身份传递和完成检查的正向契约。
+    assert.equal(collaborationSkill, agentCollaborationSkillTemplate.content);
+    assert.equal(completionReviewSkill, completionReviewSkillTemplate.content);
+    assert.equal(completionRecordSkill, completionRecordSkillTemplate.content);
+    assert.match(collaborationSkill, /T0\/T1 允许主会话直办，T2 建议分发，T3 强制实现与复核隔离/);
+    assert.match(collaborationSkill, /主会话始终可以直接进行只读证据核验和非变更型验证/);
+    assert.match(collaborationSkill, /用户确认不能授权单会话绕过独立隔离/);
+    assert.match(collaborationSkill, /优先由工具提供的父任务、调用关系或角色元数据承载/);
+    assert.match(collaborationSkill, /只有元数据不可用或不能可靠传递时/);
+    assert.match(collaborationSkill, /派发提示才必须明确“你现在是执行子代理”/);
+    assert.match(collaborationSkill, /单节点默认最多触发 4 个子代理任务/u);
+    assert.match(collaborationSkill, /默认只进行一轮独立复审/u);
+    assert.match(completionReviewSkill, /可独立验收的逻辑交付点/);
+    assert.match(completionReviewSkill, /微型步骤不单独触发/);
+    assert.match(completionReviewSkill, /最终回复前输出紧凑进度摘要/u);
+    assert.match(completionRecordSkill, /不得据此创建 plan-doc、status-doc 或 result-doc/u);
+    // 初始化生成的专题规则必须与 Skills 使用同一套预算、停止条件和进度摘要契约。
+    assert.match(collaborationRule, /单个逻辑交付点默认最多触发 4 个子代理任务/u);
+    assert.match(collaborationRule, /finding 按当前阻断、当前非阻断、后续优化分类/u);
+    assert.match(planRule, /status-doc 必须在当前执行节点后包含“进度摘要”/u);
+    assert.match(completionRule, /“剩余门禁”只包含当前阻断/u);
     assert.match(gitCommitRule, /scope 必填/u);
+    assert.match(completionRecordRule, /lifecycle: recorded/u);
+    assert.equal(
+      (await stat(join(root, "code-helper-docs/completion-record"))).isDirectory(),
+      true
+    );
     assert.match(codexHook, /agent-finish-check\.mjs/);
     await assert.rejects(
       () => stat(join(root, ".git/hooks/pre-commit")),
@@ -674,12 +731,37 @@ test("updateProject 刷新已有 Codex skills 且不创建未使用 agent 入口
       "old skill",
       "utf8"
     );
+    await writeFile(
+      join(root, ".agents/skills/code-helper-completion-review/SKILL.md"),
+      "old completion skill",
+      "utf8"
+    );
 
     const result = await updateProject(root);
     const codexSkill = await readFile(join(root, ".agents/skills/code-helper-agent-collaboration/SKILL.md"), "utf8");
+    const completionSkill = await readFile(
+      join(root, ".agents/skills/code-helper-completion-review/SKILL.md"),
+      "utf8"
+    );
 
     assert.ok(result.operations.some((operation) => operation.message.includes("已注册 Codex 项目级 skill")));
+    // update 必须把已有项目升级到新的风险分级、角色识别和完成检查语义，不能只恢复旧派发短语。
+    assert.match(codexSkill, /T0\/T1 允许主会话直办，T2 建议分发，T3 强制实现与复核隔离/);
+    assert.match(codexSkill, /主会话始终可以直接进行只读证据核验和非变更型验证/);
+    assert.match(codexSkill, /当前 agent 工具没有可调用的子代理能力，按等级降级/);
+    assert.match(codexSkill, /用户确认不能授权单会话绕过独立隔离/);
+    assert.match(codexSkill, /优先使用工具提供的父任务、调用关系或角色元数据/);
+    assert.match(codexSkill, /只有元数据不可用或不能可靠传递时/);
+    assert.match(codexSkill, /派发提示才必须明确“你现在是执行子代理”/);
+    assert.match(codexSkill, /默认委派深度为 1/);
     assert.match(codexSkill, /你现在是执行子代理/);
+    assert.match(codexSkill, /同一基线、同一工作树状态和同一验证命令默认只执行一次/);
+    assert.match(codexSkill, /共享副作用资源冲突的命令必须串行/);
+    assert.match(codexSkill, /等待或调用超时只表示本次等待结束，不等于子代理失败/);
+    assert.match(codexSkill, /不根据 Codex、Claude Code、GitHub Copilot、Grok Build 等平台名称或 skills 注册目录猜测/);
+    assert.match(completionSkill, /可独立验收的逻辑交付点/);
+    assert.match(completionSkill, /微型步骤不单独触发/);
+    assert.match(completionSkill, /真实功能变更在最终回复前仍必须触发/);
     await assert.rejects(
       () => stat(join(root, "CLAUDE.md")),
       /ENOENT/

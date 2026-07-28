@@ -1,6 +1,10 @@
 import { spawnSync } from "node:child_process";
 
-import { getArchiveFeatureNameCandidates, listTasks, type TaskRecord } from "./archive.js";
+import { findTaskByFeatureName, listTasks, type TaskRecord } from "./archive.js";
+import {
+  findCompletionRecord,
+  isValidCompletionRecordMetadata
+} from "./completion-record.js";
 import { loadConfig } from "./config.js";
 import { portablePath, projectPath, readTextIfExists } from "./fs-utils.js";
 import { MANUAL_TEST_FILE_NAME, RESULT_RECORD_FILE_NAME } from "./workflows.js";
@@ -19,6 +23,7 @@ export type CompletionReviewStatus =
   | "node-review"
   | "ready-to-archive"
   | "archived"
+  | "recorded"
   | "missing-docs"
   | "mixed";
 
@@ -28,13 +33,14 @@ export type CompletionReviewStatus =
  */
 export interface CompletionReview {
   featureName: string;
-  taskStatus: TaskRecord["status"];
+  taskStatus: TaskRecord["status"] | "recorded";
   reviewStatus: CompletionReviewStatus;
   documents: {
     plan: DocumentPresence;
     result: DocumentPresence;
     status: DocumentPresence;
     manualTest: DocumentPresence;
+    completionRecord: DocumentPresence;
   };
   statusCounts: Record<"notStarted" | "inProgress" | "partial" | "blocked" | "done", number>;
   hasCurrentExecutionNode: boolean;
@@ -68,9 +74,23 @@ export async function createCompletionReview(projectRoot: string, featureName: s
   }
 
   const tasks = await listTasks(projectRoot);
-  const task = findTask(tasks, featureName);
+  const task = findTaskByFeatureName(tasks, featureName);
 
   if (task === undefined) {
+    const completionRecord = await findCompletionRecord(projectRoot, featureName);
+    if (completionRecord !== undefined) {
+      if (!isValidCompletionRecordMetadata(completionRecord.content)) {
+        throw new Error(
+          `完成记录缺少合法终态元数据：${completionRecord.relativePath}。`
+          + "请设置 code-helper-kind: completion-record、tracking-mode: direct、lifecycle: recorded。"
+        );
+      }
+
+      // 完成记录是直接执行任务的独立终态。这里不进入 plan/status/result 完整性、
+      // Git 变更、记忆、归档或下一任务判断，避免 recorded 文件反向触发补文档。
+      return createRecordedCompletionReview(completionRecord);
+    }
+
     // 找不到任务时附上可用任务列表，方便用户对照空格/连字符/中英文候选名差异。
     const availableTasks = tasks.map((item) => item.featureName);
     const availableHint = availableTasks.length > 0
@@ -138,7 +158,11 @@ export async function createCompletionReview(projectRoot: string, featureName: s
       plan: toDocumentPresence(plan),
       result: toDocumentPresence(result),
       status: toDocumentPresence(status),
-      manualTest: toDocumentPresence(manualTest)
+      manualTest: toDocumentPresence(manualTest),
+      completionRecord: {
+        relativePath: "",
+        exists: false
+      }
     },
     statusCounts,
     hasCurrentExecutionNode,
@@ -157,6 +181,51 @@ export async function createCompletionReview(projectRoot: string, featureName: s
       hasCurrentExecutionNode,
       hasSubPlanQueue
     })
+  };
+}
+
+/**
+ * 为独立完成记录生成终态检查结果。
+ *
+ * documents 仍保留原有四类字段以兼容既有 API；这些字段的缺失在 recorded 生命周期
+ * 中不是错误，CLI 会优先展示 completionRecord 并跳过活动任务文档说明。
+ */
+function createRecordedCompletionReview(record: {
+  featureName: string;
+  relativePath: string;
+}): CompletionReview {
+  return {
+    featureName: record.featureName,
+    taskStatus: "recorded",
+    reviewStatus: "recorded",
+    documents: {
+      plan: { relativePath: "", exists: false },
+      result: { relativePath: "", exists: false },
+      status: { relativePath: "", exists: false },
+      manualTest: { relativePath: "", exists: false },
+      completionRecord: {
+        relativePath: record.relativePath,
+        exists: true
+      }
+    },
+    statusCounts: {
+      notStarted: 0,
+      inProgress: 0,
+      partial: 0,
+      blocked: 0,
+      done: 0
+    },
+    hasCurrentExecutionNode: false,
+    hasSubPlanQueue: false,
+    changedPaths: [],
+    shouldAskMemoryUpdate: false,
+    shouldAskArchive: false,
+    shouldSelectNextTask: false,
+    requiredConfirmations: [],
+    recommendations: [
+      "该文件是直接执行任务的 recorded 终态，无需补齐 plan/status/result 文档。",
+      "完成记录不参与归档，也不要求选择下一活动任务。"
+    ]
   };
 }
 
@@ -286,54 +355,6 @@ function getManualTestDocumentPathCandidates(task: TaskRecord, resultDirectory: 
   ];
 
   return mergeDocumentPathCandidates(task, activePaths, archivedPaths);
-}
-
-/**
- * 从任务列表中按功能名查找任务。
- * 依次尝试精确匹配、大小写不敏感匹配、规范化候选名匹配（空格/连字符、中英文命名规则）。
- */
-function findTask(tasks: TaskRecord[], featureName: string): TaskRecord | undefined {
-  const exact = tasks.find((task) => task.featureName === featureName);
-  if (exact !== undefined) {
-    return exact;
-  }
-
-  const caseInsensitive = tasks.find((task) => task.featureName.toLowerCase() === featureName.toLowerCase());
-  if (caseInsensitive !== undefined) {
-    return caseInsensitive;
-  }
-
-  const inputKeys = getFeatureNameLookupKeys(featureName);
-  return tasks.find((task) => {
-    for (const key of getFeatureNameLookupKeys(task.featureName)) {
-      if (inputKeys.has(key)) {
-        return true;
-      }
-    }
-
-    return false;
-  });
-}
-
-/**
- * 生成用于任务名比对的查找键集合。
- * 复用 archive 的功能名候选规则，保证 finish / archive / tasks 对同一输入命中同一任务。
- */
-function getFeatureNameLookupKeys(rawFeatureName: string): Set<string> {
-  const keys = new Set<string>();
-  const raw = rawFeatureName.trim();
-
-  if (raw.length > 0) {
-    keys.add(raw);
-    keys.add(raw.toLowerCase());
-  }
-
-  for (const candidate of getArchiveFeatureNameCandidates(rawFeatureName)) {
-    keys.add(candidate);
-    keys.add(candidate.toLowerCase());
-  }
-
-  return keys;
 }
 
 /**

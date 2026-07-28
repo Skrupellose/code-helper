@@ -56,6 +56,7 @@ export function printHelp(): void {
   code-helper features enable <key>   启用高级功能配置
   code-helper features disable <key>  关闭高级功能配置
   code-helper plan <需求文档> [中文功能名] 生成项目计划模板
+  code-helper record <中文功能名>       创建直接执行任务的终态完成记录
   code-helper manual-test <中文功能名> [标题] 生成手工测试模板
   code-helper archive <中文功能名> [--resolve-mixed] 将功能文档移动到 archive 并识别为已结束
   code-helper finish [中文功能名]        检查当前功能是否完成并提示后续动作
