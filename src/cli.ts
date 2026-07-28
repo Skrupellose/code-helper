@@ -49,6 +49,7 @@ import {
   runFinish,
   runManualTest,
   runPlan,
+  runRecord,
   runTasks
 } from "./cli/commands/tasks.js";
 import {
@@ -145,6 +146,9 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
         return runFeatures(commandProjectRoot, args);
       case "plan":
         return runPlan(commandProjectRoot, args, { inputBasePath: projectRoot });
+      case "record":
+        // record 仅提供精确的非交互入口，不加入交互主菜单。
+        return runRecord(commandProjectRoot, args);
       case "manual-test":
         return runManualTest(commandProjectRoot, args);
       case "archive":
@@ -343,6 +347,7 @@ const COMMANDS_NEEDING_INITIALIZED_ROOT = new Set<string | undefined>([
   undefined,
   "menu",
   "plan",
+  "record",
   "finish",
   "archive",
   "manual-test",

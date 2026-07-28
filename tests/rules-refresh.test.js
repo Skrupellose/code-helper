@@ -156,6 +156,8 @@ test("首次 init 创建内置规则，state.json 含 packageVersion", async () 
     const ruleContent = await readFile(rulePath, "utf8");
     const gitCommitRulePath = join(root, "code-helper-docs/user-rules/Git提交信息格式规范.md");
     const gitCommitRuleContent = await readFile(gitCommitRulePath, "utf8");
+    const completionRecordRulePath = join(root, "code-helper-docs/user-rules/完成记录规范.md");
+    const completionRecordRuleContent = await readFile(completionRecordRulePath, "utf8");
     const state = JSON.parse(await readFile(join(root, ".code-helper/state.json"), "utf8"));
     const packageVersion = await getCurrentPackageVersion();
     const createdRules = result.operations.filter(
@@ -174,11 +176,14 @@ test("首次 init 创建内置规则，state.json 含 packageVersion", async () 
     assert.match(gitCommitRuleContent, /Breaking change 的 body 必填/u);
     assert.match(gitCommitRuleContent, /chore\(release\): 发布 <version>/u);
     assert.match(gitCommitRuleContent, /优先使用 `git revert`/u);
+    assert.match(completionRecordRuleContent, /code-helper-kind: completion-record/u);
+    assert.match(completionRecordRuleContent, /不得据此创建或补齐 plan-doc、status-doc、result-doc/u);
     assert.ok(createdRules.length >= 1);
     assert.equal(state.packageVersion, packageVersion);
     assert.ok(Array.isArray(state.enabledFeatures));
     assert.equal(typeof state.ruleTemplateFingerprints["项目记忆规则优化.md"], "string");
     assert.equal(typeof state.ruleTemplateFingerprints["Git提交信息格式规范.md"], "string");
+    assert.equal(typeof state.ruleTemplateFingerprints["完成记录规范.md"], "string");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -271,9 +276,9 @@ test("0.1.0 的真实 Agent 规则在无指纹 state 下整文件升级", async 
     await updateProject(root);
     const afterUpdate = await readFile(rulePath, "utf8");
     assert.notEqual(afterUpdate, earlyTemplate);
-    // 0.1.0 只有五条基础规则；以下正文断言证明已完整刷新到当前模板。
-    assert.match(afterUpdate, /主会话定位为协调者/);
-    assert.match(afterUpdate, /如果当前会话收到主会话派发/);
+    // 0.1.0 只有五条基础规则；分级执行和派发身份正文能证明已完整刷新到当前模板。
+    assert.match(afterUpdate, /任务按风险与复杂度分为 T0-T3/);
+    assert.match(afterUpdate, /优先使用工具提供的父任务、调用关系或角色元数据/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -306,9 +311,10 @@ test("0.1.1 至 0.1.2 的真实 Agent 规则在无指纹 state 下整文件升�
     await updateProject(root);
     const afterUpdate = await readFile(rulePath, "utf8");
     assert.notEqual(afterUpdate, earlyTemplate);
-    // 这两条只存在于 0.1.3 之后的模板，能证明发生了正文整文件刷新，而非仅入口同步。
-    assert.match(afterUpdate, /如果当前会话收到主会话派发/);
-    assert.match(afterUpdate, /执行子代理发现自身缺少必要工具、权限或上下文时/);
+    // 分级降级和单层委派只存在于当前模板，能证明发生了正文整文件刷新，而非仅入口同步。
+    assert.match(afterUpdate, /当前工具没有子代理能力时，T0\/T1 由主会话按原边界直接执行/);
+    assert.match(afterUpdate, /只有元数据不可用或不能可靠传递时/);
+    assert.match(afterUpdate, /默认委派深度为 1/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

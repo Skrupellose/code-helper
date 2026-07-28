@@ -6,7 +6,7 @@ import type { CodeHelperConfig } from "../types.js";
  */
 export function renderEntryBlock(config: CodeHelperConfig): string {
   const enabledRules = [
-    "- Agent 协作规范：开始新需求、迁移、重构或反馈修复时，读取 `code-helper-docs/user-rules/Agent协作规范.md`；主会话只做协调、分配、审阅和同步，具体执行任务必须交给子代理；被明确派发的执行子代理直接完成任务，不再二次转派。",
+    "- Agent 协作规范：开始新需求、迁移、重构或反馈修复时，读取 `code-helper-docs/user-rules/Agent协作规范.md`；先按 T0-T3 判断主会话直办、建议分发或强制隔离，主会话始终负责范围控制、结果审阅和最终结论；同一基线下复用验证回执，共享产物冲突的命令串行执行；执行身份优先由工具元数据承载，无法可靠传递时才由派发提示明确，执行子代理直接完成任务且不再二次转派。",
     `- Git 提交信息格式规范：准备提交、整理提交历史、生成版本发布提交或执行 revert 时，读取 \`${config.directories.userRules}/Git提交信息格式规范.md\`；scope 必填。`,
     config.features.memoryTuning.enabled
       ? `- 项目记忆规则优化：整理或更新 \`AGENTS.md\` / \`CLAUDE.md\` / \`.github/copilot-instructions.md\` 时，读取 \`${config.directories.userRules}/项目记忆规则优化.md\`。`
@@ -15,7 +15,10 @@ export function renderEntryBlock(config: CodeHelperConfig): string {
       ? `- 项目计划优化：开始大型需求、迁移、重构或多阶段任务时，读取 \`${config.directories.userRules}/项目计划管理规范.md\`。`
       : undefined,
     config.features.resultSummary.enabled
-      ? `- 执行结果总结：完成小节点后，读取 \`${config.directories.userRules}/执行结果总结规范.md\` 并写入 result-doc。`
+      ? `- 执行结果总结：可独立验收的逻辑交付点完成后，读取 \`${config.directories.userRules}/执行结果总结规范.md\` 并写入 result-doc；微型步骤不单独生成或更新实施记录。`
+      : undefined,
+    config.features.resultSummary.enabled
+      ? `- 完成记录：直接执行任务已经完成、没有后续阶段，但收尾时发现具有复盘价值时，读取 \`${config.directories.userRules}/完成记录规范.md\` 并使用 \`code-helper-completion-record\`；完成记录不是活动任务，不得反向补齐 plan/status/result。`
       : undefined,
     config.features.testingPolicy.enabled
       ? `- 测试策略约束：涉及页面的测试只生成手工测试文档；工具只执行纯逻辑测试，读取 \`${config.directories.userRules}/测试策略规范.md\`。`
@@ -30,7 +33,7 @@ export function renderEntryBlock(config: CodeHelperConfig): string {
       ? `- 文档归档：功能完成或手动移动到 archive 后，任务视为已结束，读取 \`${config.directories.userRules}/文档归档规范.md\`。`
       : undefined,
     config.features.completionReview.enabled
-      ? `- 功能完成检查：完成实现、文档或功能变更节点后准备最终回复，或切换任务前，读取 \`${config.directories.userRules}/功能完成检查规范.md\`，并按需运行 \`npx @skrupellose/code-helper finish\`；普通问答和只读 review 不触发。`
+      ? `- 功能完成检查：完成一个可独立验收的逻辑交付点后准备最终回复，或切换任务前，读取 \`${config.directories.userRules}/功能完成检查规范.md\`，并按需运行 \`npx @skrupellose/code-helper finish\`；微型步骤、普通问答和只读 review 不单独触发。`
       : undefined,
     config.features.checks.enabled
       ? "- 规则检查：提交或阶段结束前运行 `npx @skrupellose/code-helper check`，确认协作文档结构仍完整。"
@@ -49,10 +52,13 @@ export function renderEntryBlock(config: CodeHelperConfig): string {
 
 1. 本区块由 code-helper 自动维护，请不要手工编辑；自定义规则应写在本区块外，长期规则写入 \`${config.directories.userRules}/\`。
 2. 开始新需求、迁移、重构或反馈修复前，先读取本区块索引到的专题规则。
-3. 长期规则写入 \`${config.directories.userRules}/\`，短期过程写入 \`${config.directories.resultDoc}/\`，当前状态记录写入 \`${config.directories.statusDoc}/\`。
+3. 长期规则写入 \`${config.directories.userRules}/\`；计划任务的短期过程写入 \`${config.directories.resultDoc}/\`，当前状态记录写入 \`${config.directories.statusDoc}/\`；直接执行后形成的终态完成记录写入 \`code-helper-docs/completion-record/\`。
 4. 不把一次性调试过程、临时失败细节或大段实现流水写进入口文档。
-5. 主会话只做管理、分配、审阅和结果同步；具体执行任务必须交给子代理。当前 agent 工具没有子代理能力时，先说明限制并等待用户确认，再由主会话执行。
-6. 如果当前会话是主会话明确派发的执行子代理，必须按派发范围直接读取、修改、验证和汇报，不再因“主会话必须派发子代理”规则而停止或再次转派。
+5. 主会话按 T0-T3 风险与复杂度决定执行方式：T0/T1 可直办，T2 建议分发，T3 必须实现与复核隔离；主会话始终负责范围控制、结果审阅和最终结论。
+6. 主会话始终可以进行只读证据核验、查看 diff、搜索调用方、运行非变更型静态检查和定向测试，不需要为了这些复核动作额外分发。
+7. 当前会话优先使用工具提供的父任务或角色元数据识别执行子代理；元数据不可用或不能可靠传递时，派发提示必须明确执行身份并作为兼容回退。执行子代理必须按派发范围直接完成，不再转派。
+8. 单个逻辑交付点默认最多触发 4 个子代理任务和一轮独立复审；达到原始完成定义且当前阻断项关闭后停止自动扩修，并用统一进度摘要说明下一步。
+9. 同一基线下相同验证命令默认只执行一次并复用回执；会共同写入 \`dist\`、\`coverage\`、缓存、快照或依赖目录的命令必须串行。
 
 ### 专题规则索引
 
@@ -62,7 +68,7 @@ ${enabledRules.join("\n")}
 
 - 入口文档只保留轻量索引和核心约束。
 - 专题规则文档必须包含“功能描述 / 调用时机 / 调用入口文件 / 规则”四个小节。
-- 计划、状态、结果和测试文档必须使用中文命名与中文总结。
-- agent 识别到功能变更、项目结构变化、稳定规则变化或小节点完成时，必须主动判断是否需要更新过程文档、询问更新长期记忆、询问归档或继续当前节点。
+- 计划、状态、结果、测试和完成记录必须使用中文命名与中文总结。
+- agent 识别到功能变更、项目结构变化、稳定规则变化或可独立验收的逻辑交付点完成时，必须主动判断是否需要更新过程文档、询问更新长期记忆、询问归档或继续当前节点；微型步骤不单独触发。
 - 新功能或重构形成稳定规则后，先询问用户是否更新项目记忆，不自动把短期任务状态写入长期记忆。`;
 }

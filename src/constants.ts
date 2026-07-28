@@ -7,6 +7,12 @@ import type { CodeHelperConfig, FeatureKey } from "./types.js";
 export const CONFIG_VERSION = 1;
 
 /**
+ * 直接执行任务的终态完成记录目录。
+ * 该目录不属于 plan/status/result 工作台，也不参与任务发现与归档生命周期。
+ */
+export const COMPLETION_RECORD_DIRECTORY = "code-helper-docs/completion-record";
+
+/**
  * 所有内置功能的稳定顺序。
  * 菜单展示、配置合并和测试断言都复用这个顺序。
  */

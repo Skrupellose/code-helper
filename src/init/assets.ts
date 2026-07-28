@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { FEATURE_KEYS } from "../constants.js";
+import { COMPLETION_RECORD_DIRECTORY, FEATURE_KEYS } from "../constants.js";
 import { loadConfig } from "../config.js";
 import {
   createRuleDocumentFingerprint,
@@ -153,7 +153,9 @@ export async function createDirectories(
     config.directories.resultDoc,
     `${config.directories.resultDoc}/archive`,
     config.directories.statusDoc,
-    `${config.directories.statusDoc}/archive`
+    `${config.directories.statusDoc}/archive`,
+    // 完成记录创建即为 recorded 终态，因此只创建独立目录，不创建 archive 子目录。
+    COMPLETION_RECORD_DIRECTORY
   ];
 
   for (const directory of directories) {

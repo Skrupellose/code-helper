@@ -1,4 +1,5 @@
 import { agentCollaborationSkillTemplate } from "./skills/agent-collaboration.js";
+import { completionRecordSkillTemplate } from "./skills/completion-record.js";
 import { completionReviewSkillTemplate } from "./skills/completion-review.js";
 import { documentArchiveSkillTemplate } from "./skills/document-archive.js";
 import { manualTestWorkbenchSkillTemplate } from "./skills/manual-test-workbench.js";
@@ -22,6 +23,7 @@ const CODE_HELPER_SKILL_MANIFEST: readonly Readonly<SkillTemplate>[] = Object.fr
     manualTestWorkbenchSkillTemplate,
     reviewFixSkillTemplate,
     documentArchiveSkillTemplate,
+    completionRecordSkillTemplate,
     completionReviewSkillTemplate
   ].map((skill) => Object.freeze({ ...skill }))
 );
