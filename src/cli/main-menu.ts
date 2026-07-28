@@ -22,7 +22,9 @@ export interface MainMenuGroup {
 
 /**
  * 主菜单信息架构。
- * 分组按用户完成一次协作任务的常见顺序排列：准备项目、推进任务、维护文档，再管理工具能力。
+ * 只保留「项目准备」与「工具设置」：初始化/刷新与 Skills/Hooks 管理仍由用户交互完成。
+ * 任务推进（plan / manual-test / finish）与项目维护（tasks / archive / check）
+ * 不再进入交互主菜单，改由 agent 按项目规则和适用 Skills 执行，必要时调用保留的 CLI 子命令。
  */
 export const MAIN_MENU_GROUPS: MainMenuGroup[] = [
   {
@@ -36,60 +38,20 @@ export const MAIN_MENU_GROUPS: MainMenuGroup[] = [
     ]
   },
   {
-    title: "任务推进",
-    items: [
-      {
-        value: "2",
-        name: "生成任务计划模板",
-        description: "根据需求文档创建计划、状态记录和执行记录模板，供 agent 继续完善"
-      },
-      {
-        value: "3",
-        name: "生成手工测试模板",
-        description: "创建人工验收测试模板，供 agent 根据页面和流程补充步骤"
-      },
-      {
-        value: "4",
-        name: "检查功能完成情况",
-        description: "检查当前任务是否满足完成条件，并提示后续动作"
-      }
-    ]
-  },
-  {
-    title: "项目维护",
-    items: [
-      {
-        value: "5",
-        name: "查看任务列表",
-        description: "查看 active、archived 和 mixed 状态的任务文档"
-      },
-      {
-        value: "6",
-        name: "归档已完成任务",
-        description: "将已结束任务的计划、结果和状态文档移动到 archive"
-      },
-      {
-        value: "7",
-        name: "检查协作规范",
-        description: "检查入口文档、规则目录、计划和归档结构是否完整"
-      }
-    ]
-  },
-  {
     title: "工具设置",
     items: [
       {
-        value: "8",
+        value: "2",
         name: "功能管理",
         description: "应用或取消项目级 Skills、Agent hooks 和 Git hook"
       },
       {
-        value: "9",
+        value: "3",
         name: "管理项目 Skills",
         description: "查看、注册、取消注册、检查或分析项目级 Skills"
       },
       {
-        value: "10",
+        value: "4",
         name: "管理 Hooks",
         description: "查看、安装或卸载 code-helper 管理的 Git / Agent hooks"
       }
@@ -143,7 +105,7 @@ export function formatMainMenuTextItemLines(item: MainMenuItem): string[] {
  * 该项不属于 MAIN_MENU_GROUPS，避免被误认为普通项目准备动作。
  */
 export function formatVersionUpgradeSelectItemLabel(versionUpdate: VersionUpdateState): string {
-  return `  U. ${padMenuText("更新到最新版本", MAIN_MENU_NAME_COLUMN_WIDTH)} 升级 npm 包并刷新当前项目 code-helper 入口、Skills 和 Hooks（${versionUpdate.currentVersion} -> ${versionUpdate.latestVersion}）`;
+  return `  U. ${padMenuText("安装或升级到最新版本", MAIN_MENU_NAME_COLUMN_WIDTH)} 安装或升级本地开发依赖，再调用新版 update 刷新入口、Skills 和 Hooks（${versionUpdate.currentVersion} -> ${versionUpdate.latestVersion}）`;
 }
 
 /**
@@ -152,8 +114,8 @@ export function formatVersionUpgradeSelectItemLabel(versionUpdate: VersionUpdate
  */
 export function formatVersionUpgradeTextItemLines(versionUpdate: VersionUpdateState): string[] {
   return [
-    "  U. 更新到最新版本",
-    `      升级 npm 包并刷新当前项目 code-helper 入口、Skills 和 Hooks（${versionUpdate.currentVersion} -> ${versionUpdate.latestVersion}）`
+    "  U. 安装或升级到最新版本",
+    `      安装或升级本地开发依赖，再调用新版 update 刷新入口、Skills 和 Hooks（${versionUpdate.currentVersion} -> ${versionUpdate.latestVersion}）`
   ];
 }
 

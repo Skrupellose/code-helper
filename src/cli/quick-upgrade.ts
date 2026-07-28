@@ -29,7 +29,7 @@ export interface CodeHelperQuickUpgradeOptions {
 
 /**
  * 主菜单顶部的快捷升级动作。
- * 该动作只在交互菜单中出现，执行顺序固定为：升级 npm 包，再刷新当前项目已有 code-helper 本地资产。
+ * 该动作只在交互菜单中出现，执行顺序固定为：安装或升级本地开发依赖，再调用新版 update 刷新本地资产。
  */
 export async function runCodeHelperQuickUpgrade(
   projectRoot: string,
@@ -41,15 +41,15 @@ export async function runCodeHelperQuickUpgrade(
   try {
     const command = await resolveCodeHelperUpgradeCommand(projectRoot);
 
-    console.log(`准备升级 npm 包：${command.command} ${command.args.join(" ")}`);
+    console.log(`准备安装或升级本地开发依赖：${command.command} ${command.args.join(" ")}`);
     const installExitCode = await runPackageCommand(command, projectRoot);
 
     if (installExitCode !== 0) {
-      console.error(`npm 包升级失败，退出码：${installExitCode}`);
+      console.error(`本地开发依赖安装或升级失败，退出码：${installExitCode}`);
       return installExitCode;
     }
 
-    console.log("npm 包升级成功，开始刷新当前项目 code-helper 入口、Skills 和 Hooks。");
+    console.log("本地开发依赖安装或升级成功，开始调用新版 code-helper update 刷新入口、Skills 和 Hooks。");
     const updateExitCode = await runUpdateCommand(projectRoot);
 
     if (updateExitCode !== 0) {
@@ -57,7 +57,7 @@ export async function runCodeHelperQuickUpgrade(
       return updateExitCode;
     }
 
-    console.log("当前项目 code-helper 本地资产刷新完成。");
+    console.log("新版 code-helper update 已完成当前项目本地资产刷新。");
     return 0;
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
