@@ -162,11 +162,17 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
     assert.ok(secondOperations.every((operation) => operation.action === "skipped"));
     assert.ok(statuses.every((status) => status.registered));
     assert.match(completionSkill, /name: code-helper-completion-review/);
+    assert.match(completionSkill, /可独立验收的逻辑交付点/);
+    assert.match(completionSkill, /微型步骤不单独触发/);
+    assert.match(completionSkill, /真实功能变更在最终回复前仍必须触发/);
     // 新增协作 skill 必须能被注册，并包含对子代理协作边界的明确说明。
     assert.match(collaborationSkill, /name: code-helper-agent-collaboration/);
-    assert.match(collaborationSkill, /子代理/);
+    assert.match(collaborationSkill, /T0\/T1 允许主会话直办，T2 建议分发，T3 强制实现与复核隔离/);
+    assert.match(collaborationSkill, /主会话始终可以直接进行只读证据核验和非变更型验证/);
+    assert.match(collaborationSkill, /当前 agent 工具没有可调用的子代理能力，按等级降级/);
     assert.match(collaborationSkill, /你现在是执行子代理/);
-    assert.match(collaborationSkill, /不再套用“主会话必须派发子代理”的职责/);
+    assert.match(collaborationSkill, /默认委派深度为 1/);
+    assert.match(collaborationSkill, /执行子代理不得自行二次转派/);
     assert.match(manualTestSkill, /name: code-helper-manual-test-workbench/);
     assert.match(manualTestSkill, /manual-test.*只负责生成结构化模板/s);
     assert.match(manualTestSkill, /测试环境、前置数据、操作步骤、预期结果、回归范围和阻塞记录/);
@@ -178,6 +184,7 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
     assert.match(reviewFixSkill, /不要创建.*代码审查\.md/s);
     assert.match(reviewFixSkill, /不自动提交、推送、归档、发布或更新长期记忆/);
     assert.match(reviewFixSkill, /Codex、Claude、Grok、GitHub Copilot/);
+    assert.match(reviewFixSkill, /按项目 Agent 协作规范的 T0-T3 风险等级决定直办、建议分发或强制实现与复核隔离/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1135,8 +1142,9 @@ test("内置完成检查与归档 skill 描述会收窄触发和手工测试条�
       "utf8"
     );
 
-    assert.match(completionSkill, /完成实现、文档或功能变更节点后准备最终回复/u);
-    assert.match(completionSkill, /普通问答、只读 review.*不触发/u);
+    assert.match(completionSkill, /完成可独立验收的逻辑交付点并准备最终回复/u);
+    assert.match(completionSkill, /微型步骤不单独触发/u);
+    assert.match(completionSkill, /真实功能变更在最终回复前仍必须触发/u);
     assert.match(completionSkill, /mixed 任务必须优先/u);
     assert.match(completionSkill, /没有 active 且没有 mixed 任务时/u);
     assert.match(completionSkill, /仅报告当前没有活动任务/u);

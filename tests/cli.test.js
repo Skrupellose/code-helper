@@ -533,7 +533,9 @@ test("sync-local 刷新 AGENTS 和四类项目级 skills 且不创建其他入�
     const copilotCollaborationSkill = await readFile(join(root, ".github/skills/code-helper-agent-collaboration/SKILL.md"), "utf8");
     const copilotManualTestSkill = await readFile(join(root, ".github/skills/code-helper-manual-test-workbench/SKILL.md"), "utf8");
     const grokSkill = await readFile(join(root, ".grok/skills/code-helper-completion-review/SKILL.md"), "utf8");
+    const grokCollaborationSkill = await readFile(join(root, ".grok/skills/code-helper-agent-collaboration/SKILL.md"), "utf8");
     const copilotReviewFixSkill = await readFile(join(root, ".github/skills/code-helper-review-fix/SKILL.md"), "utf8");
+    const grokReviewFixSkill = await readFile(join(root, ".grok/skills/code-helper-review-fix/SKILL.md"), "utf8");
     const localSkillTemplate = await readFile(join(root, ".code-helper/skills/completion-review.SKILL.md"), "utf8");
     const localCollaborationTemplate = await readFile(join(root, ".code-helper/skills/agent-collaboration.SKILL.md"), "utf8");
     const localManualTestTemplate = await readFile(join(root, ".code-helper/skills/manual-test-workbench.SKILL.md"), "utf8");
@@ -542,10 +544,17 @@ test("sync-local 刷新 AGENTS 和四类项目级 skills 且不创建其他入�
       join(root, "code-helper-docs/user-rules/Git提交信息格式规范.md"),
       "utf8"
     );
+    const resultSummaryRule = await readFile(
+      join(root, "code-helper-docs/user-rules/执行结果总结规范.md"),
+      "utf8"
+    );
 
     assert.equal(result, 0);
-    assert.match(agents, /主会话只做管理、分配、审阅和结果同步；具体执行任务必须交给子代理/);
-    assert.match(agents, /如果当前会话是主会话明确派发的执行子代理/);
+    assert.match(agents, /T0\/T1 可直办，T2 建议分发，T3 必须实现与复核隔离/);
+    assert.match(agents, /主会话始终可以进行只读证据核验、查看 diff、搜索调用方、运行非变更型静态检查和定向测试/);
+    assert.match(agents, /执行结果总结：可独立验收的逻辑交付点完成后/);
+    assert.match(agents, /微型步骤不单独生成或更新实施记录/);
+    assert.match(agents, /优先使用工具提供的父任务或角色元数据识别执行子代理/);
     assert.match(agents, /Agent 协作规范/);
     assert.match(agents, /手工测试生成/);
     assert.match(agents, /code-helper-manual-test-workbench/);
@@ -556,7 +565,15 @@ test("sync-local 刷新 AGENTS 和四类项目级 skills 且不创建其他入�
     assert.match(agents, /Codex、Claude Code、GitHub Copilot 或 Grok Build/);
     assert.match(codexSkill, /name: code-helper-completion-review/);
     assert.match(codexCollaborationSkill, /name: code-helper-agent-collaboration/);
-    assert.match(codexCollaborationSkill, /子代理/);
+    assert.match(codexCollaborationSkill, /T0\/T1 允许主会话直办，T2 建议分发，T3 强制实现与复核隔离/);
+    assert.match(codexCollaborationSkill, /主会话始终可以直接进行只读证据核验和非变更型验证/);
+    assert.match(codexCollaborationSkill, /T0\/T1：主会话按原范围直接执行，不需要额外等待确认/);
+    assert.match(codexCollaborationSkill, /用户确认不能授权单会话绕过独立隔离/);
+    assert.match(codexCollaborationSkill, /优先使用工具提供的父任务、调用关系或角色元数据/);
+    assert.match(codexCollaborationSkill, /默认委派深度为 1/);
+    assert.match(codexCollaborationSkill, /顺序强依赖链优先由同一执行代理负责到底/);
+    assert.match(codexCollaborationSkill, /补充任务优先复用原执行代理/);
+    assert.match(codexCollaborationSkill, /完成检查按可独立验收的逻辑交付点触发/);
     assert.match(codexCollaborationSkill, /你现在是执行子代理/);
     assert.match(codexManualTestSkill, /name: code-helper-manual-test-workbench/);
     assert.match(codexManualTestSkill, /测试环境、前置数据、操作步骤、预期结果、回归范围和阻塞记录/);
@@ -570,6 +587,23 @@ test("sync-local 刷新 AGENTS 和四类项目级 skills 且不创建其他入�
     assert.match(copilotManualTestSkill, /name: code-helper-manual-test-workbench/);
     assert.match(grokSkill, /name: code-helper-completion-review/);
     assert.match(copilotReviewFixSkill, /name: code-helper-review-fix/);
+    assert.match(copilotReviewFixSkill, /按项目 Agent 协作规范的 T0-T3 风险等级决定直办、建议分发或强制实现与复核隔离/);
+    // 四个平台与本地模板必须逐字一致，避免某个平台继续保留旧的强制分发口径。
+    assert.equal(claudeCollaborationSkill, codexCollaborationSkill);
+    assert.equal(copilotCollaborationSkill, codexCollaborationSkill);
+    assert.equal(grokCollaborationSkill, codexCollaborationSkill);
+    assert.equal(localCollaborationTemplate, codexCollaborationSkill);
+    assert.equal(claudeReviewFixSkill, codexReviewFixSkill);
+    assert.equal(copilotReviewFixSkill, codexReviewFixSkill);
+    assert.equal(grokReviewFixSkill, codexReviewFixSkill);
+    assert.equal(localReviewFixTemplate, codexReviewFixSkill);
+    assert.match(codexSkill, /可独立验收的逻辑交付点/);
+    assert.match(codexSkill, /微型步骤不单独触发/);
+    assert.match(codexSkill, /真实功能变更在最终回复前仍必须触发/);
+    assert.equal(claudeSkill, codexSkill);
+    assert.equal(copilotSkill, codexSkill);
+    assert.equal(grokSkill, codexSkill);
+    assert.equal(localSkillTemplate, codexSkill);
     assert.match(localSkillTemplate, /name: code-helper-completion-review/);
     assert.match(localCollaborationTemplate, /name: code-helper-agent-collaboration/);
     assert.match(localManualTestTemplate, /name: code-helper-manual-test-workbench/);
@@ -577,6 +611,9 @@ test("sync-local 刷新 AGENTS 和四类项目级 skills 且不创建其他入�
     assert.match(gitCommitRule, /普通提交统一使用：\s*\x60<type>\(<scope>\): <subject>\x60/u);
     assert.match(gitCommitRule, /Breaking change 提交统一使用：\s*\x60<type>\(<scope>\)!: <subject>\x60/u);
     assert.match(gitCommitRule, /scope 必填/u);
+    assert.match(resultSummaryRule, /可独立验收的逻辑交付点完成后的实施记录/u);
+    assert.match(resultSummaryRule, /微型步骤不单独生成或更新实施记录/u);
+    assert.match(resultSummaryRule, /重要阻塞、回滚点或影响下一步决策的验证结论不必等待逻辑交付点完成/u);
     await assert.rejects(
       () => stat(join(root, "CLAUDE.md")),
       /ENOENT/
