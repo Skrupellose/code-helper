@@ -1,6 +1,7 @@
 import { loadConfig } from "./config.js";
 import { checkArchiveState } from "./checks/archive.js";
 import { checkConfig, checkRawConfig } from "./checks/config.js";
+import { checkCompletionRecords } from "./checks/completion-record.js";
 import { checkChineseWorkbenchDocuments, checkPlanDirectories } from "./checks/documents.js";
 import { checkEntryDocuments } from "./checks/entries.js";
 import { checkRuleDocuments } from "./checks/rules.js";
@@ -31,6 +32,7 @@ export async function runChecks(projectRoot: string, options: { writeReport?: bo
   issues.push(...(await checkRuleDocuments(projectRoot, config)));
   issues.push(...(await checkPlanDirectories(projectRoot, config)));
   issues.push(...(await checkChineseWorkbenchDocuments(projectRoot, config)));
+  issues.push(...(await checkCompletionRecords(projectRoot)));
   issues.push(...(await checkTestingPolicy(projectRoot, config)));
   issues.push(...(await checkArchiveState(projectRoot, config)));
 

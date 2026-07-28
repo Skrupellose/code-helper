@@ -22,6 +22,16 @@ export function printCompletionReview(review: CompletionReview, checkOnly: boole
   console.log(`任务状态：${review.taskStatus}`);
   console.log(`检查结论：${formatCompletionReviewStatus(review.reviewStatus)}`);
   console.log(`运行模式：${checkOnly ? "仅检查，不修改文件" : "检查并给出下一步建议"}`);
+
+  // recorded 是独立终态，不展示 plan/status/result“缺失”，避免用户或 agent
+  // 把这些非适用字段误解为需要补齐的活动任务材料。
+  if (review.reviewStatus === "recorded") {
+    console.log("");
+    console.log(`完成记录：${formatDocumentPresence(review.documents.completionRecord)}`);
+    console.log("无需补齐 plan/status/result，无需归档，也无需选择下一活动任务。");
+    return;
+  }
+
   console.log("");
   console.log("文档状态：");
   console.log(`- 计划文档：${formatDocumentPresence(review.documents.plan)}`);
@@ -125,6 +135,7 @@ function formatCompletionReviewStatus(status: CompletionReview["reviewStatus"]):
     "node-review": "需要先补齐当前执行节点",
     "ready-to-archive": "可在用户确认后归档",
     archived: "任务已归档，视为已结束",
+    recorded: "完成记录已登记，视为直接执行任务终态",
     "missing-docs": "缺少必要协作文档",
     mixed: "存在 active/archive 冲突，需先整理"
   };

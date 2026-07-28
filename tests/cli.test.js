@@ -369,6 +369,7 @@ test("help 会展示 sync-local 子命令", async () => {
     assert.match(logs.join("\n"), /code-helper version/);
     assert.match(logs.join("\n"), /code-helper npm-scripts install/);
     assert.match(logs.join("\n"), /code-helper sync-local/);
+    assert.match(logs.join("\n"), /code-helper record <中文功能名>/);
     assert.match(logs.join("\n"), /注册全部项目级 skills/);
   } finally {
     console.log = originalLog;

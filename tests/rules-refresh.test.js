@@ -156,6 +156,8 @@ test("首次 init 创建内置规则，state.json 含 packageVersion", async () 
     const ruleContent = await readFile(rulePath, "utf8");
     const gitCommitRulePath = join(root, "code-helper-docs/user-rules/Git提交信息格式规范.md");
     const gitCommitRuleContent = await readFile(gitCommitRulePath, "utf8");
+    const completionRecordRulePath = join(root, "code-helper-docs/user-rules/完成记录规范.md");
+    const completionRecordRuleContent = await readFile(completionRecordRulePath, "utf8");
     const state = JSON.parse(await readFile(join(root, ".code-helper/state.json"), "utf8"));
     const packageVersion = await getCurrentPackageVersion();
     const createdRules = result.operations.filter(
@@ -174,11 +176,14 @@ test("首次 init 创建内置规则，state.json 含 packageVersion", async () 
     assert.match(gitCommitRuleContent, /Breaking change 的 body 必填/u);
     assert.match(gitCommitRuleContent, /chore\(release\): 发布 <version>/u);
     assert.match(gitCommitRuleContent, /优先使用 `git revert`/u);
+    assert.match(completionRecordRuleContent, /code-helper-kind: completion-record/u);
+    assert.match(completionRecordRuleContent, /不得据此创建或补齐 plan-doc、status-doc、result-doc/u);
     assert.ok(createdRules.length >= 1);
     assert.equal(state.packageVersion, packageVersion);
     assert.ok(Array.isArray(state.enabledFeatures));
     assert.equal(typeof state.ruleTemplateFingerprints["项目记忆规则优化.md"], "string");
     assert.equal(typeof state.ruleTemplateFingerprints["Git提交信息格式规范.md"], "string");
+    assert.equal(typeof state.ruleTemplateFingerprints["完成记录规范.md"], "string");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

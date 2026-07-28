@@ -1,6 +1,6 @@
 # code-helper
 
-`code-helper` 是一个面向 agent 协作项目的 CLI，用于初始化协作规则、生成计划和验收模板、记录执行状态，并在任务结束前检查是否还有未处理事项。工具适用于绝大部分编程语言项目，可把 7 个内置 Skills 注册给 Codex、Claude Code、GitHub Copilot 和 Grok Build，并为项目生成 Git 提交信息规范。
+`code-helper` 是一个面向 agent 协作项目的 CLI，用于初始化协作规则、生成计划和验收模板、记录执行状态，并在任务结束前检查是否还有未处理事项。工具适用于绝大部分编程语言项目，可把 8 个内置 Skills 注册给 Codex、Claude Code、GitHub Copilot 和 Grok Build，并为项目生成 Git 提交信息规范。
 
 ## 运行环境
 
@@ -43,6 +43,7 @@ npx code-helper version
 npx code-helper npm-scripts install
 npx code-helper plan docs/订单管理需求.md 订单管理升级
 npx code-helper manual-test 订单管理升级
+npx code-helper record 轻量修复复盘
 npx code-helper finish 订单管理升级
 npx code-helper archive 订单管理升级
 npx code-helper tasks
@@ -76,6 +77,7 @@ npx @skrupellose/code-helper@latest update
 | `npm-scripts install` | 写入常用 npm scripts，仅适合已有 `package.json` 的 Node/npm 项目 |
 | `plan`                | 根据需求文档创建计划、状态记录和执行记录模板，供 agent 继续完善                 |
 | `manual-test`         | 创建人工验收测试模板，供 agent 根据页面和流程补充步骤                      |
+| `record`              | 为已完成且具有复盘价值的直接执行任务创建完成记录模板                       |
 | `finish`              | 检查当前任务是否满足完成条件，并提示后续动作                              |
 | `archive`             | 将已结束任务的计划、结果和状态文档移动到 archive                        |
 | `tasks`               | 查看 active、archived 和 mixed 状态的任务文档                  |
@@ -94,6 +96,7 @@ npx @skrupellose/code-helper@latest update
 | `code-helper-docs/plan-doc/`      | 任务计划文档                |
 | `code-helper-docs/result-doc/`    | 执行记录和手工测试文档           |
 | `code-helper-docs/status-doc/`    | 当前任务状态记录              |
+| `code-helper-docs/completion-record/` | 直接执行任务的终态完成记录        |
 | `AGENTS.md`                       | Codex / Grok Build 项目入口文档 |
 | `CLAUDE.md`                       | Claude Code 项目入口文档    |
 | `.github/copilot-instructions.md` | GitHub Copilot 项目入口文档 |
@@ -118,6 +121,14 @@ npx @skrupellose/code-helper@latest update
 
 已完成任务可以用 `archive` 移入对应的 `archive/` 目录。手动移动到 `archive/` 的任务也会被识别为已结束任务。
 
+直接执行任务如果已经完成、没有后续阶段，但收尾时发现具有跨模块改动、较长验证链或重要决策等复盘价值，可以让 agent 生成独立完成记录：
+
+```bash
+npx @skrupellose/code-helper record 轻量修复复盘
+```
+
+完成记录写入 `code-helper-docs/completion-record/<中文功能名>-完成记录.md`，创建即为 `recorded` 终态。它不属于活动任务，不要求补齐 plan/status/result，也不需要再次归档。普通轻量任务不强制生成完成记录；仍有后续阶段或阻塞的任务应升级为计划跟踪。
+
 ## 完成检查
 
 完成小节点、识别到功能变更、准备最终回复或切换任务前，可以运行：
@@ -128,7 +139,7 @@ npx @skrupellose/code-helper finish 订单管理升级 --check-only
 
 `finish` 只输出完成判断和后续建议，不会自动更新长期记忆、归档文档、提交代码或发布包。
 
-## 7 个内置 Skills
+## 8 个内置 Skills
 
 初始化并注册 Skills 后，用户优先用自然语言描述目标即可：
 
@@ -136,6 +147,7 @@ npx @skrupellose/code-helper finish 订单管理升级 --check-only
 - “补一份人工验收清单”对应 `code-helper-manual-test-workbench`。
 - “先只读 review 最近改动”对应 `code-helper-review-fix`。
 - “完成前检查是否还有遗漏”对应 `code-helper-completion-review`。
+- “这个直接执行任务已经完成，但值得留一份复盘记录”对应 `code-helper-completion-record`。
 - “这个功能完成后先问我是否归档”对应 `code-helper-document-archive`。
 - “把稳定规则整理成长期记忆草案”对应 `code-helper-memory-tuning`。
 - “按多 agent 协作规范拆分和审阅”对应 `code-helper-agent-collaboration`。

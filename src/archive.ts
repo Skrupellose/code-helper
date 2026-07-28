@@ -2,6 +2,7 @@ import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { loadConfig } from "./config.js";
+import { findCompletionRecord } from "./completion-record.js";
 import { ensureDirectory, pathExists, portablePath, projectPath, writeText } from "./fs-utils.js";
 import { containsChinese } from "./text-utils.js";
 import type { CodeHelperConfig, OperationResult } from "./types.js";
@@ -47,7 +48,23 @@ export async function archiveFeature(
     throw new Error("文档归档功能已关闭，请先执行 `code-helper features enable documentArchive`。");
   }
 
-  const featureNames = getArchiveFeatureNameCandidates(rawFeatureName);
+  const rawFeatureNames = getArchiveFeatureNameCandidates(rawFeatureName);
+  const matchingTask = findTaskByFeatureName(await listTasks(projectRoot), rawFeatureName);
+  const featureNames = matchingTask === undefined
+    ? rawFeatureNames
+    : [...new Set([matchingTask.featureName, ...rawFeatureNames])];
+  const completionRecord = await findCompletionRecord(projectRoot, rawFeatureName);
+  const explicitlyNamedCompletionRecord = /-完成记录(?:\.md)?$/u.test(rawFeatureName.trim());
+  if (
+    completionRecord !== undefined
+    && (matchingTask === undefined || explicitlyNamedCompletionRecord)
+  ) {
+    // 完成记录创建即为 recorded 终态，不能进入 plan/status/result 的 archive 生命周期。
+    throw new Error(
+      `完成记录已经是终态，无需归档：${completionRecord.relativePath}。`
+    );
+  }
+
   const recordFeatureName = featureNames[0];
   const operations: OperationResult[] = [];
   const moves = featureNames.flatMap((featureName) => getArchiveMoves(config, featureName));
@@ -113,6 +130,47 @@ export function getArchiveFeatureNameCandidates(rawFeatureName: string): string[
     : [legacyName, chineseName];
 
   return [...new Set(orderedNames)];
+}
+
+/**
+ * 用统一的精确、大小写不敏感和规范化候选规则查找计划任务。
+ *
+ * record、finish、archive 和检查器必须复用该函数，避免同一输入在不同生命周期
+ * 入口命中不同任务。
+ */
+export function findTaskByFeatureName(
+  tasks: TaskRecord[],
+  rawFeatureName: string
+): TaskRecord | undefined {
+  const inputKeys = getFeatureNameLookupKeys(rawFeatureName);
+
+  return tasks.find((task) => {
+    for (const key of getFeatureNameLookupKeys(task.featureName)) {
+      if (inputKeys.has(key)) {
+        return true;
+      }
+    }
+
+    return false;
+  });
+}
+
+/** 生成大小写不敏感且兼容历史英文名的任务查找键。 */
+function getFeatureNameLookupKeys(rawFeatureName: string): Set<string> {
+  const keys = new Set<string>();
+  const raw = rawFeatureName.trim();
+
+  if (raw.length > 0) {
+    keys.add(raw);
+    keys.add(raw.toLowerCase());
+  }
+
+  for (const candidate of getArchiveFeatureNameCandidates(rawFeatureName)) {
+    keys.add(candidate);
+    keys.add(candidate.toLowerCase());
+  }
+
+  return keys;
 }
 
 /**

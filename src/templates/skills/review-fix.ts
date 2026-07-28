@@ -147,7 +147,7 @@ ID 格式固定为 \`RF-P0-001\`、\`RF-P1-001\`、\`RF-P2-001\`，同一轮复�
 
 仍影响下一步决策的 finding 或阻塞同步到 \`code-helper-docs/status-doc/<中文功能名>-状态.md\`。写入范围不得超过用户授权；不要创建 \`代码审查.md\`、\`review.md\` 等未被 code-helper 支持的新结果文档类型。
 
-没有记录授权时，findings 只保留在当前对话，不写入任何过程文档。如果当前没有活动任务，即使用户授权记录 review，也不要自行虚构 plan-doc、status-doc 或 result-doc；应先在对话中汇报，并在确实需要建立任务文档时另行取得授权。
+没有记录授权时，findings 只保留在当前对话，不写入任何过程文档。如果当前没有活动任务，即使用户授权记录 review，也不要自行虚构 plan-doc、status-doc 或 result-doc；应先在对话中汇报，并在确实需要建立任务文档时另行取得授权。用户随后授权修复且整组修复已经完成、没有后续阶段并具有复盘价值时，可以由主会话使用 \`code-helper-completion-record\` 生成独立完成记录；纯只读 review 仍不得生成完成记录。
 
 ## 阶段三：逐项复审
 

@@ -11,6 +11,7 @@ import { initializeProject, updateProject } from "../dist/init.js";
 import { runChecks } from "../dist/checks.js";
 import { runCli } from "../dist/cli.js";
 import { agentCollaborationSkillTemplate } from "../dist/templates/skills/agent-collaboration.js";
+import { completionRecordSkillTemplate } from "../dist/templates/skills/completion-record.js";
 import { completionReviewSkillTemplate } from "../dist/templates/skills/completion-review.js";
 import {
   buildInitTargetMultiSelectOptions,
@@ -183,10 +184,18 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
       join(root, ".agents/skills/code-helper-completion-review/SKILL.md"),
       "utf8"
     );
+    const completionRecordSkill = await readFile(
+      join(root, ".agents/skills/code-helper-completion-record/SKILL.md"),
+      "utf8"
+    );
     const codexHook = await readFile(join(root, ".codex/hooks.json"), "utf8");
     const managedBlock = extractManagedBlock(agents);
     const gitCommitRule = await readFile(
       join(root, "code-helper-docs/user-rules/Git提交信息格式规范.md"),
+      "utf8"
+    );
+    const completionRecordRule = await readFile(
+      join(root, "code-helper-docs/user-rules/完成记录规范.md"),
       "utf8"
     );
 
@@ -209,6 +218,7 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
     // 首次初始化必须注册当前模板原文，并建立协作分级、身份传递和完成检查的正向契约。
     assert.equal(collaborationSkill, agentCollaborationSkillTemplate.content);
     assert.equal(completionReviewSkill, completionReviewSkillTemplate.content);
+    assert.equal(completionRecordSkill, completionRecordSkillTemplate.content);
     assert.match(collaborationSkill, /T0\/T1 允许主会话直办，T2 建议分发，T3 强制实现与复核隔离/);
     assert.match(collaborationSkill, /主会话始终可以直接进行只读证据核验和非变更型验证/);
     assert.match(collaborationSkill, /用户确认不能授权单会话绕过独立隔离/);
@@ -217,7 +227,13 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
     assert.match(collaborationSkill, /派发提示才必须明确“你现在是执行子代理”/);
     assert.match(completionReviewSkill, /可独立验收的逻辑交付点/);
     assert.match(completionReviewSkill, /微型步骤不单独触发/);
+    assert.match(completionRecordSkill, /不得据此创建 plan-doc、status-doc 或 result-doc/u);
     assert.match(gitCommitRule, /scope 必填/u);
+    assert.match(completionRecordRule, /lifecycle: recorded/u);
+    assert.equal(
+      (await stat(join(root, "code-helper-docs/completion-record"))).isDirectory(),
+      true
+    );
     assert.match(codexHook, /agent-finish-check\.mjs/);
     await assert.rejects(
       () => stat(join(root, ".git/hooks/pre-commit")),

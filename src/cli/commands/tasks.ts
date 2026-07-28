@@ -1,7 +1,13 @@
 import { stdin as input, stdout as output } from "node:process";
 
-import { archiveFeature, listTasks, type TaskRecord } from "../../archive.js";
+import {
+  archiveFeature,
+  findTaskByFeatureName,
+  listTasks,
+  type TaskRecord
+} from "../../archive.js";
 import { createCompletionReview } from "../../completion.js";
+import { createCompletionRecord } from "../../completion-record.js";
 import { normalizeDroppedPath } from "../../input-utils.js";
 import { canUseInteractiveKeys } from "../../terminal-ui.js";
 import { createManualTestDocument, createPlanWorkbench } from "../../workflows.js";
@@ -37,6 +43,38 @@ export async function runPlan(projectRoot: string, args: string[], options: RunP
   });
   const operations = await createPlanWorkbench({ projectRoot, requirementPath: normalizedRequirementPath, featureName });
   printOperations(operations);
+  return 0;
+}
+
+/**
+ * 创建直接执行任务的终态完成记录。
+ * 参数：record <中文功能名>。
+ */
+export async function runRecord(projectRoot: string, args: string[]): Promise<number> {
+  const [featureName] = args;
+
+  if (!featureName) {
+    console.error("缺少中文功能名称。用法：code-helper record <中文功能名>");
+    return 1;
+  }
+
+  const matchingTask = findTaskByFeatureName(await listTasks(projectRoot), featureName);
+  if (matchingTask !== undefined) {
+    // 完成记录只服务于没有计划任务的直接执行工作；即使计划任务已经归档，
+    // 也不能用同名完成记录制造第二套终态。
+    console.error(
+      `功能“${matchingTask.featureName}”已经存在 ${matchingTask.status} 计划任务文档，`
+      + "请维护原 plan/status/result 生命周期，不要创建同名完成记录。"
+    );
+    return 1;
+  }
+
+  printOperations([
+    await createCompletionRecord({
+      projectRoot,
+      featureName
+    })
+  ]);
   return 0;
 }
 
@@ -184,7 +222,12 @@ export async function runTasks(projectRoot: string, args: string[]): Promise<num
  */
 function printFinishCheckOnlyCandidates(tasks: TaskRecord[]): void {
   if (tasks.length === 0) {
-    console.log("功能完成检查：当前没有发现活动任务。");
+    console.log("功能完成检查：当前没有发现活动计划任务。");
+    console.log(
+      "如果本轮是直接执行：仍有后续阶段、阻塞或跨会话恢复需求时应升级为计划跟踪；"
+      + "已经完成且具有复盘价值时才生成 completion-record；普通轻量任务直接总结。"
+    );
+    console.log("不要在收尾阶段倒写或补齐 plan/status/result。");
     console.log("如果本轮变更形成长期规则，请询问用户是否更新项目记忆。");
     return;
   }

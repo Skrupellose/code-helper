@@ -223,6 +223,8 @@ description: 当用户提供完整需求文档，并要求拆分开发计划、�
 
 ## 边界规则
 
+- 已经通过直接执行完成且只有事后复盘价值的任务，不倒写计划文档；使用 \`code-helper-completion-record\` 生成独立完成记录。
+- 直接执行任务仍有后续阶段、阻塞或跨会话恢复需求时，才升级为本 Skill 管理的 plan/status/result 计划任务。
 - 不要创建英文任务文档名，例如 implementation.md、manual-test.md 或 <feature>-status.md；新文档统一使用 实施记录.md、手工测试.md 和 <中文功能名>-状态.md。
 - 不要跳过总纲直接写细表。
 - 不要把所有需求都套成组件计划或页面计划。

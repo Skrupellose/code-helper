@@ -95,8 +95,9 @@ async function recordManagedSkillFingerprints(root, target, records) {
 test("内置 Skill 单一 manifest 的名称、目录、模板文件和正文保持一致", () => {
   const manifest = getSkillManifest();
 
-  assert.equal(manifest.length, 7);
+  assert.equal(manifest.length, 8);
   assert.ok(manifest.some((skill) => skill.name === "code-helper-review-fix"));
+  assert.ok(manifest.some((skill) => skill.name === "code-helper-completion-record"));
   assert.equal(new Set(manifest.map((skill) => skill.fileName)).size, manifest.length);
   assert.equal(new Set(manifest.map((skill) => skill.directoryName)).size, manifest.length);
   assert.equal(new Set(manifest.map((skill) => skill.name)).size, manifest.length);
@@ -144,6 +145,10 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
       join(root, ".agents/skills/code-helper-completion-review/SKILL.md"),
       "utf8"
     );
+    const completionRecordSkill = await readFile(
+      join(root, ".agents/skills/code-helper-completion-record/SKILL.md"),
+      "utf8"
+    );
     const collaborationSkill = await readFile(
       join(root, ".agents/skills/code-helper-agent-collaboration/SKILL.md"),
       "utf8"
@@ -165,6 +170,12 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
     assert.match(completionSkill, /可独立验收的逻辑交付点/);
     assert.match(completionSkill, /微型步骤不单独触发/);
     assert.match(completionSkill, /真实功能变更在最终回复前仍必须触发/);
+    assert.match(completionSkill, /计划跟踪、直接执行和 recorded 完成记录/);
+    assert.match(completionSkill, /不得返回 missing-docs/);
+    assert.match(completionRecordSkill, /name: code-helper-completion-record/);
+    assert.match(completionRecordSkill, /code-helper-kind: completion-record/);
+    assert.match(completionRecordSkill, /不创建 plan-doc、status-doc、result-doc 或手工测试文档/);
+    assert.match(completionRecordSkill, /不为倒写文档派子代理/);
     // 新增协作 skill 必须能被注册，并包含对子代理协作边界的明确说明。
     assert.match(collaborationSkill, /name: code-helper-agent-collaboration/);
     assert.match(collaborationSkill, /T0\/T1 允许主会话直办，T2 建议分发，T3 强制实现与复核隔离/);
@@ -1146,8 +1157,10 @@ test("内置完成检查与归档 skill 描述会收窄触发和手工测试条�
     assert.match(completionSkill, /微型步骤不单独触发/u);
     assert.match(completionSkill, /真实功能变更在最终回复前仍必须触发/u);
     assert.match(completionSkill, /mixed 任务必须优先/u);
-    assert.match(completionSkill, /没有 active 且没有 mixed 任务时/u);
-    assert.match(completionSkill, /仅报告当前没有活动任务/u);
+    assert.match(completionSkill, /没有对应任务文档的是直接执行/u);
+    assert.match(completionSkill, /普通轻量任务直接总结/u);
+    assert.match(completionSkill, /已经存在 completion-record 时，只确认其为 recorded 终态/u);
+    assert.match(completionSkill, /不要求补齐过程文档、归档或选择下一任务/u);
     assert.match(archiveSkill, /初始化预建的空 archive 目录不触发/u);
     assert.match(archiveSkill, /仅当任务涉及页面、可视化、浏览器真实链路、人工业务验收/u);
     assert.match(archiveSkill, /纯逻辑任务以自动化测试/u);
