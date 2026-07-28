@@ -6,7 +6,7 @@ import type { CodeHelperConfig } from "../types.js";
  */
 export function renderEntryBlock(config: CodeHelperConfig): string {
   const enabledRules = [
-    "- Agent 协作规范：开始新需求、迁移、重构或反馈修复时，读取 `code-helper-docs/user-rules/Agent协作规范.md`；先按 T0-T3 判断主会话直办、建议分发或强制隔离，主会话始终负责范围控制、结果审阅和最终结论；执行身份优先由工具元数据承载，无法可靠传递时才由派发提示明确，执行子代理直接完成任务且不再二次转派。",
+    "- Agent 协作规范：开始新需求、迁移、重构或反馈修复时，读取 `code-helper-docs/user-rules/Agent协作规范.md`；先按 T0-T3 判断主会话直办、建议分发或强制隔离，主会话始终负责范围控制、结果审阅和最终结论；同一基线下复用验证回执，共享产物冲突的命令串行执行；执行身份优先由工具元数据承载，无法可靠传递时才由派发提示明确，执行子代理直接完成任务且不再二次转派。",
     `- Git 提交信息格式规范：准备提交、整理提交历史、生成版本发布提交或执行 revert 时，读取 \`${config.directories.userRules}/Git提交信息格式规范.md\`；scope 必填。`,
     config.features.memoryTuning.enabled
       ? `- 项目记忆规则优化：整理或更新 \`AGENTS.md\` / \`CLAUDE.md\` / \`.github/copilot-instructions.md\` 时，读取 \`${config.directories.userRules}/项目记忆规则优化.md\`。`
@@ -58,6 +58,7 @@ export function renderEntryBlock(config: CodeHelperConfig): string {
 6. 主会话始终可以进行只读证据核验、查看 diff、搜索调用方、运行非变更型静态检查和定向测试，不需要为了这些复核动作额外分发。
 7. 当前会话优先使用工具提供的父任务或角色元数据识别执行子代理；元数据不可用或不能可靠传递时，派发提示必须明确执行身份并作为兼容回退。执行子代理必须按派发范围直接完成，不再转派。
 8. 单个逻辑交付点默认最多触发 4 个子代理任务和一轮独立复审；达到原始完成定义且当前阻断项关闭后停止自动扩修，并用统一进度摘要说明下一步。
+9. 同一基线下相同验证命令默认只执行一次并复用回执；会共同写入 \`dist\`、\`coverage\`、缓存、快照或依赖目录的命令必须串行。
 
 ### 专题规则索引
 

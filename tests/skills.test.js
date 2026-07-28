@@ -184,6 +184,10 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
     assert.match(collaborationSkill, /你现在是执行子代理/);
     assert.match(collaborationSkill, /默认委派深度为 1/);
     assert.match(collaborationSkill, /执行子代理不得自行二次转派/);
+    assert.match(collaborationSkill, /同一基线、同一工作树状态和同一验证命令默认只执行一次/);
+    assert.match(collaborationSkill, /验证回执：精确命令、工作目录、退出码、结果摘要、共享副作用资源和未验证范围/);
+    assert.match(collaborationSkill, /等待或调用超时只表示本次等待结束，不等于子代理失败/);
+    assert.match(collaborationSkill, /没有中断能力：把旧任务标记为.*superseded/s);
     assert.match(manualTestSkill, /name: code-helper-manual-test-workbench/);
     assert.match(manualTestSkill, /manual-test.*只负责生成结构化模板/s);
     assert.match(manualTestSkill, /测试环境、前置数据、操作步骤、预期结果、回归范围和阻塞记录/);
@@ -196,6 +200,7 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
     assert.match(reviewFixSkill, /不自动提交、推送、归档、发布或更新长期记忆/);
     assert.match(reviewFixSkill, /Codex、Claude、Grok、GitHub Copilot/);
     assert.match(reviewFixSkill, /按项目 Agent 协作规范的 T0-T3 风险等级决定直办、建议分发或强制实现与复核隔离/);
+    assert.match(reviewFixSkill, /同一基线下已经有有效回执的相同命令不机械重复/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -574,6 +574,12 @@ test("sync-local 刷新 AGENTS 和四类项目级 skills 且不创建其他入�
     assert.match(codexCollaborationSkill, /默认委派深度为 1/);
     assert.match(codexCollaborationSkill, /顺序强依赖链优先由同一执行代理负责到底/);
     assert.match(codexCollaborationSkill, /补充任务优先复用原执行代理/);
+    assert.match(codexCollaborationSkill, /同一基线、同一工作树状态和同一验证命令默认只执行一次/);
+    assert.match(codexCollaborationSkill, /共同写入.*dist.*coverage.*缓存.*快照.*依赖目录.*必须串行/s);
+    assert.match(codexCollaborationSkill, /任务 ID、状态、起始基线、改动文件或等价 diff 身份/);
+    assert.match(codexCollaborationSkill, /等待或调用超时只表示本次等待结束，不等于子代理失败/);
+    assert.match(codexCollaborationSkill, /accepted.*running.*waiting_input.*blocked.*completed.*cancelled.*superseded/s);
+    assert.match(codexCollaborationSkill, /子代理、并行执行、角色元数据、会话复用、状态查询和中断/);
     assert.match(codexCollaborationSkill, /完成检查按可独立验收的逻辑交付点触发/);
     assert.match(codexCollaborationSkill, /单节点默认最多触发 4 个子代理任务/u);
     assert.match(codexCollaborationSkill, /默认只进行一轮独立复审/u);
@@ -582,6 +588,7 @@ test("sync-local 刷新 AGENTS 和四类项目级 skills 且不创建其他入�
     assert.match(codexManualTestSkill, /name: code-helper-manual-test-workbench/);
     assert.match(codexManualTestSkill, /测试环境、前置数据、操作步骤、预期结果、回归范围和阻塞记录/);
     assert.match(codexReviewFixSkill, /name: code-helper-review-fix/);
+    assert.match(codexReviewFixSkill, /同一基线下已经有有效回执的相同命令不机械重复/);
     assert.match(claudeSkill, /name: code-helper-completion-review/);
     assert.match(claudeCollaborationSkill, /name: code-helper-agent-collaboration/);
     assert.match(claudeManualTestSkill, /name: code-helper-manual-test-workbench/);

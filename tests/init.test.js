@@ -755,6 +755,10 @@ test("updateProject 刷新已有 Codex skills 且不创建未使用 agent 入口
     assert.match(codexSkill, /派发提示才必须明确“你现在是执行子代理”/);
     assert.match(codexSkill, /默认委派深度为 1/);
     assert.match(codexSkill, /你现在是执行子代理/);
+    assert.match(codexSkill, /同一基线、同一工作树状态和同一验证命令默认只执行一次/);
+    assert.match(codexSkill, /共享副作用资源冲突的命令必须串行/);
+    assert.match(codexSkill, /等待或调用超时只表示本次等待结束，不等于子代理失败/);
+    assert.match(codexSkill, /不根据 Codex、Claude Code、GitHub Copilot、Grok Build 等平台名称或 skills 注册目录猜测/);
     assert.match(completionSkill, /可独立验收的逻辑交付点/);
     assert.match(completionSkill, /微型步骤不单独触发/);
     assert.match(completionSkill, /真实功能变更在最终回复前仍必须触发/);
