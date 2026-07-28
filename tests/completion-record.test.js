@@ -100,6 +100,37 @@ test("完成记录不进入 tasks 且 finish 返回 recorded 终态", async () =
   }
 });
 
+test("finish 拒绝把损坏元数据的完成记录判为 recorded", async () => {
+  // 文件名合法仍不足以证明记录已经进入终态；缺失 frontmatter 或生命周期错误都必须失败。
+  const root = await createInitializedProject();
+  const targetPath = join(root, "code-helper-docs/completion-record/损坏记录-完成记录.md");
+  const invalidContents = [
+    "# 损坏记录完成记录\n",
+    [
+      "---",
+      "code-helper-kind: completion-record",
+      "tracking-mode: direct",
+      "lifecycle: active",
+      "---",
+      "",
+      "# 损坏记录完成记录",
+      ""
+    ].join("\n")
+  ];
+
+  try {
+    for (const content of invalidContents) {
+      await writeFile(targetPath, content, "utf8");
+      await assert.rejects(
+        () => createCompletionReview(root, "损坏记录"),
+        /完成记录缺少合法终态元数据/
+      );
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("archiveFeature 明确拒绝已经处于终态的完成记录", async () => {
   // archive 只能处理 plan/status/result 活动任务，不能为完成记录再创建归档生命周期。
   const root = await createInitializedProject();

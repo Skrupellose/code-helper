@@ -1,7 +1,10 @@
 import { spawnSync } from "node:child_process";
 
 import { findTaskByFeatureName, listTasks, type TaskRecord } from "./archive.js";
-import { findCompletionRecord } from "./completion-record.js";
+import {
+  findCompletionRecord,
+  isValidCompletionRecordMetadata
+} from "./completion-record.js";
 import { loadConfig } from "./config.js";
 import { portablePath, projectPath, readTextIfExists } from "./fs-utils.js";
 import { MANUAL_TEST_FILE_NAME, RESULT_RECORD_FILE_NAME } from "./workflows.js";
@@ -76,6 +79,13 @@ export async function createCompletionReview(projectRoot: string, featureName: s
   if (task === undefined) {
     const completionRecord = await findCompletionRecord(projectRoot, featureName);
     if (completionRecord !== undefined) {
+      if (!isValidCompletionRecordMetadata(completionRecord.content)) {
+        throw new Error(
+          `完成记录缺少合法终态元数据：${completionRecord.relativePath}。`
+          + "请设置 code-helper-kind: completion-record、tracking-mode: direct、lifecycle: recorded。"
+        );
+      }
+
       // 完成记录是直接执行任务的独立终态。这里不进入 plan/status/result 完整性、
       // Git 变更、记忆、归档或下一任务判断，避免 recorded 文件反向触发补文档。
       return createRecordedCompletionReview(completionRecord);

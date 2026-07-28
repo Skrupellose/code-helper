@@ -184,6 +184,20 @@ export function parseCompletionRecordFrontmatter(content: string): Record<string
 }
 
 /**
+ * 判断完成记录是否包含合法的直接执行终态元数据。
+ *
+ * finish 复用既有 frontmatter 解析器和 check 使用的三个固定字段契约，
+ * 避免仅凭文件名把损坏记录识别为 recorded 终态。
+ */
+export function isValidCompletionRecordMetadata(content: string): boolean {
+  const frontmatter = parseCompletionRecordFrontmatter(content);
+
+  return frontmatter?.["code-helper-kind"] === COMPLETION_RECORD_KIND
+    && frontmatter?.["tracking-mode"] === COMPLETION_RECORD_TRACKING_MODE
+    && frontmatter?.lifecycle === COMPLETION_RECORD_LIFECYCLE;
+}
+
+/**
  * 判断文件名是否满足 `<中文功能名>-完成记录.md`。
  */
 export function isValidCompletionRecordFileName(fileName: string): boolean {
