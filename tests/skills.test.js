@@ -1197,6 +1197,49 @@ test("内置 review-fix skill 会保持只读审查、授权修复和逐项复�
   }
 });
 
+test("内置协作 skills 会限制 Agent 与复审预算并展示统一进度摘要", async () => {
+  // 该测试锁定本轮效率优化，避免后续重新引入无上限分发、多轮全量复审或隐藏进度。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-collaboration-budget-"));
+
+  try {
+    await registerProjectSkills(root);
+    const collaborationSkill = await readFile(
+      join(root, ".agents/skills/code-helper-agent-collaboration/SKILL.md"),
+      "utf8"
+    );
+    const reviewFixSkill = await readFile(
+      join(root, ".agents/skills/code-helper-review-fix/SKILL.md"),
+      "utf8"
+    );
+    const planSkill = await readFile(
+      join(root, ".agents/skills/code-helper-plan-workbench/SKILL.md"),
+      "utf8"
+    );
+    const completionSkill = await readFile(
+      join(root, ".agents/skills/code-helper-completion-review/SKILL.md"),
+      "utf8"
+    );
+
+    assert.match(collaborationSkill, /单节点默认最多触发 4 个子代理任务/u);
+    assert.match(collaborationSkill, /T2 默认使用一个执行子代理/u);
+    assert.match(collaborationSkill, /T3 默认使用一个实现子代理和一个独立复核子代理/u);
+    assert.match(collaborationSkill, /默认只进行一轮独立复审/u);
+    assert.match(collaborationSkill, /领域名称或代码中出现.*不能单独判定为 T3/su);
+    assert.match(collaborationSkill, /原始完成定义满足且当前阻断项关闭后，必须停止自动扩修/u);
+    assert.doesNotMatch(collaborationSkill, /\| T3 \| 涉及安全、权限、用户数据/u);
+    assert.match(reviewFixSkill, /范围分类.*当前阻断.*当前非阻断.*后续优化/su);
+    assert.match(reviewFixSkill, /逐项复审只核对原 finding、修复直接影响路径和最小回归面/u);
+    assert.match(reviewFixSkill, /当前非阻断和后续优化未经用户明确纳入时，不自动延长当前节点/u);
+    assert.match(planSkill, /## 进度摘要/u);
+    assert.match(planSkill, /完成定义进度/u);
+    assert.match(planSkill, /Agent 使用/u);
+    assert.match(completionSkill, /最终回复前输出紧凑进度摘要/u);
+    assert.match(completionSkill, /“剩余门禁”只列当前阻断/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("runSkillsAudit 不会把跨目标错位的部分 Skills 拼成完整注册", async () => {
   // Codex 保留一项、Claude Code 保留其余项；全局名称虽齐全，但两个目标都不可独立使用。
   const root = await mkdtemp(join(tmpdir(), "code-helper-skills-audit-misaligned-"));

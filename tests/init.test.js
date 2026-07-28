@@ -198,6 +198,18 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
       join(root, "code-helper-docs/user-rules/完成记录规范.md"),
       "utf8"
     );
+    const collaborationRule = await readFile(
+      join(root, "code-helper-docs/user-rules/Agent协作规范.md"),
+      "utf8"
+    );
+    const planRule = await readFile(
+      join(root, "code-helper-docs/user-rules/项目计划管理规范.md"),
+      "utf8"
+    );
+    const completionRule = await readFile(
+      join(root, "code-helper-docs/user-rules/功能完成检查规范.md"),
+      "utf8"
+    );
 
     assert.ok(result.operations.some((operation) => operation.path.endsWith("项目记忆规则优化.md")));
     assert.match(agents, /用户已有规则/);
@@ -225,9 +237,17 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
     assert.match(collaborationSkill, /优先由工具提供的父任务、调用关系或角色元数据承载/);
     assert.match(collaborationSkill, /只有元数据不可用或不能可靠传递时/);
     assert.match(collaborationSkill, /派发提示才必须明确“你现在是执行子代理”/);
+    assert.match(collaborationSkill, /单节点默认最多触发 4 个子代理任务/u);
+    assert.match(collaborationSkill, /默认只进行一轮独立复审/u);
     assert.match(completionReviewSkill, /可独立验收的逻辑交付点/);
     assert.match(completionReviewSkill, /微型步骤不单独触发/);
+    assert.match(completionReviewSkill, /最终回复前输出紧凑进度摘要/u);
     assert.match(completionRecordSkill, /不得据此创建 plan-doc、status-doc 或 result-doc/u);
+    // 初始化生成的专题规则必须与 Skills 使用同一套预算、停止条件和进度摘要契约。
+    assert.match(collaborationRule, /单个逻辑交付点默认最多触发 4 个子代理任务/u);
+    assert.match(collaborationRule, /finding 按当前阻断、当前非阻断、后续优化分类/u);
+    assert.match(planRule, /status-doc 必须在当前执行节点后包含“进度摘要”/u);
+    assert.match(completionRule, /“剩余门禁”只包含当前阻断/u);
     assert.match(gitCommitRule, /scope 必填/u);
     assert.match(completionRecordRule, /lifecycle: recorded/u);
     assert.equal(

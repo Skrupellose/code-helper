@@ -575,6 +575,9 @@ test("sync-local 刷新 AGENTS 和四类项目级 skills 且不创建其他入�
     assert.match(codexCollaborationSkill, /顺序强依赖链优先由同一执行代理负责到底/);
     assert.match(codexCollaborationSkill, /补充任务优先复用原执行代理/);
     assert.match(codexCollaborationSkill, /完成检查按可独立验收的逻辑交付点触发/);
+    assert.match(codexCollaborationSkill, /单节点默认最多触发 4 个子代理任务/u);
+    assert.match(codexCollaborationSkill, /默认只进行一轮独立复审/u);
+    assert.match(codexCollaborationSkill, /原始完成定义满足且当前阻断项关闭后，必须停止自动扩修/u);
     assert.match(codexCollaborationSkill, /你现在是执行子代理/);
     assert.match(codexManualTestSkill, /name: code-helper-manual-test-workbench/);
     assert.match(codexManualTestSkill, /测试环境、前置数据、操作步骤、预期结果、回归范围和阻塞记录/);
@@ -601,6 +604,8 @@ test("sync-local 刷新 AGENTS 和四类项目级 skills 且不创建其他入�
     assert.match(codexSkill, /可独立验收的逻辑交付点/);
     assert.match(codexSkill, /微型步骤不单独触发/);
     assert.match(codexSkill, /真实功能变更在最终回复前仍必须触发/);
+    assert.match(codexSkill, /最终回复前输出紧凑进度摘要/u);
+    assert.match(codexReviewFixSkill, /当前阻断 \/ 当前非阻断 \/ 后续优化/u);
     assert.equal(claudeSkill, codexSkill);
     assert.equal(copilotSkill, codexSkill);
     assert.equal(grokSkill, codexSkill);
