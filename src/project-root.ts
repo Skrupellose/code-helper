@@ -5,7 +5,7 @@ import { pathExists } from "./fs-utils.js";
 
 /**
  * 向上查找已经初始化过的 code-helper 项目根目录。
- * plan 常被从需求文档所在子目录触发；如果只使用当前 cwd，会把 docs/ 误当成项目根并生成 docs/code-helper-docs。
+ * plan 常被从需求文档所在子目录触发；如果只使用当前 cwd，会把 docs/ 误当成项目根并生成嵌套的 `.code-helper` 工作区。
  */
 export async function resolveInitializedProjectRoot(startPath: string): Promise<string> {
   let currentPath = resolve(startPath);

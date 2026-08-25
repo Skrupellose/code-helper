@@ -23,6 +23,8 @@ export interface MarkdownExportResult {
 export interface MarkdownExportOptions {
   taskId?: string;
   force?: boolean;
+  /** 为 true 时导出到可由项目选择提交的旧版稳定目录。 */
+  tracked?: boolean;
 }
 
 interface ExportRow {
@@ -48,7 +50,7 @@ export async function exportMarkdownDocuments(
 
   for (const task of tasks) {
     for (const document of repository.listDocuments(task.id)) {
-      const relativePath = getStableMarkdownExportPath(task, document);
+      const relativePath = getStableMarkdownExportPath(task, document, options);
       const item = await exportSingleDocument(
         safeRoot,
         database,
@@ -66,22 +68,29 @@ export async function exportMarkdownDocuments(
 }
 
 /** 根据任务生命周期和文档类型计算稳定的兼容导出路径。 */
-export function getStableMarkdownExportPath(task: TaskRecord, document: DocumentRecord): string {
+export function getStableMarkdownExportPath(
+  task: TaskRecord,
+  document: DocumentRecord,
+  options: Pick<MarkdownExportOptions, "tracked"> = {}
+): string {
   const name = validatePathSegment(task.name, "任务名称");
+  // 默认视图与 SQLite 同属 `.code-helper`，由 init 写入 Git 忽略区块；
+  // `--tracked` 是用户明确请求的交接/审计副本，使用旧版公共目录以保持兼容。
+  const root = options.tracked === true ? "code-helper-docs" : ".code-helper/local/docs";
   if (document.type === "completion_record") {
-    return join("code-helper-docs", "completion-record", `${name}-完成记录.md`);
+    return join(root, "completion-record", `${name}-完成记录.md`);
   }
 
   const archive = task.status === "archived" ? ["archive"] : [];
   switch (document.type) {
     case "plan":
-      return join("code-helper-docs", "plan-doc", ...archive, `${name}.md`);
+      return join(root, "plan-doc", ...archive, `${name}.md`);
     case "status":
-      return join("code-helper-docs", "status-doc", ...archive, `${name}-状态.md`);
+      return join(root, "status-doc", ...archive, `${name}-状态.md`);
     case "result":
-      return join("code-helper-docs", "result-doc", ...archive, name, "实施记录.md");
+      return join(root, "result-doc", ...archive, name, "实施记录.md");
     case "manual_test":
-      return join("code-helper-docs", "result-doc", ...archive, name, "手工测试.md");
+      return join(root, "result-doc", ...archive, name, "手工测试.md");
     default: {
       const exhaustive: never = document.type;
       throw new Error(`不支持的文档类型：${exhaustive}`);

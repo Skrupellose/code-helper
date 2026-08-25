@@ -29,12 +29,12 @@ description: 当用户提供完整需求文档，并要求拆分开发计划、�
 
 默认在 SQLite 中生成或维护任务与文档，并同步以下 Markdown 兼容视图：
 
-- code-helper-docs/plan-doc/<中文功能名>.md：执行计划文档
-- code-helper-docs/result-doc/<中文功能名>/实施记录.md：阶段或小节点实施记录
-- code-helper-docs/status-doc/<中文功能名>-状态.md：当前状态记录
-- code-helper-docs/result-doc/<中文功能名>/手工测试.md：仅当需求涉及页面、可视化、浏览器链路或需要人工验收时生成
+- .code-helper/local/docs/plan-doc/<中文功能名>.md：执行计划文档
+- .code-helper/local/docs/result-doc/<中文功能名>/实施记录.md：阶段或小节点实施记录
+- .code-helper/local/docs/status-doc/<中文功能名>-状态.md：当前状态记录
+- .code-helper/local/docs/result-doc/<中文功能名>/手工测试.md：仅当需求涉及页面、可视化、浏览器链路或需要人工验收时生成
 
-SQLite 是任务状态与正文的权威来源；Markdown 视图用于阅读、Git 审阅和兼容旧工具，不得绕过数据库静默改变生命周期。所有最终产物必须使用中文命名，并在文档内使用中文总结当前目标、完成情况、验证结论、风险和下一步。
+SQLite 是任务状态与正文的权威来源；默认 Markdown 视图只供本地阅读和旧工具兼容，并由 Git 忽略。需要 Git 审阅、交接或审计时，显式执行 \`documents export --tracked\`；不得绕过数据库静默改变生命周期。所有最终产物必须使用中文命名，并在文档内使用中文总结当前目标、完成情况、验证结论、风险和下一步。
 
 Agent 补全文档后必须先运行 \`npx @skrupellose/code-helper documents import\` 预览，再使用 \`documents import --apply\` 写入 SQLite revision；如果报告数据库与 Markdown 双边变化，停止自动同步并人工合并。
 

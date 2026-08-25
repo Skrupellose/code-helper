@@ -10,7 +10,13 @@ export const CONFIG_VERSION = 1;
  * 直接执行任务的终态完成记录目录。
  * 该目录不属于 plan/status/result 工作台，也不参与任务发现与归档生命周期。
  */
-export const COMPLETION_RECORD_DIRECTORY = "code-helper-docs/completion-record";
+export const COMPLETION_RECORD_DIRECTORY = ".code-helper/local/docs/completion-record";
+
+/**
+ * 旧版 Markdown 目录只作为迁移和兼容读取来源。
+ * 新任务不会再向这些目录写入，需交接或审计时由 `documents export --tracked` 显式生成。
+ */
+export const LEGACY_DOCUMENTS_DIRECTORY = "code-helper-docs";
 
 /**
  * 所有内置功能的稳定顺序。
@@ -60,9 +66,9 @@ export const DEFAULT_CONFIG: CodeHelperConfig = {
   directories: {
     workspace: ".code-helper",
     userRules: "code-helper-docs/user-rules",
-    planDoc: "code-helper-docs/plan-doc",
-    resultDoc: "code-helper-docs/result-doc",
-    statusDoc: "code-helper-docs/status-doc"
+    planDoc: ".code-helper/local/docs/plan-doc",
+    resultDoc: ".code-helper/local/docs/result-doc",
+    statusDoc: ".code-helper/local/docs/status-doc"
   },
   features: {
     memoryTuning: { enabled: true },

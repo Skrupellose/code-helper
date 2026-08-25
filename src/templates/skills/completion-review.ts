@@ -20,7 +20,7 @@ description: 当 agent 完成可独立验收的逻辑交付点并准备最终回
 1. 先判断本轮工作模式：已有 active/mixed 文档的是计划跟踪任务；没有对应任务文档的是直接执行；已经存在 completion-record 的是 recorded 终态。
 2. 计划跟踪任务继续查看任务列表并区分 active、archived、mixed；目录生命周期优先于归档正文中的历史“下一步”。
 3. mixed 任务必须优先请求人工确认 active/archive 哪一侧为终态，不得因为没有纯 active 任务而只报告“没有活动任务”，也不得直接归档或切换任务。
-4. 有 active 任务时，读取 code-helper-docs/status-doc/<中文功能名>-状态.md，再读取对应 plan-doc 和 result-doc。
+4. 有 active 任务时，读取 .code-helper/local/docs/status-doc/<中文功能名>-状态.md，再读取对应 plan-doc 和 result-doc。
 5. 直接执行任务没有 active 或 mixed 文档时，不虚构任务名，也不创建 plan/status/result；先检查实际 diff、验证、风险和未完成项。
 6. 直接执行任务仍有后续阶段、阻塞或跨会话恢复需求时，使用 \`code-helper-plan-workbench\` 升级为计划跟踪；已经完成且具有复盘价值时，使用 \`code-helper-completion-record\` 生成独立完成记录；普通轻量任务直接总结。
 7. 已经存在 completion-record 时，只确认其为 recorded 终态，不要求补齐过程文档、归档或选择下一任务。

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -30,10 +30,10 @@ test("initializeProject 会创建独立完成记录目录", async () => {
   const root = await createInitializedProject();
 
   try {
-    const directory = await stat(join(root, "code-helper-docs/completion-record"));
+    const directory = await stat(join(root, ".code-helper/local/docs/completion-record"));
     assert.equal(directory.isDirectory(), true);
     await assert.rejects(
-      () => stat(join(root, "code-helper-docs/completion-record/archive")),
+      () => stat(join(root, ".code-helper/local/docs/completion-record/archive")),
       /ENOENT/
     );
   } finally {
@@ -44,7 +44,7 @@ test("initializeProject 会创建独立完成记录目录", async () => {
 test("createCompletionRecord 生成终态元数据且未修改时重复执行保持幂等", async () => {
   // 未发生手工修改时重复执行返回 skipped；手工修改冲突由独立用例验证。
   const root = await createInitializedProject();
-  const targetPath = join(root, "code-helper-docs/completion-record/归档优化-完成记录.md");
+  const targetPath = join(root, ".code-helper/local/docs/completion-record/归档优化-完成记录.md");
 
   try {
     const first = await createCompletionRecord({
@@ -75,7 +75,7 @@ test("createCompletionRecord 生成终态元数据且未修改时重复执行保
 
 test("重复 record 遇到手工修改的 Markdown 时返回结构化导出冲突", async () => {
   const root = await createInitializedProject();
-  const targetPath = join(root, "code-helper-docs/completion-record/记录冲突-完成记录.md");
+  const targetPath = join(root, ".code-helper/local/docs/completion-record/记录冲突-完成记录.md");
   try {
     await createCompletionRecord({ projectRoot: root, featureName: "记录冲突" });
     await writeFile(targetPath, "# 用户手工修改\n", "utf8");
@@ -121,7 +121,7 @@ test("完成记录不进入 tasks 且 finish 返回 recorded 终态", async () =
 test("finish 拒绝把损坏元数据的完成记录判为 recorded", async () => {
   // 文件名合法仍不足以证明记录已经进入终态；缺失 frontmatter 或生命周期错误都必须失败。
   const root = await createInitializedProject();
-  const targetPath = join(root, "code-helper-docs/completion-record/损坏记录-完成记录.md");
+  const targetPath = join(root, ".code-helper/local/docs/completion-record/损坏记录-完成记录.md");
   const invalidContents = [
     "# 损坏记录完成记录\n",
     [
@@ -171,7 +171,7 @@ test("archiveFeature 明确拒绝已经处于终态的完成记录", async () =>
 test("runChecks 独立校验完成记录元数据、章节和命名", async () => {
   // 手工创建的损坏文件应由完成记录检查器报告，不能进入任务缺文档检查。
   const root = await createInitializedProject();
-  const invalidPath = join(root, "code-helper-docs/completion-record/invalid.md");
+  const invalidPath = join(root, ".code-helper/local/docs/completion-record/invalid.md");
 
   try {
     await writeFile(
@@ -229,9 +229,9 @@ test("record CLI 从子目录执行时仍写入已初始化项目根", async () 
     await mkdir(nestedRoot, { recursive: true });
 
     assert.equal(await runCli(["record", "子目录记录"], nestedRoot), 0);
-    await stat(join(root, "code-helper-docs/completion-record/子目录记录-完成记录.md"));
+    await stat(join(root, ".code-helper/local/docs/completion-record/子目录记录-完成记录.md"));
     await assert.rejects(
-      () => stat(join(nestedRoot, "code-helper-docs/completion-record/子目录记录-完成记录.md")),
+      () => stat(join(nestedRoot, ".code-helper/local/docs/completion-record/子目录记录-完成记录.md")),
       /ENOENT/
     );
   } finally {
@@ -246,6 +246,7 @@ test("record CLI 拒绝为已有计划任务创建第二套终态", async () => 
   const originalError = console.error;
 
   try {
+    await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
     await writeFile(
       join(root, "code-helper-docs/plan-doc/已有计划.md"),
       "# 已有计划\n",
@@ -258,7 +259,7 @@ test("record CLI 拒绝为已有计划任务创建第二套终态", async () => 
     assert.equal(await runCli(["record", "已有计划"], root), 1);
     assert.match(errors.join("\n"), /已经存在 active 计划任务文档/);
     await assert.rejects(
-      () => stat(join(root, "code-helper-docs/completion-record/已有计划-完成记录.md")),
+      () => stat(join(root, ".code-helper/local/docs/completion-record/已有计划-完成记录.md")),
       /ENOENT/
     );
   } finally {
@@ -272,6 +273,7 @@ test("核心完成记录 API 拒绝 archived、mixed 和大小写变体计划任
   const root = await createInitializedProject();
 
   try {
+    await mkdir(join(root, "code-helper-docs/plan-doc/archive"), { recursive: true });
     await writeFile(
       join(root, "code-helper-docs/plan-doc/archive/API优化.md"),
       "# API 优化\n",
@@ -306,6 +308,7 @@ test("check 会报告手工形成的完成记录与计划任务冲突", async ()
   const root = await createInitializedProject();
 
   try {
+    await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
     await createCompletionRecord({
       projectRoot: root,
       featureName: "冲突任务"
@@ -348,7 +351,7 @@ test("check 会拒绝无法由 finish 规范化命中的手工完成记录名", 
   const root = await createInitializedProject();
   const nonCanonicalPath = join(
     root,
-    "code-helper-docs/completion-record/功能.v2-完成记录.md"
+    ".code-helper/local/docs/completion-record/功能.v2-完成记录.md"
   );
 
   try {

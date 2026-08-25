@@ -145,10 +145,10 @@ npx code-helper update
 | `.code-helper/version-policy.json` | 项目选择的 Stable/Canary 通道策略 |
 | `.code-helper/`                   | 其他工具配置、受控模板和可选检查输出      |
 | `code-helper-docs/user-rules/`    | 长期协作规则                |
-| `code-helper-docs/plan-doc/`      | 任务计划文档                |
-| `code-helper-docs/result-doc/`    | 执行记录和手工测试文档           |
-| `code-helper-docs/status-doc/`    | 当前任务状态记录              |
-| `code-helper-docs/completion-record/` | 直接执行任务的终态完成记录        |
+| `.code-helper/local/docs/plan-doc/`      | 默认 Git 忽略的任务计划兼容视图                |
+| `.code-helper/local/docs/result-doc/`    | 默认 Git 忽略的执行记录和手工测试兼容视图           |
+| `.code-helper/local/docs/status-doc/`    | 默认 Git 忽略的当前任务状态兼容视图              |
+| `.code-helper/local/docs/completion-record/` | 默认 Git 忽略的直接执行任务完成记录兼容视图        |
 | `AGENTS.md`                       | Codex / Grok Build 项目入口文档 |
 | `CLAUDE.md`                       | Claude Code 项目入口文档    |
 | `.github/copilot-instructions.md` | GitHub Copilot 项目入口文档 |
@@ -163,15 +163,15 @@ npx code-helper update
 
 `plan` 默认把三类文档写入 SQLite，并同步生成以下 Markdown 兼容视图：
 
-- `code-helper-docs/plan-doc/<中文功能名>.md`
-- `code-helper-docs/result-doc/<中文功能名>/实施记录.md`
-- `code-helper-docs/status-doc/<中文功能名>-状态.md`
+- `.code-helper/local/docs/plan-doc/<中文功能名>.md`
+- `.code-helper/local/docs/result-doc/<中文功能名>/实施记录.md`
+- `.code-helper/local/docs/status-doc/<中文功能名>-状态.md`
 
 页面、可视化、浏览器链路或人工业务验收场景，可以用 `manual-test` 单独创建手工测试模板：
 
-- `code-helper-docs/result-doc/<中文功能名>/手工测试.md`
+- `.code-helper/local/docs/result-doc/<中文功能名>/手工测试.md`
 
-SQLite 是初始化后项目的任务与文档权威来源；Markdown 用于人工阅读、Git 审阅和旧工具兼容。默认导出不会覆盖导出后被手工修改的文件，只有显式 `documents export --force` 才允许覆盖。
+SQLite 是初始化后项目的任务与文档权威来源；默认 Markdown 是 Git 忽略的本地兼容视图。需要 Git 交接或审计时执行 `documents export --tracked` 生成 `code-helper-docs/` 单向副本；该副本不能直接用 `documents import` 回写，需将修改同步回本地视图后再 import。默认导出不会覆盖导出后被手工修改的文件，只有显式 `documents export --force` 才允许覆盖。
 
 Agent 或用户编辑 Markdown 兼容视图后，先运行 `documents import` 预览；只有磁盘文件基于上次导出且数据库没有同时变化时，`documents import --apply` 才会创建新的 SQLite revision。双边变化或缺少导出基线会保持冲突，不自动猜测覆盖方向。
 
@@ -194,7 +194,7 @@ Agent 或用户编辑 Markdown 兼容视图后，先运行 `documents import` �
 npx @skrupellose/code-helper record 轻量修复复盘
 ```
 
-完成记录写入 `code-helper-docs/completion-record/<中文功能名>-完成记录.md`，创建即为 `recorded` 终态。它不属于活动任务，不要求补齐 plan/status/result，也不需要再次归档。普通轻量任务不强制生成完成记录；仍有后续阶段或阻塞的任务应升级为计划跟踪。
+完成记录默认写入 `.code-helper/local/docs/completion-record/<中文功能名>-完成记录.md`，创建即为 `recorded` 终态。它不属于活动任务，不要求补齐 plan/status/result，也不需要再次归档；需要 Git 交接时使用 `documents export --tracked`。普通轻量任务不强制生成完成记录；仍有后续阶段或阻塞的任务应升级为计划跟踪。
 
 ## 完成检查
 

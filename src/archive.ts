@@ -2,6 +2,7 @@ import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { loadConfig } from "./config.js";
+import { LEGACY_DOCUMENTS_DIRECTORY } from "./constants.js";
 import { findCompletionRecord } from "./completion-record.js";
 import { createLegacyTaskSlug, withDocumentRepository } from "./documents/index.js";
 import { ensureDirectory, pathExists, portablePath, projectPath, writeText } from "./fs-utils.js";
@@ -216,6 +217,23 @@ export async function listTasks(projectRoot: string): Promise<TaskRecord[]> {
   await collectStatusDocuments(projectRoot, config, tasks, false);
   await collectStatusDocuments(projectRoot, config, tasks, true);
 
+  // 旧公共目录不再创建或写入，但旧项目尚未迁移时 tasks/archive/finish 仍必须可读。
+  const legacyConfig: CodeHelperConfig = {
+    ...config,
+    directories: {
+      ...config.directories,
+      planDoc: `${LEGACY_DOCUMENTS_DIRECTORY}/plan-doc`,
+      resultDoc: `${LEGACY_DOCUMENTS_DIRECTORY}/result-doc`,
+      statusDoc: `${LEGACY_DOCUMENTS_DIRECTORY}/status-doc`
+    }
+  };
+  await collectPlanDocuments(projectRoot, legacyConfig, tasks, false);
+  await collectPlanDocuments(projectRoot, legacyConfig, tasks, true);
+  await collectResultDocuments(projectRoot, legacyConfig, tasks, false);
+  await collectResultDocuments(projectRoot, legacyConfig, tasks, true);
+  await collectStatusDocuments(projectRoot, legacyConfig, tasks, false);
+  await collectStatusDocuments(projectRoot, legacyConfig, tasks, true);
+
   // 初始化后的项目以 SQLite 任务状态为权威；Markdown 扫描只负责补充导出路径，
   // 未建立数据库的旧项目继续保持纯文件扫描，不让只读 tasks 命令意外创建数据库。
   const databasePath = projectPath(projectRoot, `${config.directories.workspace}/code-helper.sqlite`);
@@ -254,7 +272,7 @@ export async function listTasks(projectRoot: string): Promise<TaskRecord[]> {
  * plan/status 是单文件，result 是目录，三者互相独立，允许部分存在。
  */
 function getArchiveMoves(config: CodeHelperConfig, featureName: string): Array<{ from: string; to: string }> {
-  return [
+  const localMoves = [
     {
       from: portablePath(config.directories.planDoc, `${featureName}.md`),
       to: portablePath(config.directories.planDoc, "archive", `${featureName}.md`)
@@ -271,6 +289,26 @@ function getArchiveMoves(config: CodeHelperConfig, featureName: string): Array<{
       from: portablePath(config.directories.statusDoc, `${featureName}-status.md`),
       to: portablePath(config.directories.statusDoc, "archive", `${featureName}-status.md`)
     }
+  ];
+  // 已迁移项目写本地视图；旧项目只读兼容的 archive 命令仍可显式归档旧目录文档。
+  const legacyMoves = getArchiveMovesForDirectories({
+    planDoc: `${LEGACY_DOCUMENTS_DIRECTORY}/plan-doc`,
+    resultDoc: `${LEGACY_DOCUMENTS_DIRECTORY}/result-doc`,
+    statusDoc: `${LEGACY_DOCUMENTS_DIRECTORY}/status-doc`
+  }, featureName);
+  return [...localMoves, ...legacyMoves];
+}
+
+/** 以给定目录布局生成三类任务文档的移动计划。 */
+function getArchiveMovesForDirectories(
+  directories: Pick<CodeHelperConfig["directories"], "planDoc" | "resultDoc" | "statusDoc">,
+  featureName: string
+): Array<{ from: string; to: string }> {
+  return [
+    { from: portablePath(directories.planDoc, `${featureName}.md`), to: portablePath(directories.planDoc, "archive", `${featureName}.md`) },
+    { from: portablePath(directories.resultDoc, featureName), to: portablePath(directories.resultDoc, "archive", featureName) },
+    { from: portablePath(directories.statusDoc, `${featureName}-状态.md`), to: portablePath(directories.statusDoc, "archive", `${featureName}-状态.md`) },
+    { from: portablePath(directories.statusDoc, `${featureName}-status.md`), to: portablePath(directories.statusDoc, "archive", `${featureName}-status.md`) }
   ];
 }
 

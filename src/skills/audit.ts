@@ -34,7 +34,8 @@ export async function runSkillsAudit(projectRoot: string): Promise<SkillAuditRec
   ).flat();
   const fullyRegisteredTargets = getFullyRegisteredTargets(allStatuses);
   const hasUserRules = await directoryExists(projectPath(projectRoot, "code-helper-docs/user-rules"));
-  const hasPlanDocs = await directoryExists(projectPath(projectRoot, "code-helper-docs/plan-doc"));
+  const hasPlanDocs = await directoryExists(projectPath(projectRoot, ".code-helper/local/docs/plan-doc"))
+    || await directoryExists(projectPath(projectRoot, "code-helper-docs/plan-doc"));
   const hasManualTestDocs = await hasManualTestDocument(projectRoot);
   // init 会预建空 archive 目录；只有扫描到真实 archived / mixed 任务时，
   // 才能说明项目已经使用归档能力，避免空目录让推荐条件永久为真。
@@ -147,26 +148,16 @@ function isSkillRegisteredInCompleteTarget(statuses: SkillRegistrationStatus[], 
  * 归档目录不参与推荐依据，避免已结束任务持续提示当前项目缺少手工测试生成 skill。
  */
 async function hasManualTestDocument(projectRoot: string): Promise<boolean> {
-  const resultDocRoot = projectPath(projectRoot, "code-helper-docs/result-doc");
-  const taskDirectories = await readDirectoryIfExists(resultDocRoot);
-
-  if (taskDirectories === undefined) {
-    return false;
-  }
-
-  for (const taskDirectory of taskDirectories) {
-    if (taskDirectory === "archive") {
-      continue;
-    }
-
-    const taskDirectoryPath = join(resultDocRoot, taskDirectory);
-
-    if (!(await directoryExists(taskDirectoryPath))) {
-      continue;
-    }
-
-    if ((await readTextIfExists(join(taskDirectoryPath, "手工测试.md"))) !== undefined) {
-      return true;
+  // 新默认目录优先；旧版公共目录只作为未迁移项目的只读兼容来源。
+  for (const relativeRoot of [".code-helper/local/docs/result-doc", "code-helper-docs/result-doc"]) {
+    const resultDocRoot = projectPath(projectRoot, relativeRoot);
+    const taskDirectories = await readDirectoryIfExists(resultDocRoot);
+    if (taskDirectories === undefined) continue;
+    for (const taskDirectory of taskDirectories) {
+      if (taskDirectory === "archive") continue;
+      const taskDirectoryPath = join(resultDocRoot, taskDirectory);
+      if (!(await directoryExists(taskDirectoryPath))) continue;
+      if ((await readTextIfExists(join(taskDirectoryPath, "手工测试.md"))) !== undefined) return true;
     }
   }
 

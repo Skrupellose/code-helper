@@ -13,10 +13,13 @@ CLAUDE.md
 .agents/
 .claude/
 .grok/
-.code-helper/
 code-helper-docs/
 .github/skills/
 .github/copilot-instructions.md
 
 .DS_Store
 *.log
+
+# code-helper:local:start
+.code-helper/
+# code-helper:local:end

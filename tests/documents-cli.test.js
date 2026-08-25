@@ -28,6 +28,8 @@ test("documents CLI 支持预览、显式迁移、完整性检查和安全导出
   try {
     await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
     await mkdir(join(root, "code-helper-docs/result-doc/迁移任务"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/status-doc"), { recursive: true });
     await writeFile(join(root, "code-helper-docs/plan-doc/迁移任务.md"), "# 计划\n", "utf8");
     await writeFile(join(root, "code-helper-docs/result-doc/迁移任务/实施记录.md"), "# 实施\n", "utf8");
     await writeFile(join(root, "code-helper-docs/status-doc/迁移任务-状态.md"), "# 状态\n", "utf8");
@@ -45,15 +47,19 @@ test("documents CLI 支持预览、显式迁移、完整性检查和安全导出
     assert.match(checked.logs.join("\n"), /检查通过/u);
 
     // migrate --apply 本身必须登记基线，不能要求用户先额外执行一次 export。
-    assert.equal(await readFile(join(root, "code-helper-docs/plan-doc/迁移任务.md"), "utf8"), "# 计划\n");
+    assert.equal(await readFile(join(root, ".code-helper/local/docs/plan-doc/迁移任务.md"), "utf8"), "# 计划\n");
 
-    await writeFile(join(root, "code-helper-docs/plan-doc/迁移任务.md"), "# 计划修订\n", "utf8");
+    await writeFile(join(root, ".code-helper/local/docs/plan-doc/迁移任务.md"), "# 计划修订\n", "utf8");
     const importPreview = await runCliCaptured(["documents", "import", "--json"], root);
     assert.equal(importPreview.exitCode, 0);
     assert.match(importPreview.logs.join("\n"), /"status": "candidate"/u);
     const imported = await runCliCaptured(["documents", "import", "--apply"], root);
     assert.equal(imported.exitCode, 0);
     assert.match(imported.logs.join("\n"), /已导入：1/u);
+
+    const tracked = await runCliCaptured(["documents", "export", "--tracked", "--force"], root);
+    assert.equal(tracked.exitCode, 0);
+    assert.equal(await readFile(join(root, "code-helper-docs/plan-doc/迁移任务.md"), "utf8"), "# 计划修订\n");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -69,11 +75,11 @@ test("documents migrate 为旧英文文件生成稳定中文视图和首次导�
     const applied = await runCliCaptured(["documents", "migrate", "--apply"], root);
     assert.equal(applied.exitCode, 0);
     assert.equal(
-      await readFile(join(root, "code-helper-docs/result-doc/英文迁移/实施记录.md"), "utf8"),
+      await readFile(join(root, ".code-helper/local/docs/result-doc/英文迁移/实施记录.md"), "utf8"),
       "# 旧实施\n"
     );
 
-    await writeFile(join(root, "code-helper-docs/result-doc/英文迁移/实施记录.md"), "# 新实施\n", "utf8");
+    await writeFile(join(root, ".code-helper/local/docs/result-doc/英文迁移/实施记录.md"), "# 新实施\n", "utf8");
     const preview = await runCliCaptured(["documents", "import", "--json"], root);
     assert.equal(preview.exitCode, 0);
     assert.match(preview.logs.join("\n"), /"status": "candidate"/u);

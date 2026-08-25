@@ -1,6 +1,6 @@
 import { readdir } from "node:fs/promises";
 
-import { COMPLETION_RECORD_DIRECTORY } from "./constants.js";
+import { COMPLETION_RECORD_DIRECTORY, LEGACY_DOCUMENTS_DIRECTORY } from "./constants.js";
 import {
   registerMarkdownExportBaseline,
   withDocumentRepository
@@ -121,15 +121,12 @@ export async function findCompletionRecord(
   rawName: string
 ): Promise<CompletionRecord | undefined> {
   for (const featureName of getCompletionRecordFeatureNameCandidates(rawName)) {
-    const relativePath = getCompletionRecordRelativePath(featureName);
-    const content = await readTextIfExists(projectPath(projectRoot, relativePath));
+    for (const relativePath of getCompletionRecordRelativePathCandidates(featureName)) {
+      const content = await readTextIfExists(projectPath(projectRoot, relativePath));
 
-    if (content !== undefined) {
-      return {
-        featureName,
-        relativePath,
-        content
-      };
+      if (content !== undefined) {
+        return { featureName, relativePath, content };
+      }
     }
   }
 
@@ -145,32 +142,20 @@ export async function findCompletionRecord(
 export async function listCompletionRecordFiles(
   projectRoot: string
 ): Promise<Array<{ fileName: string; relativePath: string; content: string }>> {
-  const directoryPath = projectPath(projectRoot, COMPLETION_RECORD_DIRECTORY);
-  let fileNames: string[];
-
-  try {
-    fileNames = await readdir(directoryPath);
-  } catch (error) {
-    if (isMissingPathError(error)) {
-      return [];
-    }
-
-    throw error;
-  }
-
   const records: Array<{ fileName: string; relativePath: string; content: string }> = [];
-
-  for (const fileName of fileNames) {
-    if (fileName.startsWith(".") || !fileName.endsWith(".md")) {
-      continue;
+  for (const directory of [COMPLETION_RECORD_DIRECTORY, `${LEGACY_DOCUMENTS_DIRECTORY}/completion-record`]) {
+    let fileNames: string[];
+    try {
+      fileNames = await readdir(projectPath(projectRoot, directory));
+    } catch (error) {
+      if (isMissingPathError(error)) continue;
+      throw error;
     }
-
-    const relativePath = portablePath(COMPLETION_RECORD_DIRECTORY, fileName);
-    const content = await readTextIfExists(projectPath(projectRoot, relativePath));
-
-    // readdir 与 readFile 之间文件可能被外部删除；仅跳过这一瞬态缺失，其他 IO 错误由底层抛出。
-    if (content !== undefined) {
-      records.push({ fileName, relativePath, content });
+    for (const fileName of fileNames) {
+      if (fileName.startsWith(".") || !fileName.endsWith(".md")) continue;
+      const relativePath = portablePath(directory, fileName);
+      const content = await readTextIfExists(projectPath(projectRoot, relativePath));
+      if (content !== undefined) records.push({ fileName, relativePath, content });
     }
   }
 
@@ -263,6 +248,15 @@ export function getCompletionRecordRelativePath(featureName: string): string {
     COMPLETION_RECORD_DIRECTORY,
     `${normalizedFeatureName}${COMPLETION_RECORD_FILE_SUFFIX}`
   );
+}
+
+/** 新路径优先；旧版路径只读兼容，绝不作为新记录写入位置。 */
+function getCompletionRecordRelativePathCandidates(featureName: string): string[] {
+  const fileName = `${normalizeCompletionRecordFeatureName(featureName)}${COMPLETION_RECORD_FILE_SUFFIX}`;
+  return [
+    portablePath(COMPLETION_RECORD_DIRECTORY, fileName),
+    portablePath(LEGACY_DOCUMENTS_DIRECTORY, "completion-record", fileName)
+  ];
 }
 
 /**

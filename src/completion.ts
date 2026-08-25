@@ -6,6 +6,7 @@ import {
   isValidCompletionRecordMetadata
 } from "./completion-record.js";
 import { loadConfig } from "./config.js";
+import { LEGACY_DOCUMENTS_DIRECTORY } from "./constants.js";
 import { portablePath, projectPath, readTextIfExists } from "./fs-utils.js";
 import { MANUAL_TEST_FILE_NAME, RESULT_RECORD_FILE_NAME } from "./workflows.js";
 
@@ -102,19 +103,19 @@ export async function createCompletionReview(projectRoot: string, featureName: s
   // plan 也走候选列表：mixed 时需在 active 与 archive 双侧探测，避免误判缺失。
   const plan = await readDocumentCandidates(
     projectRoot,
-    getPlanDocumentPathCandidates(task, config.directories.planDoc)
+    getDocumentPathCandidates(task, config.directories.planDoc, "plan")
   );
   const result = await readDocumentCandidates(
     projectRoot,
-    getResultDocumentPathCandidates(task, config.directories.resultDoc)
+    getDocumentPathCandidates(task, config.directories.resultDoc, "result")
   );
   const status = await readDocumentCandidates(
     projectRoot,
-    getStatusDocumentPathCandidates(task, config.directories.statusDoc)
+    getDocumentPathCandidates(task, config.directories.statusDoc, "status")
   );
   const manualTest = await readDocumentCandidates(
     projectRoot,
-    getManualTestDocumentPathCandidates(task, config.directories.resultDoc)
+    getDocumentPathCandidates(task, config.directories.resultDoc, "manual_test")
   );
   const combinedContent = [plan.content, result.content, status.content, manualTest.content].filter(Boolean).join("\n");
   // 完成结论只读取 status-doc 的结构化执行区段。计划说明、历史实施记录、状态枚举示例和
@@ -355,6 +356,31 @@ function getManualTestDocumentPathCandidates(task: TaskRecord, resultDirectory: 
   ];
 
   return mergeDocumentPathCandidates(task, activePaths, archivedPaths);
+}
+
+/**
+ * 默认本地视图优先，旧公共目录仅作为未迁移项目的只读 fallback。
+ * 按文档类型复用既有 active/archive/mixed 候选排序，避免完成检查与 archive/tasks
+ * 对同一历史任务得出不一致结论。
+ */
+function getDocumentPathCandidates(
+  task: TaskRecord,
+  localDirectory: string,
+  type: "plan" | "result" | "status" | "manual_test"
+): string[] {
+  const legacyDirectory = type === "plan"
+    ? `${LEGACY_DOCUMENTS_DIRECTORY}/plan-doc`
+    : type === "status"
+      ? `${LEGACY_DOCUMENTS_DIRECTORY}/status-doc`
+      : `${LEGACY_DOCUMENTS_DIRECTORY}/result-doc`;
+  const resolver = type === "plan"
+    ? getPlanDocumentPathCandidates
+    : type === "result"
+      ? getResultDocumentPathCandidates
+      : type === "status"
+        ? getStatusDocumentPathCandidates
+        : getManualTestDocumentPathCandidates;
+  return [...resolver(task, localDirectory), ...resolver(task, legacyDirectory)];
 }
 
 /**

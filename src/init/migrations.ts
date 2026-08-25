@@ -6,7 +6,7 @@ import type { CodeHelperConfig, OperationResult } from "../types.js";
 
 /**
  * 迁移旧版工作区到新版布局。
- * 内部状态保留在 `.code-helper`，可读协作文档迁移到 `code-helper-docs`。
+ * 内部状态和默认过程文档保留在 `.code-helper`，长期规则仍位于 `code-helper-docs/user-rules`。
  */
 export async function migrateLegacyAgentWorkspace(projectRoot: string, config: CodeHelperConfig): Promise<OperationResult[]> {
   const migrations = [

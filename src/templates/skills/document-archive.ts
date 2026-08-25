@@ -17,14 +17,14 @@ description: 当用户要求归档功能文档、结束一个功能、查看任�
 
 ## 文档位置
 
-- 活动计划：code-helper-docs/plan-doc/<中文功能名>.md
-- 活动结果：code-helper-docs/result-doc/<中文功能名>/
-- 活动状态：code-helper-docs/status-doc/<中文功能名>-状态.md
-- 活动实施记录：code-helper-docs/result-doc/<中文功能名>/实施记录.md
-- 活动手工测试：code-helper-docs/result-doc/<中文功能名>/手工测试.md
-- 归档计划：code-helper-docs/plan-doc/archive/<中文功能名>.md
-- 归档结果：code-helper-docs/result-doc/archive/<中文功能名>/
-- 归档状态：code-helper-docs/status-doc/archive/<中文功能名>-状态.md
+- 活动计划：.code-helper/local/docs/plan-doc/<中文功能名>.md
+- 活动结果：.code-helper/local/docs/result-doc/<中文功能名>/
+- 活动状态：.code-helper/local/docs/status-doc/<中文功能名>-状态.md
+- 活动实施记录：.code-helper/local/docs/result-doc/<中文功能名>/实施记录.md
+- 活动手工测试：.code-helper/local/docs/result-doc/<中文功能名>/手工测试.md
+- 归档计划：.code-helper/local/docs/plan-doc/archive/<中文功能名>.md
+- 归档结果：.code-helper/local/docs/result-doc/archive/<中文功能名>/
+- 归档状态：.code-helper/local/docs/status-doc/archive/<中文功能名>-状态.md
 
 ## 使用流程
 
@@ -43,7 +43,7 @@ description: 当用户要求归档功能文档、结束一个功能、查看任�
 
 ## 边界规则
 
-- \`code-helper-docs/completion-record/\` 中的完成记录创建即为 recorded 终态，不属于活动任务，也不需要再次归档。
+- \`.code-helper/local/docs/completion-record/\` 中的完成记录创建即为 recorded 终态，不属于活动任务，也不需要再次归档。
 - SQLite 是任务生命周期权威来源；Markdown 仅作为可重建兼容视图，默认导出不得覆盖手工修改。
 - 只有 plan/status/result 计划任务进入 active、archived、mixed 生命周期；不得因为完成记录缺少计划或状态文档而补齐三件套。
 - 归档不覆盖已有 archive 目标。

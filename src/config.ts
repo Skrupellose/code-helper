@@ -4,7 +4,7 @@ import type { CodeHelperConfig, FeatureKey } from "./types.js";
 
 /**
  * 旧版工具工作区配置路径。
- * 新版把内部状态保留在 `.code-helper`，把可读协作文档迁移到 `code-helper-docs`。
+ * 新版把内部状态和默认过程文档保留在 `.code-helper`；`code-helper-docs` 仅保留长期规则和旧版兼容来源。
  */
 const LEGACY_WORKSPACE_DIRECTORY = ".agent/code-helper";
 

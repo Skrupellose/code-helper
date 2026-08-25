@@ -43,9 +43,9 @@ test("createPlanWorkbench 会生成计划、结果和状态文档", async () => 
       featureName: "订单管理升级"
     });
 
-    const plan = await readFile(join(root, "code-helper-docs/plan-doc/订单管理升级.md"), "utf8");
-    const result = await readFile(join(root, "code-helper-docs/result-doc/订单管理升级/实施记录.md"), "utf8");
-    const status = await readFile(join(root, "code-helper-docs/status-doc/订单管理升级-状态.md"), "utf8");
+    const plan = await readFile(join(root, ".code-helper/local/docs/plan-doc/订单管理升级.md"), "utf8");
+    const result = await readFile(join(root, ".code-helper/local/docs/result-doc/订单管理升级/实施记录.md"), "utf8");
+    const status = await readFile(join(root, ".code-helper/local/docs/status-doc/订单管理升级-状态.md"), "utf8");
 
     assert.equal(operations.length, 3);
     assert.match(plan, /下一步建议/);
@@ -57,7 +57,7 @@ test("createPlanWorkbench 会生成计划、结果和状态文档", async () => 
     assert.match(status, /子计划队列/);
     assert.match(status, /一次只推进“当前执行节点”/);
     await assert.rejects(
-      () => stat(join(root, "code-helper-docs/result-doc/订单管理升级/手工测试.md")),
+      () => stat(join(root, ".code-helper/local/docs/result-doc/订单管理升级/手工测试.md")),
       /ENOENT/
     );
   } finally {
@@ -81,7 +81,7 @@ test("createPlanWorkbench 支持读取绝对路径需求文档", async () => {
       featureName: "absolute-feature"
     });
 
-    const plan = await readFile(join(root, "code-helper-docs/plan-doc/外部订单需求.md"), "utf8");
+    const plan = await readFile(join(root, ".code-helper/local/docs/plan-doc/外部订单需求.md"), "utf8");
     assert.equal(operations.length, 3);
     assert.match(plan, /从项目外部拖入/);
   } finally {
@@ -102,7 +102,7 @@ test("createManualTestDocument 会生成独立页面手工测试文档", async (
       title: "页面功能手工测试"
     });
 
-    const manual = await readFile(join(root, "code-helper-docs/result-doc/页面功能/手工测试.md"), "utf8");
+    const manual = await readFile(join(root, ".code-helper/local/docs/result-doc/页面功能/手工测试.md"), "utf8");
     assert.match(manual, /页面功能手工测试/);
     assert.match(manual, /工具侧只执行纯逻辑测试/);
   } finally {
@@ -116,7 +116,7 @@ test("重复 plan 遇到手工修改的 Markdown 时返回结构化导出冲突"
     await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
     await writeFile(join(root, "requirement.md"), "# 冲突计划\n", "utf8");
     await createPlanWorkbench({ projectRoot: root, requirementPath: "requirement.md" });
-    const planPath = join(root, "code-helper-docs/plan-doc/冲突计划.md");
+    const planPath = join(root, ".code-helper/local/docs/plan-doc/冲突计划.md");
     await writeFile(planPath, "# 用户手工修改\n", "utf8");
 
     await assert.rejects(
@@ -135,7 +135,7 @@ test("重复 manual-test 遇到手工修改的 Markdown 时返回结构化导出
   try {
     await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
     await createManualTestDocument({ projectRoot: root, featureName: "手工冲突" });
-    const manualPath = join(root, "code-helper-docs/result-doc/手工冲突/手工测试.md");
+    const manualPath = join(root, ".code-helper/local/docs/result-doc/手工冲突/手工测试.md");
     await writeFile(manualPath, "# 用户手工修改\n", "utf8");
 
     await assert.rejects(
@@ -164,11 +164,11 @@ test("archiveFeature 会把功能文档移动到归档目录并标记为 archive
     const operations = await archiveFeature(root, "待归档功能");
     const tasks = await listTasks(root);
 
-    assert.ok(operations.some((operation) => operation.path.endsWith("code-helper-docs/plan-doc/archive/待归档功能.md")));
+    assert.ok(operations.some((operation) => operation.path.endsWith(".code-helper/local/docs/plan-doc/archive/待归档功能.md")));
     assert.equal(tasks.length, 1);
     assert.equal(tasks[0].featureName, "待归档功能");
     assert.equal(tasks[0].status, "archived");
-    assert.ok(tasks[0].archivedArtifacts.includes("code-helper-docs/plan-doc/archive/待归档功能.md"));
+    assert.ok(tasks[0].archivedArtifacts.includes(".code-helper/local/docs/plan-doc/archive/待归档功能.md"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -186,17 +186,17 @@ test("archiveFeature 遇到 mixed 冲突时需要显式 resolve", async () => {
       requirementPath: "requirement.md",
       featureName: "冲突归档"
     });
-    await mkdir(join(root, "code-helper-docs/plan-doc/archive"), { recursive: true });
+    await mkdir(join(root, ".code-helper/local/docs/plan-doc/archive"), { recursive: true });
     await copyFile(
-      join(root, "code-helper-docs/plan-doc/冲突归档.md"),
-      join(root, "code-helper-docs/plan-doc/archive/冲突归档.md")
+      join(root, ".code-helper/local/docs/plan-doc/冲突归档.md"),
+      join(root, ".code-helper/local/docs/plan-doc/archive/冲突归档.md")
     );
 
     await assert.rejects(
       () => archiveFeature(root, "冲突归档"),
       /--resolve-mixed/
     );
-    await stat(join(root, "code-helper-docs/result-doc/冲突归档/实施记录.md"));
+    await stat(join(root, ".code-helper/local/docs/result-doc/冲突归档/实施记录.md"));
 
     await archiveFeature(root, "冲突归档", { resolveMixed: true });
     const tasks = await listTasks(root);
@@ -205,7 +205,7 @@ test("archiveFeature 遇到 mixed 冲突时需要显式 resolve", async () => {
     assert.equal(tasks[0].featureName, "冲突归档");
     assert.equal(tasks[0].status, "archived");
     await assert.rejects(
-      () => stat(join(root, "code-helper-docs/plan-doc/冲突归档.md")),
+      () => stat(join(root, ".code-helper/local/docs/plan-doc/冲突归档.md")),
       /ENOENT/
     );
   } finally {
@@ -226,20 +226,20 @@ test("SQLite 初始化后手动移动 Markdown 不会绕过权威任务状态", 
       featureName: "手动归档功能"
     });
 
-    await mkdir(join(root, "code-helper-docs/plan-doc/archive"), { recursive: true });
-    await mkdir(join(root, "code-helper-docs/result-doc/archive"), { recursive: true });
-    await mkdir(join(root, "code-helper-docs/status-doc/archive"), { recursive: true });
+    await mkdir(join(root, ".code-helper/local/docs/plan-doc/archive"), { recursive: true });
+    await mkdir(join(root, ".code-helper/local/docs/result-doc/archive"), { recursive: true });
+    await mkdir(join(root, ".code-helper/local/docs/status-doc/archive"), { recursive: true });
     await rename(
-      join(root, "code-helper-docs/plan-doc/手动归档功能.md"),
-      join(root, "code-helper-docs/plan-doc/archive/手动归档功能.md")
+      join(root, ".code-helper/local/docs/plan-doc/手动归档功能.md"),
+      join(root, ".code-helper/local/docs/plan-doc/archive/手动归档功能.md")
     );
     await rename(
-      join(root, "code-helper-docs/result-doc/手动归档功能"),
-      join(root, "code-helper-docs/result-doc/archive/手动归档功能")
+      join(root, ".code-helper/local/docs/result-doc/手动归档功能"),
+      join(root, ".code-helper/local/docs/result-doc/archive/手动归档功能")
     );
     await rename(
-      join(root, "code-helper-docs/status-doc/手动归档功能-状态.md"),
-      join(root, "code-helper-docs/status-doc/archive/手动归档功能-状态.md")
+      join(root, ".code-helper/local/docs/status-doc/手动归档功能-状态.md"),
+      join(root, ".code-helper/local/docs/status-doc/archive/手动归档功能-状态.md")
     );
 
     const tasks = await listTasks(root);
@@ -281,7 +281,9 @@ test("archiveFeature 能归档使用小写迁移 slug 的大小写旧任务", as
   const root = await mkdtemp(join(tmpdir(), "code-helper-legacy-slug-archive-"));
   try {
     await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
+    await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
     await mkdir(join(root, "code-helper-docs/result-doc/Legacy-UPPER"), { recursive: true });
+    await mkdir(join(root, "code-helper-docs/status-doc"), { recursive: true });
     await writeFile(join(root, "code-helper-docs/plan-doc/Legacy-UPPER.md"), "# Legacy plan\n", "utf8");
     await writeFile(join(root, "code-helper-docs/result-doc/Legacy-UPPER/implementation.md"), "# Legacy result\n", "utf8");
     await writeFile(join(root, "code-helper-docs/status-doc/Legacy-UPPER-status.md"), "# Legacy status\n", "utf8");

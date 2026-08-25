@@ -60,12 +60,12 @@ test("createCompletionReview 会列出必须确认的归档和记忆问题", asy
       featureName: "收尾检查"
     });
     await writeFile(
-      join(root, "code-helper-docs/plan-doc/收尾检查.md"),
+      join(root, ".code-helper/local/docs/plan-doc/收尾检查.md"),
       "# 收尾检查\n\n## 当前执行节点\n\n状态：已完成\n\n## 子计划队列\n\n状态：已完成\n",
       "utf8"
     );
     await writeFile(
-      join(root, "code-helper-docs/status-doc/收尾检查-状态.md"),
+      join(root, ".code-helper/local/docs/status-doc/收尾检查-状态.md"),
       "# 收尾检查状态\n\n## 当前执行节点\n\n状态：已完成\n\n## 子计划队列\n\n状态：已完成\n",
       "utf8"
     );
@@ -971,6 +971,8 @@ test("createCompletionReview 会保留 git 当前变更路径的首字符和中�
     await writeFile(join(root, "src/cli.ts"), "export const value = 1;\n", "utf8");
 
     execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+    await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
+    await writeFile(join(root, "code-helper-docs/plan-doc/菜单优化.md"), "# 菜单优化\n", "utf8");
     execFileSync("git", ["add", "README.md", "src/cli.ts", "code-helper-docs/plan-doc/菜单优化.md"], {
       cwd: root,
       stdio: "ignore"

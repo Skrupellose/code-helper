@@ -24,7 +24,7 @@ export async function runDocuments(projectRoot: string, args: string[] = []): Pr
     case "check":
       return runIntegrityCheck(projectRoot, rest);
     default:
-      console.error("用法：code-helper documents <migrate [--apply] [--json]|import [--apply] [--json]|export [--force] [--json]|check [--json]>");
+      console.error("用法：code-helper documents <migrate [--apply] [--json]|import [--apply] [--json]|export [--tracked] [--force] [--json]|check [--json]>");
       return 1;
   }
 }
@@ -118,10 +118,11 @@ async function runMigration(projectRoot: string, args: string[]): Promise<number
 /** 将 SQLite 权威正文导出为兼容 Markdown 视图。 */
 async function runExport(projectRoot: string, args: string[]): Promise<number> {
   const force = args.includes("--force");
+  const tracked = args.includes("--tracked");
   const json = args.includes("--json");
-  const unknown = args.filter((arg) => arg !== "--force" && arg !== "--json");
+  const unknown = args.filter((arg) => arg !== "--force" && arg !== "--tracked" && arg !== "--json");
   if (unknown.length > 0) {
-    console.error("用法：code-helper documents export [--force] [--json]");
+    console.error("用法：code-helper documents export [--tracked] [--force] [--json]");
     return 1;
   }
 
@@ -131,7 +132,7 @@ async function runExport(projectRoot: string, args: string[]): Promise<number> {
       projectRoot,
       connection,
       new DocumentRepository(connection),
-      { force }
+      { force, tracked }
     );
     if (json) {
       console.log(JSON.stringify(result, null, 2));

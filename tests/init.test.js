@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -55,6 +55,8 @@ function extractManagedBlock(content) {
 async function writeLegacyEnglishWorkbenchDocs(root) {
   // 旧项目可能已经存在英文计划、结果和状态文档；测试统一复用这组兼容样本。
   await mkdir(join(root, "code-helper-docs/result-doc/seo-docs"), { recursive: true });
+  await mkdir(join(root, "code-helper-docs/plan-doc"), { recursive: true });
+  await mkdir(join(root, "code-helper-docs/status-doc"), { recursive: true });
   await writeFile(join(root, "code-helper-docs/plan-doc/seo-plan.md"), "# legacy seo plan\n", "utf8");
   await writeFile(
     join(root, "code-helper-docs/result-doc/seo-docs/implementation.md"),
@@ -63,6 +65,99 @@ async function writeLegacyEnglishWorkbenchDocs(root) {
   );
   await writeFile(join(root, "code-helper-docs/status-doc/seo-docs-status.md"), "# legacy status\n", "utf8");
 }
+
+test("init 仅维护 code-helper 的 Git 忽略区块并保留用户规则", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-gitignore-"));
+  try {
+    await writeFile(join(root, ".gitignore"), "dist/\n# 用户规则\ncustom/\n", "utf8");
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
+    await updateProject(root);
+    const content = await readFile(join(root, ".gitignore"), "utf8");
+    assert.match(content, /dist\/\n# 用户规则\ncustom\//u);
+    assert.equal((content.match(/# code-helper:local:start/gu) ?? []).length, 1);
+    assert.match(content, /# code-helper:local:start\n\.code-helper\/\n# code-helper:local:end/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("init 维护 Git 忽略区块时保留 CRLF 和区块外用户内容，并归一重复完整区块", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-gitignore-crlf-"));
+  const original = [
+    "dist/",
+    "# 用户规则",
+    "custom/",
+    "# code-helper:local:start",
+    ".code-helper/",
+    "# code-helper:local:end",
+    "# 保留在两个受控区块之间的用户内容",
+    "shared/",
+    "# code-helper:local:start",
+    "old-code-helper-rule/",
+    "# code-helper:local:end",
+    "tail/",
+    ""
+  ].join("\r\n");
+
+  try {
+    await writeFile(join(root, ".gitignore"), original, "utf8");
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
+    const first = await readFile(join(root, ".gitignore"), "utf8");
+    await updateProject(root);
+    const second = await readFile(join(root, ".gitignore"), "utf8");
+
+    assert.equal((first.match(/# code-helper:local:start/gu) ?? []).length, 1);
+    assert.match(first, /# code-helper:local:start\r\n\.code-helper\/\r\n# code-helper:local:end/u);
+    assert.match(first, /# 保留在两个受控区块之间的用户内容\r\nshared\//u);
+    assert.match(first, /dist\/\r\n# 用户规则\r\ncustom\//u);
+    assert.equal(first, second);
+    // 不能只检查是否含有 CRLF；混入任意裸 LF 都代表原文件换行风格被破坏。
+    assert.equal(/(^|[^\r])\n/u.test(first), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("init 遇到不完整 Git 忽略受控标记时拒绝修改用户文件", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-gitignore-incomplete-"));
+  const original = "custom/\n# code-helper:local:start\nuser-content/\n";
+
+  try {
+    await writeFile(join(root, ".gitignore"), original, "utf8");
+    await assert.rejects(
+      () => initializeProject({ projectRoot: root, skillRegistrationTargets: [] }),
+      /受控区块标记不完整/u
+    );
+    assert.equal(await readFile(join(root, ".gitignore"), "utf8"), original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("init 拒绝通过符号链接或目录维护 Git 忽略文件", async () => {
+  const linkRoot = await mkdtemp(join(tmpdir(), "code-helper-gitignore-link-"));
+  const directoryRoot = await mkdtemp(join(tmpdir(), "code-helper-gitignore-directory-"));
+  const externalFile = join(linkRoot, "external-gitignore");
+
+  try {
+    await writeFile(externalFile, "external/\n", "utf8");
+    await symlink(externalFile, join(linkRoot, ".gitignore"));
+    await assert.rejects(
+      () => initializeProject({ projectRoot: linkRoot, skillRegistrationTargets: [] }),
+      /拒绝维护符号链接 .gitignore/u
+    );
+    assert.equal(await readFile(externalFile, "utf8"), "external/\n");
+
+    await mkdir(join(directoryRoot, ".gitignore"));
+    await assert.rejects(
+      () => initializeProject({ projectRoot: directoryRoot, skillRegistrationTargets: [] }),
+      /目标不是普通文件/u
+    );
+  } finally {
+    await rm(linkRoot, { recursive: true, force: true });
+    await rm(directoryRoot, { recursive: true, force: true });
+  }
+});
 
 test("init raw mode 目标多选默认不勾选任何 agent", () => {
   // 新项目无法推断用户实际使用的 agent 工具，菜单默认值必须保持完全未选择。
@@ -253,7 +348,7 @@ test("initializeProject 会创建默认工作区并保留已有 AGENTS 内容", 
     assert.match(gitCommitRule, /scope 必填/u);
     assert.match(completionRecordRule, /lifecycle: recorded/u);
     assert.equal(
-      (await stat(join(root, "code-helper-docs/completion-record"))).isDirectory(),
+      (await stat(join(root, ".code-helper/local/docs/completion-record"))).isDirectory(),
       true
     );
     assert.match(codexHook, /agent-finish-check\.mjs/);
@@ -1068,7 +1163,7 @@ test("initializeProject 会迁移旧版内部工作区配置到 .code-helper", a
     const result = await initializeProject({ projectRoot: root });
     const config = await readFile(join(root, ".code-helper/config.json"), "utf8");
     const migratedRule = await readFile(join(root, "code-helper-docs/user-rules/旧规则.md"), "utf8");
-    const migratedPlan = await readFile(join(root, "code-helper-docs/plan-doc/旧计划.md"), "utf8");
+    const migratedPlan = await readFile(join(root, ".code-helper/local/docs/plan-doc/旧计划.md"), "utf8");
 
     assert.equal(result.config.directories.workspace, ".code-helper");
     assert.match(config, /"workspace": ".code-helper"/);
@@ -1080,7 +1175,7 @@ test("initializeProject 会迁移旧版内部工作区配置到 .code-helper", a
   }
 });
 
-test("initializeProject 会把早期 .code-helper 文档迁移到 code-helper-docs", async () => {
+test("initializeProject 会把早期 .code-helper 文档迁移到本地兼容视图", async () => {
   // 该测试覆盖上一版布局：内部状态在 .code-helper，协作文档也误放在 .code-helper 下。
   const root = await mkdtemp(join(tmpdir(), "code-helper-migrate-docs-"));
 
@@ -1097,7 +1192,7 @@ test("initializeProject 会把早期 .code-helper 文档迁移到 code-helper-do
     await initializeProject({ projectRoot: root });
 
     const migratedRule = await readFile(join(root, "code-helper-docs/user-rules/旧协作规则.md"), "utf8");
-    const migratedStatus = await readFile(join(root, "code-helper-docs/status-doc/旧功能-状态.md"), "utf8");
+    const migratedStatus = await readFile(join(root, ".code-helper/local/docs/status-doc/旧功能-状态.md"), "utf8");
 
     assert.match(migratedRule, /旧协作规则/);
     assert.match(migratedStatus, /旧状态/);

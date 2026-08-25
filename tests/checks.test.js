@@ -119,27 +119,27 @@ test("runChecks：documents 非中文名 / 意外结果文件名 / 缺失工作�
 
   try {
     // 计划文档英文名、结果目录英文名、意外结果文件名、状态旧后缀 → 均为 non-chinese-document-name（warning）
-    await writeFile(join(root, "code-helper-docs/plan-doc/english-plan.md"), "# plan\n", "utf8");
-    await mkdir(join(root, "code-helper-docs/result-doc/order-task"), { recursive: true });
+    await writeFile(join(root, ".code-helper/local/docs/plan-doc/english-plan.md"), "# plan\n", "utf8");
+    await mkdir(join(root, ".code-helper/local/docs/result-doc/order-task"), { recursive: true });
     // 中文任务目录内使用非固定文件名，也应走同一 code
-    await mkdir(join(root, "code-helper-docs/result-doc/订单任务"), { recursive: true });
+    await mkdir(join(root, ".code-helper/local/docs/result-doc/订单任务"), { recursive: true });
     await writeFile(
-      join(root, "code-helper-docs/result-doc/订单任务/其他笔记.md"),
+      join(root, ".code-helper/local/docs/result-doc/订单任务/其他笔记.md"),
       "# unexpected result file\n",
       "utf8"
     );
-    await writeFile(join(root, "code-helper-docs/status-doc/订单任务-status.md"), "# status\n", "utf8");
+    await writeFile(join(root, ".code-helper/local/docs/status-doc/订单任务-status.md"), "# status\n", "utf8");
 
     let issues = await runChecks(root);
     const naming = assertHasIssue(issues, "non-chinese-document-name");
     assert.ok(naming.every((issue) => issue.level === "warning"));
-    assert.ok(naming.some((issue) => issue.path === "code-helper-docs/plan-doc/english-plan.md"));
-    assert.ok(naming.some((issue) => issue.path === "code-helper-docs/result-doc/order-task"));
-    assert.ok(naming.some((issue) => issue.path === "code-helper-docs/result-doc/订单任务/其他笔记.md"));
-    assert.ok(naming.some((issue) => issue.path === "code-helper-docs/status-doc/订单任务-status.md"));
+    assert.ok(naming.some((issue) => issue.path === ".code-helper/local/docs/plan-doc/english-plan.md"));
+    assert.ok(naming.some((issue) => issue.path === ".code-helper/local/docs/result-doc/order-task"));
+    assert.ok(naming.some((issue) => issue.path === ".code-helper/local/docs/result-doc/订单任务/其他笔记.md"));
+    assert.ok(naming.some((issue) => issue.path === ".code-helper/local/docs/status-doc/订单任务-status.md"));
 
     // 删除 plan-doc 工作台目录 → missing-workbench-directory
-    await rm(join(root, "code-helper-docs/plan-doc"), { recursive: true, force: true });
+    await rm(join(root, ".code-helper/local/docs/plan-doc"), { recursive: true, force: true });
     issues = await runChecks(root);
     assertHasIssue(issues, "missing-workbench-directory", "plan-doc");
     assert.equal(
@@ -202,7 +202,7 @@ test("runChecks：missing-archive-directory 与 mixed-task-archive-state", async
 
   try {
     // 删掉某一侧 archive 子目录 → missing-archive-directory
-    await rm(join(root, "code-helper-docs/plan-doc/archive"), { recursive: true, force: true });
+    await rm(join(root, ".code-helper/local/docs/plan-doc/archive"), { recursive: true, force: true });
     let issues = await runChecks(root);
     assertHasIssue(issues, "missing-archive-directory", "plan-doc/archive");
     assert.equal(
@@ -211,10 +211,10 @@ test("runChecks：missing-archive-directory 与 mixed-task-archive-state", async
     );
 
     // 恢复 archive 后构造 active + archive 同名任务 → mixed-task-archive-state
-    await mkdir(join(root, "code-helper-docs/plan-doc/archive"), { recursive: true });
+    await mkdir(join(root, ".code-helper/local/docs/plan-doc/archive"), { recursive: true });
     // 复杂夹具：同一中文功能名在活动侧与归档侧各放一份 plan，触发 mixed
-    await writeFile(join(root, "code-helper-docs/plan-doc/混合任务.md"), "# active plan\n", "utf8");
-    await writeFile(join(root, "code-helper-docs/plan-doc/archive/混合任务.md"), "# archived plan\n", "utf8");
+    await writeFile(join(root, ".code-helper/local/docs/plan-doc/混合任务.md"), "# active plan\n", "utf8");
+    await writeFile(join(root, ".code-helper/local/docs/plan-doc/archive/混合任务.md"), "# archived plan\n", "utf8");
 
     issues = await runChecks(root);
     assertHasIssue(issues, "mixed-task-archive-state");

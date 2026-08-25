@@ -38,17 +38,17 @@ test("Markdown 导出按活动、归档和完成记录生成稳定路径", async
 
     assert.equal(
       getStableMarkdownExportPath(archived, resultDocument),
-      join("code-helper-docs", "result-doc", "archive", "归档任务", "实施记录.md")
+      join(".code-helper", "local", "docs", "result-doc", "archive", "归档任务", "实施记录.md")
     );
     const exported = await exportMarkdownDocuments(projectRoot, database, repository);
     assert.equal(exported.conflicts.length, 0);
     assert.equal(exported.exported.length, 3);
     assert.equal(
-      await readFile(join(projectRoot, "code-helper-docs/plan-doc/活动任务.md"), "utf8"),
+      await readFile(join(projectRoot, ".code-helper/local/docs/plan-doc/活动任务.md"), "utf8"),
       "# 活动计划\n"
     );
     assert.equal(
-      await readFile(join(projectRoot, "code-helper-docs/completion-record/直接任务-完成记录.md"), "utf8"),
+      await readFile(join(projectRoot, ".code-helper/local/docs/completion-record/直接任务-完成记录.md"), "utf8"),
       "# 完成记录\n"
     );
   });
@@ -58,8 +58,8 @@ test("默认不覆盖无摘要文件和导出后手工修改的文件", async ()
   await withExportProject(async ({ projectRoot, database, repository }) => {
     const task = repository.createTask({ slug: "manual", name: "手改保护" });
     const document = repository.createDocument({ taskId: task.id, type: "status", body: "数据库 v1" });
-    const target = join(projectRoot, "code-helper-docs/status-doc/手改保护-状态.md");
-    await mkdir(join(projectRoot, "code-helper-docs/status-doc"), { recursive: true });
+    const target = join(projectRoot, ".code-helper/local/docs/status-doc/手改保护-状态.md");
+    await mkdir(join(projectRoot, ".code-helper/local/docs/status-doc"), { recursive: true });
     await writeFile(target, "用户原文件", "utf8");
 
     const unknown = await exportMarkdownDocuments(projectRoot, database, repository);
@@ -87,7 +87,7 @@ test("磁盘仍等于上次导出摘要时允许安全刷新", async () => {
     const refreshed = await exportMarkdownDocuments(projectRoot, database, repository);
     assert.equal(refreshed.exported[0].status, "updated");
     assert.equal(
-      await readFile(join(projectRoot, "code-helper-docs/result-doc/安全刷新/实施记录.md"), "utf8"),
+      await readFile(join(projectRoot, ".code-helper/local/docs/result-doc/安全刷新/实施记录.md"), "utf8"),
       "版本二"
     );
     assert.equal(
@@ -102,7 +102,7 @@ test("Markdown 单边修改可预览并显式导回 SQLite 修订历史", async 
     const task = repository.createTask({ slug: "roundtrip", name: "安全回写" });
     const document = repository.createDocument({ taskId: task.id, type: "plan", body: "数据库初稿" });
     await exportMarkdownDocuments(projectRoot, database, repository);
-    const target = join(projectRoot, "code-helper-docs/plan-doc/安全回写.md");
+    const target = join(projectRoot, ".code-helper/local/docs/plan-doc/安全回写.md");
     await writeFile(target, "Markdown 修订", "utf8");
 
     const preview = await importMarkdownDocuments(projectRoot, database, repository);
@@ -122,7 +122,7 @@ test("数据库与 Markdown 双边变化时拒绝自动导入", async () => {
     const task = repository.createTask({ slug: "diverged", name: "双边冲突" });
     const document = repository.createDocument({ taskId: task.id, type: "status", body: "共同基线" });
     await exportMarkdownDocuments(projectRoot, database, repository);
-    await writeFile(join(projectRoot, "code-helper-docs/status-doc/双边冲突-状态.md"), "Markdown 分支", "utf8");
+    await writeFile(join(projectRoot, ".code-helper/local/docs/status-doc/双边冲突-状态.md"), "Markdown 分支", "utf8");
     repository.updateDocument(document.id, { body: "数据库分支", expectedRevision: 1 });
 
     const result = await importMarkdownDocuments(projectRoot, database, repository, { apply: true });
@@ -138,12 +138,12 @@ test("批量导入预检发现冲突时不部分写入其它安全候选", async
     const safeTask = repository.createTask({ slug: "safe-batch", name: "批量安全项" });
     const safeDocument = repository.createDocument({ taskId: safeTask.id, type: "plan", body: "安全基线" });
     await exportMarkdownDocuments(projectRoot, database, repository, { taskId: safeTask.id });
-    await writeFile(join(projectRoot, "code-helper-docs/plan-doc/批量安全项.md"), "安全候选修订", "utf8");
+    await writeFile(join(projectRoot, ".code-helper/local/docs/plan-doc/批量安全项.md"), "安全候选修订", "utf8");
 
     const conflictTask = repository.createTask({ slug: "conflict-batch", name: "批量冲突项" });
     repository.createDocument({ taskId: conflictTask.id, type: "status", body: "数据库正文" });
-    await mkdir(join(projectRoot, "code-helper-docs/status-doc"), { recursive: true });
-    await writeFile(join(projectRoot, "code-helper-docs/status-doc/批量冲突项-状态.md"), "无基线修改", "utf8");
+    await mkdir(join(projectRoot, ".code-helper/local/docs/status-doc"), { recursive: true });
+    await writeFile(join(projectRoot, ".code-helper/local/docs/status-doc/批量冲突项-状态.md"), "无基线修改", "utf8");
 
     const result = await importMarkdownDocuments(projectRoot, database, repository, { apply: true });
     assert.equal(result.conflicts.length, 1);
@@ -167,5 +167,15 @@ test("稳定导出路径拒绝 Windows 保留名称和路径分隔符", async ()
       () => getStableMarkdownExportPath(traversal, traversalDocument),
       /跨平台非法字符/u
     );
+  });
+});
+
+test("可跟踪导出显式写入旧版公共目录", async () => {
+  await withExportProject(async ({ projectRoot, database, repository }) => {
+    const task = repository.createTask({ slug: "tracked", name: "交接任务" });
+    repository.createDocument({ taskId: task.id, type: "plan", body: "交接正文" });
+    const result = await exportMarkdownDocuments(projectRoot, database, repository, { tracked: true });
+    assert.equal(result.conflicts.length, 0);
+    assert.equal(await readFile(join(projectRoot, "code-helper-docs/plan-doc/交接任务.md"), "utf8"), "交接正文");
   });
 });

@@ -10,7 +10,7 @@ export const manualTestWorkbenchSkillTemplate: SkillTemplate = {
   fileName: "manual-test-workbench.SKILL.md",
   content: `---
 name: code-helper-manual-test-workbench
-description: 当用户要求生成手工测试文档、验收清单、页面或可视化验收、真实浏览器链路验证、人工业务验收、回归测试步骤或测试补充说明时必须使用。该 skill 要读取需求、plan-doc、status-doc、result-doc 和相关页面或代码上下文，输出或更新 code-helper-docs/result-doc/<中文功能名>/手工测试.md；CLI manual-test 只生成模板，完整测试步骤必须由该 skill 结合上下文补全。
+description: 当用户要求生成手工测试文档、验收清单、页面或可视化验收、真实浏览器链路验证、人工业务验收、回归测试步骤或测试补充说明时必须使用。该 skill 要读取需求、plan-doc、status-doc、result-doc 和相关页面或代码上下文，输出或更新 .code-helper/local/docs/result-doc/<中文功能名>/手工测试.md；CLI manual-test 只生成模板，完整测试步骤必须由该 skill 结合上下文补全。
 ---
 
 # Code Helper 手工测试生成
@@ -33,10 +33,10 @@ description: 当用户要求生成手工测试文档、验收清单、页面或�
 执行前必须读取并综合以下内容：
 
 1. 用户本轮需求、验收口径和补充约束。
-2. \`code-helper-docs/plan-doc/<中文功能名>.md\`，确认计划中的验收标准、依赖关系和回归范围。
-3. \`code-helper-docs/status-doc/<中文功能名>-状态.md\`，确认当前执行节点、已完成范围、阻塞点和下一步。
-4. \`code-helper-docs/result-doc/<中文功能名>/实施记录.md\`，确认实际改动、验证结论、风险和未完成项。
-5. 已存在的 \`code-helper-docs/result-doc/<中文功能名>/手工测试.md\`，保留有效内容并补全缺口。
+2. \`.code-helper/local/docs/plan-doc/<中文功能名>.md\`，确认计划中的验收标准、依赖关系和回归范围。
+3. \`.code-helper/local/docs/status-doc/<中文功能名>-状态.md\`，确认当前执行节点、已完成范围、阻塞点和下一步。
+4. \`.code-helper/local/docs/result-doc/<中文功能名>/实施记录.md\`，确认实际改动、验证结论、风险和未完成项。
+5. 已存在的 \`.code-helper/local/docs/result-doc/<中文功能名>/手工测试.md\`，保留有效内容并补全缺口。
 6. 与测试对象相关的页面、组件、路由、命令、接口、配置、数据结构或业务规则代码。
 7. 测试策略规则，尤其是页面、可视化和真实浏览器链路由用户手工执行，工具只执行纯逻辑测试。
 
@@ -48,7 +48,7 @@ description: 当用户要求生成手工测试文档、验收清单、页面或�
 
 输出或更新：
 
-\`code-helper-docs/result-doc/<中文功能名>/手工测试.md\`
+\`.code-helper/local/docs/result-doc/<中文功能名>/手工测试.md\`
 
 文档必须使用中文命名、中文标题和中文总结。功能名必须尽量来自已有 plan-doc、status-doc 或 result-doc；如果只能从用户描述推断，要保留可区分后缀，避免多个任务覆盖同一目录。
 
@@ -190,7 +190,7 @@ description: 当用户要求生成手工测试文档、验收清单、页面或�
 如果 \`手工测试.md\` 不存在：
 
 1. 先确认中文功能名和目标目录。
-2. 创建 \`code-helper-docs/result-doc/<中文功能名>/手工测试.md\`。
+2. 创建 \`.code-helper/local/docs/result-doc/<中文功能名>/手工测试.md\`。
 3. 写入完整结构，不只写空标题。
 
 ## 完成标准
@@ -202,5 +202,5 @@ description: 当用户要求生成手工测试文档、验收清单、页面或�
 - 每个核心场景都有可执行步骤和可判定预期结果。
 - 明确区分工具可执行的纯逻辑测试和用户必须手工执行的页面、可视化、真实浏览器链路。
 - 阻塞项、缺失数据和未覆盖风险被单独记录。
-- 文档路径为 \`code-helper-docs/result-doc/<中文功能名>/手工测试.md\`。`
+- 文档路径为 \`.code-helper/local/docs/result-doc/<中文功能名>/手工测试.md\`。`
 };

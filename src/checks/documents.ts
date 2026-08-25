@@ -1,4 +1,5 @@
 import { portablePath, projectPath, readTextIfExists } from "../fs-utils.js";
+import { LEGACY_DOCUMENTS_DIRECTORY } from "../constants.js";
 import type { CheckIssue, CodeHelperConfig } from "../types.js";
 import { containsChinese, createChineseNameIssue, safeReadDirectory } from "./shared.js";
 
@@ -48,6 +49,21 @@ export async function checkChineseWorkbenchDocuments(projectRoot: string, config
   issues.push(...(await checkResultDocumentNames(projectRoot, portablePath(config.directories.resultDoc, "archive"))));
   issues.push(...(await checkStatusDocumentNames(projectRoot, config.directories.statusDoc)));
   issues.push(...(await checkStatusDocumentNames(projectRoot, portablePath(config.directories.statusDoc, "archive"))));
+
+  // 旧公共目录只读兼容：仍提示命名问题，帮助用户在显式 migrate 前发现遗留文档。
+  for (const directory of ["plan-doc", "result-doc", "status-doc"]) {
+    const root = portablePath(LEGACY_DOCUMENTS_DIRECTORY, directory);
+    if (directory === "plan-doc") {
+      issues.push(...(await checkPlanDocumentNames(projectRoot, root)));
+      issues.push(...(await checkPlanDocumentNames(projectRoot, portablePath(root, "archive"))));
+    } else if (directory === "result-doc") {
+      issues.push(...(await checkResultDocumentNames(projectRoot, root)));
+      issues.push(...(await checkResultDocumentNames(projectRoot, portablePath(root, "archive"))));
+    } else {
+      issues.push(...(await checkStatusDocumentNames(projectRoot, root)));
+      issues.push(...(await checkStatusDocumentNames(projectRoot, portablePath(root, "archive"))));
+    }
+  }
 
   return issues;
 }

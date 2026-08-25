@@ -17,6 +17,7 @@ import {
   installEntryDocuments
 } from "./entries.js";
 import { migrateLegacyAgentWorkspace } from "./migrations.js";
+import { ensureCodeHelperGitIgnore } from "./gitignore.js";
 import {
   installProjectAgentHooks,
   installProjectSkillRegistrations,
@@ -68,6 +69,7 @@ export async function initializeProject(options: InitializeOptions): Promise<Ini
 
   operations.push(...(await migrateLegacyAgentWorkspace(options.projectRoot, config)));
   await createDirectories(options.projectRoot, config, operations);
+  operations.push(await ensureCodeHelperGitIgnore(options.projectRoot));
   ensureDocumentDatabase(options.projectRoot);
   operations.push({
     path: projectPath(options.projectRoot, `${config.directories.workspace}/code-helper.sqlite`),
@@ -113,6 +115,7 @@ export async function updateProject(
 
   operations.push(...(await migrateLegacyAgentWorkspace(projectRoot, config)));
   await createDirectories(projectRoot, config, operations);
+  operations.push(await ensureCodeHelperGitIgnore(projectRoot));
   ensureDocumentDatabase(projectRoot);
   operations.push({
     path: projectPath(projectRoot, `${config.directories.workspace}/code-helper.sqlite`),

@@ -266,7 +266,7 @@ function renderPlanDocument(featureName: string, requirementPath: string, requir
 
 1. 先确认目标、阶段边界和验收标准。
 2. 再按依赖顺序拆分基础能力、核心实现、集成验收和复查任务。
-3. 将当前要执行的第一个子计划同步到 \`code-helper-docs/status-doc/${featureName}-状态.md\` 的“当前执行节点”。
+3. 将当前要执行的第一个子计划同步到本地状态记录的“当前执行节点”。
 4. 每完成一个子计划，都更新实施记录、计划状态和状态记录，再进入下一个子计划。
 5. 涉及页面、可视化或浏览器链路时，只生成手工测试文档，由用户执行。
 6. 工具执行测试时只运行纯逻辑测试，例如函数单元测试或非浏览器集成测试。
@@ -307,9 +307,9 @@ ${excerpt}
 
 ## 状态记录
 
-- 当前状态文件：\`code-helper-docs/status-doc/${featureName}-状态.md\`
-- 执行记录目录：\`code-helper-docs/result-doc/${featureName}/\`
-- 按需手工测试文档：\`code-helper-docs/result-doc/${featureName}/${MANUAL_TEST_FILE_NAME}\`
+- 当前状态文件：本地 status-doc 目录中的 ${featureName}-状态.md
+- 执行记录目录：本地 result-doc 目录中的 ${featureName}/
+- 按需手工测试文档：本地 result-doc 目录中的 ${featureName}/${MANUAL_TEST_FILE_NAME}
 - 推进要求：每个子计划开始前先更新状态记录的“当前执行节点”，完成后再写入下一节点。
 `;
 }
@@ -410,9 +410,9 @@ function renderStatusDocument(featureName: string): string {
 
 ## 关键索引
 
-- 执行计划：\`code-helper-docs/plan-doc/${featureName}.md\`
-- 实施记录：\`code-helper-docs/result-doc/${featureName}/${RESULT_RECORD_FILE_NAME}\`
-- 手工测试：\`code-helper-docs/result-doc/${featureName}/${MANUAL_TEST_FILE_NAME}\`
+- 执行计划：本地 plan-doc 目录中的 ${featureName}.md
+- 实施记录：本地 result-doc 目录中的 ${featureName}/${RESULT_RECORD_FILE_NAME}
+- 手工测试：本地 result-doc 目录中的 ${featureName}/${MANUAL_TEST_FILE_NAME}
 
 ## 仍会影响后续判断的风险点
 

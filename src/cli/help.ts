@@ -66,7 +66,7 @@ export function printHelp(): void {
   code-helper tasks [--json]           查看 active / archived / mixed 任务
   code-helper documents migrate [--apply] [--json] 预览或显式导入旧版 Markdown 文档
   code-helper documents import [--apply] [--json]  预览或显式导入 Markdown 单边修改
-  code-helper documents export [--force] [--json]  从 SQLite 导出兼容 Markdown 视图
+  code-helper documents export [--tracked] [--force] [--json]  从 SQLite 导出兼容 Markdown 视图；--tracked 写入可提交副本
   code-helper documents check [--json] 检查 SQLite 文档数据库完整性
   code-helper skills list              查看项目级 skills 注册状态
   code-helper skills register [target] 按项目入口或指定 target 注册项目级 skills

@@ -10,7 +10,7 @@ export const completionRecordSkillTemplate: SkillTemplate = {
   fileName: "completion-record.SKILL.md",
   content: `---
 name: code-helper-completion-record
-description: 当任务通过直接执行完成，但收尾时发现改动跨模块、验证链较长、形成重要决策或具有后续复盘价值时必须使用。该 skill 只生成 code-helper-docs/completion-record/<中文功能名>-完成记录.md，不创建 plan-doc、status-doc、result-doc 或手工测试文档；任务仍有后续阶段、阻塞、跨会话恢复需求或已经属于 active/mixed 计划任务时不得使用。
+description: 当任务通过直接执行完成，但收尾时发现改动跨模块、验证链较长、形成重要决策或具有后续复盘价值时必须使用。该 skill 只生成 .code-helper/local/docs/completion-record/<中文功能名>-完成记录.md，不创建 plan-doc、status-doc、result-doc 或手工测试文档；任务仍有后续阶段、阻塞、跨会话恢复需求或已经属于 active/mixed 计划任务时不得使用。
 ---
 
 # Code Helper 完成记录
@@ -46,7 +46,7 @@ description: 当任务通过直接执行完成，但收尾时发现改动跨模�
 
 ## 输出位置
 
-\`code-helper-docs/completion-record/<中文功能名>-完成记录.md\`
+\`.code-helper/local/docs/completion-record/<中文功能名>-完成记录.md\`
 
 完成记录必须保留以下 frontmatter：
 

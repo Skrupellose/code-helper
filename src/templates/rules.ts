@@ -139,7 +139,7 @@ ${entryFiles.map((file) => `- ${file}`).join("\n")}
 5. 验证只记录关键命令和结论，不粘贴冗长输出。
 6. 如果页面需要测试，写入手工测试文档，不要求 agent 执行浏览器自动化。
 7. 影响下一步决策的结论同步到 \`${config.directories.statusDoc}/\`，细节留在 result-doc。
-8. 没有计划任务的直接执行工作如果已经完成、没有后续阶段且具有复盘价值，使用 \`code-helper-completion-record\` 写入 \`code-helper-docs/completion-record/<中文功能名>-完成记录.md\`；不得因此补建 plan/status/result。
+8. 没有计划任务的直接执行工作如果已经完成、没有后续阶段且具有复盘价值，使用 \`code-helper-completion-record\` 写入 \`.code-helper/local/docs/completion-record/<中文功能名>-完成记录.md\`；不得因此补建 plan/status/result。
 9. 直接执行任务仍有未完成阶段、阻塞或跨会话恢复需求时，必须升级为计划跟踪，不能用完成记录代替过程文档。
 10. 计划跟踪任务只在关键里程碑更新 status-doc 的进度摘要；普通搜索、单次命令和微型补丁不生成流水式过程记录。
 11. 多 agent 结果中的验证结论必须能追溯到任务 ID、起始基线、diff 身份和验证回执；不得把已经过期或属于被取消、被替代任务的回执写成当前有效结论。`
@@ -164,7 +164,7 @@ ${entryFiles.map((file) => `- ${file}`).join("\n")}
 
 ## 规则
 
-1. 使用 \`code-helper-completion-record\` 生成 \`code-helper-docs/completion-record/<中文功能名>-完成记录.md\`。
+1. 使用 \`code-helper-completion-record\` 生成 \`.code-helper/local/docs/completion-record/<中文功能名>-完成记录.md\`。
 2. 完成记录必须保留 \`code-helper-kind: completion-record\`、\`tracking-mode: direct\` 和 \`lifecycle: recorded\` frontmatter。
 3. 完成记录必须包含背景、实施总结、实际改动、验证、未验证事项、风险与后续。
 4. 完成记录创建即为 recorded 终态，不参与 active、archived、mixed 生命周期。
@@ -227,7 +227,7 @@ ${entryFiles.map((file) => `- ${file}`).join("\n")}
 
 ## 规则
 
-1. 初始化后的项目以 SQLite 任务状态和文档正文为权威；\`${config.directories.planDoc}/\`、\`${config.directories.resultDoc}/\`、\`${config.directories.statusDoc}/\` 是 Markdown 兼容视图。
+1. 初始化后的项目以 SQLite 任务状态和文档正文为权威；\`${config.directories.planDoc}/\`、\`${config.directories.resultDoc}/\`、\`${config.directories.statusDoc}/\` 是默认 Git 忽略的本地 Markdown 兼容视图；需要 Git 交接或审计时使用 \`documents export --tracked\`。
 2. 已结束任务的兼容视图放入归档目录：\`${config.directories.planDoc}/archive/\`、\`${config.directories.resultDoc}/archive/\`、\`${config.directories.statusDoc}/archive/\`。
 3. 执行 \`npx @skrupellose/code-helper archive <中文功能名>\` 时，先把 SQLite 任务状态迁移为 archived，再同步对应 Markdown 兼容视图。
 4. 归档不覆盖已有目标；如果 archive 中已经存在同名文档，视为用户已经手动归档。
@@ -237,7 +237,7 @@ ${entryFiles.map((file) => `- ${file}`).join("\n")}
 8. status-doc 是当前状态记录，归档后不再作为当前任务入口。
 9. 初始化预建的空 archive 目录不代表存在归档任务；只有实际 archived 或 mixed 任务文档才参与生命周期判断。
 10. 归档前必须检查实施记录和状态记录。只有页面、可视化、浏览器真实链路、人工业务验收任务，或结果目录已经存在 \`手工测试.md\` 时，才把手工测试结论作为归档条件；纯逻辑任务以自动化验证为准。
-11. \`code-helper-docs/completion-record/\` 中的完成记录创建即为 recorded 终态，不属于计划任务，也不需要再次归档；不得因为完成记录缺少计划或状态文档而补齐三件套。
+11. \`.code-helper/local/docs/completion-record/\` 中的完成记录创建即为 recorded 终态，不属于计划任务，也不需要再次归档；不得因为完成记录缺少计划或状态文档而补齐三件套。
 12. Markdown 导出默认保护手工修改；需要覆盖时必须显式使用 \`documents export --force\`。
 13. Agent 修改 Markdown 兼容视图后必须先运行 \`documents import\` 预览，再显式使用 \`--apply\` 写入 SQLite revision；双边变化时不得自动覆盖。`
     },

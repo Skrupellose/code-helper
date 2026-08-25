@@ -505,14 +505,14 @@ test("plan 从需求文档子目录执行时仍写入已初始化项目根", asy
     await writeFile(join(docsRoot, "需求.md"), "# 子目录需求\n\n从 docs 目录执行 plan。", "utf8");
 
     const exitCode = await runCli(["plan", "需求.md"], docsRoot);
-    const plan = await readFile(join(root, "code-helper-docs/plan-doc/子目录需求.md"), "utf8");
+    const plan = await readFile(join(root, ".code-helper/local/docs/plan-doc/子目录需求.md"), "utf8");
 
     assert.equal(exitCode, 0);
     assert.match(plan, /从 docs 目录执行 plan/);
     assert.match(plan, /原始需求文档：`docs\/需求\.md`/);
-    assert.match(logs.join("\n"), /code-helper-docs\/plan-doc\/子目录需求\.md/);
+    assert.match(logs.join("\n"), /\.code-helper\/local\/docs\/plan-doc\/子目录需求\.md/);
     await assert.rejects(
-      () => stat(join(docsRoot, "code-helper-docs")),
+      () => stat(join(docsRoot, ".code-helper")),
       /ENOENT/
     );
   } finally {
@@ -905,12 +905,12 @@ test("finish 输出必须确认事项以防遗漏收尾步骤", async () => {
       featureName: "收尾确认"
     });
     await writeFile(
-      join(root, "code-helper-docs/plan-doc/收尾确认.md"),
+      join(root, ".code-helper/local/docs/plan-doc/收尾确认.md"),
       "# 收尾确认\n\n## 当前执行节点\n\n状态：已完成\n\n## 子计划队列\n\n状态：已完成\n",
       "utf8"
     );
     await writeFile(
-      join(root, "code-helper-docs/status-doc/收尾确认-状态.md"),
+      join(root, ".code-helper/local/docs/status-doc/收尾确认-状态.md"),
       "# 收尾确认状态\n\n## 当前执行节点\n\n状态：已完成\n\n## 子计划队列\n\n状态：已完成\n",
       "utf8"
     );
