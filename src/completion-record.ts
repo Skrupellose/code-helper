@@ -2,6 +2,10 @@ import { readdir } from "node:fs/promises";
 
 import { COMPLETION_RECORD_DIRECTORY } from "./constants.js";
 import {
+  registerMarkdownExportBaseline,
+  withDocumentRepository
+} from "./documents/index.js";
+import {
   portablePath,
   projectPath,
   readTextIfExists,
@@ -9,7 +13,7 @@ import {
 } from "./fs-utils.js";
 import { containsChinese } from "./text-utils.js";
 import type { OperationResult } from "./types.js";
-import { normalizeDocumentName } from "./workflows.js";
+import { normalizeDocumentName, normalizeFeatureName } from "./workflows.js";
 
 /** 完成记录固定使用的文件名后缀。 */
 export const COMPLETION_RECORD_FILE_SUFFIX = "-完成记录.md";
@@ -49,11 +53,33 @@ export async function createCompletionRecord(
   await assertNoPlanningTaskConflict(options.projectRoot, featureName);
   const relativePath = getCompletionRecordRelativePath(featureName);
   const targetPath = projectPath(options.projectRoot, relativePath);
+  const body = await readTextIfExists(targetPath) ?? renderCompletionRecordDocument(featureName);
+
+  // 完成记录在 SQLite 中也是独立 recorded 终态；Markdown 仅作为兼容导出视图。
+  withDocumentRepository(options.projectRoot, (repository) => {
+    const slug = normalizeFeatureName(featureName);
+    const task = repository.getTaskBySlug(slug)
+      ?? repository.createTask({ slug, name: featureName, trackingMode: "recorded" });
+
+    if (task.trackingMode !== "recorded") {
+      throw new Error(`功能“${featureName}”已经存在计划任务，不能创建同名完成记录。`);
+    }
+
+    if (!repository.listDocuments(task.id).some((document) => document.type === "completion_record")) {
+      repository.createDocument({
+        taskId: task.id,
+        type: "completion_record",
+        body,
+        source: "markdown-compatible-cli"
+      });
+    }
+  });
 
   const operation = await writeTextIfMissing(
     targetPath,
-    renderCompletionRecordDocument(featureName)
+    body
   );
+  await registerMarkdownExportBaseline(options.projectRoot, normalizeFeatureName(featureName));
 
   return {
     ...operation,

@@ -227,17 +227,19 @@ ${entryFiles.map((file) => `- ${file}`).join("\n")}
 
 ## 规则
 
-1. 活动任务文档保留在当前工作区：\`${config.directories.planDoc}/\`、\`${config.directories.resultDoc}/\`、\`${config.directories.statusDoc}/\`。
-2. 已结束任务文档放入归档目录：\`${config.directories.planDoc}/archive/\`、\`${config.directories.resultDoc}/archive/\`、\`${config.directories.statusDoc}/archive/\`。
-3. 执行 \`npx @skrupellose/code-helper archive <中文功能名>\` 时，将 \`${config.directories.planDoc}/<中文功能名>.md\`、\`${config.directories.resultDoc}/<中文功能名>/\`、\`${config.directories.statusDoc}/<中文功能名>-状态.md\` 移入对应 archive 目录。
+1. 初始化后的项目以 SQLite 任务状态和文档正文为权威；\`${config.directories.planDoc}/\`、\`${config.directories.resultDoc}/\`、\`${config.directories.statusDoc}/\` 是 Markdown 兼容视图。
+2. 已结束任务的兼容视图放入归档目录：\`${config.directories.planDoc}/archive/\`、\`${config.directories.resultDoc}/archive/\`、\`${config.directories.statusDoc}/archive/\`。
+3. 执行 \`npx @skrupellose/code-helper archive <中文功能名>\` 时，先把 SQLite 任务状态迁移为 archived，再同步对应 Markdown 兼容视图。
 4. 归档不覆盖已有目标；如果 archive 中已经存在同名文档，视为用户已经手动归档。
-5. 只要任务文档只存在于 archive 目录中，就应识别为已结束任务。
-6. 如果同一中文功能名同时存在 active 文档和 archived 文档，状态为 mixed，必须人工确认是否有遗漏文档需要继续归档。
+5. SQLite 已初始化时以数据库状态判断任务是否结束；尚未迁移的旧项目继续按 archive 目录识别。
+6. 旧项目中同一中文功能名同时存在 active 和 archived Markdown 时状态为 mixed，必须人工确认后再迁移。
 7. 新功能开始时不要复用已归档中文功能名；需要返工时，新建后续中文功能名或明确从 archive 恢复。
 8. status-doc 是当前状态记录，归档后不再作为当前任务入口。
 9. 初始化预建的空 archive 目录不代表存在归档任务；只有实际 archived 或 mixed 任务文档才参与生命周期判断。
 10. 归档前必须检查实施记录和状态记录。只有页面、可视化、浏览器真实链路、人工业务验收任务，或结果目录已经存在 \`手工测试.md\` 时，才把手工测试结论作为归档条件；纯逻辑任务以自动化验证为准。
-11. \`code-helper-docs/completion-record/\` 中的完成记录创建即为 recorded 终态，不属于计划任务，也不需要再次归档；不得因为完成记录缺少计划或状态文档而补齐三件套。`
+11. \`code-helper-docs/completion-record/\` 中的完成记录创建即为 recorded 终态，不属于计划任务，也不需要再次归档；不得因为完成记录缺少计划或状态文档而补齐三件套。
+12. Markdown 导出默认保护手工修改；需要覆盖时必须显式使用 \`documents export --force\`。
+13. Agent 修改 Markdown 兼容视图后必须先运行 \`documents import\` 预览，再显式使用 \`--apply\` 写入 SQLite revision；双边变化时不得自动覆盖。`
     },
     {
       fileName: "功能完成检查规范.md",

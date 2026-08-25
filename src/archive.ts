@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 
 import { loadConfig } from "./config.js";
 import { findCompletionRecord } from "./completion-record.js";
+import { createLegacyTaskSlug, withDocumentRepository } from "./documents/index.js";
 import { ensureDirectory, pathExists, portablePath, projectPath, writeText } from "./fs-utils.js";
 import { containsChinese } from "./text-utils.js";
 import type { CodeHelperConfig, OperationResult } from "./types.js";
@@ -12,7 +13,7 @@ import { normalizeDocumentName, normalizeFeatureName } from "./workflows.js";
  * 任务文档的状态。
  * active 表示仍在顶层工作目录，archived 表示已经进入 archive，mixed 表示两边都存在，需要人工确认。
  */
-export type TaskStatus = "active" | "archived" | "mixed";
+export type TaskStatus = "active" | "paused" | "completed" | "cancelled" | "archived" | "mixed";
 
 /**
  * 单个任务在 plan/result/status 三类文档中的分布。
@@ -76,6 +77,32 @@ export async function archiveFeature(
       "如果确认归档目录中的版本应保留，请运行 `code-helper archive <中文功能名> --resolve-mixed` 清理活动副本。",
       ...conflicts.map((conflict) => `冲突路径：${conflict}`)
     ].join("\n"));
+  }
+
+  // SQLite 是初始化后项目的任务状态权威；先提交归档状态，再处理可重建的 Markdown 导出视图。
+  // 导出移动失败不会把已经归档的业务任务重新标记为活动，后续 export 可重新生成视图。
+  const databasePath = projectPath(projectRoot, `${config.directories.workspace}/code-helper.sqlite`);
+  if (matchingTask !== undefined && await pathExists(databasePath)) {
+    const databaseOperation = withDocumentRepository(projectRoot, (repository) => {
+      // 新任务沿用 normalizeFeatureName；旧 Markdown 迁移会使用 NFKC + 小写 slug。
+      // 两种规范化都尝试，避免大小写或 Unicode 兼容字符让数据库状态漏归档。
+      const task = repository.getTaskBySlug(normalizeFeatureName(matchingTask.featureName))
+        ?? repository.getTaskBySlug(createLegacyTaskSlug(matchingTask.featureName));
+      if (task === undefined) {
+        return undefined;
+      }
+      if (task.status !== "archived") {
+        repository.transitionTaskStatus(task.id, "archived");
+      }
+      return {
+        path: databasePath,
+        action: "updated" as const,
+        message: "已将 SQLite 任务状态更新为 archived"
+      };
+    });
+    if (databaseOperation !== undefined) {
+      operations.push(databaseOperation);
+    }
   }
 
   for (const move of moves) {
@@ -180,6 +207,7 @@ function getFeatureNameLookupKeys(rawFeatureName: string): Set<string> {
 export async function listTasks(projectRoot: string): Promise<TaskRecord[]> {
   const config = await loadConfig(projectRoot);
   const tasks = new Map<string, TaskRecord>();
+  const databaseStatuses = new Map<string, TaskStatus>();
 
   await collectPlanDocuments(projectRoot, config, tasks, false);
   await collectPlanDocuments(projectRoot, config, tasks, true);
@@ -188,10 +216,35 @@ export async function listTasks(projectRoot: string): Promise<TaskRecord[]> {
   await collectStatusDocuments(projectRoot, config, tasks, false);
   await collectStatusDocuments(projectRoot, config, tasks, true);
 
+  // 初始化后的项目以 SQLite 任务状态为权威；Markdown 扫描只负责补充导出路径，
+  // 未建立数据库的旧项目继续保持纯文件扫描，不让只读 tasks 命令意外创建数据库。
+  const databasePath = projectPath(projectRoot, `${config.directories.workspace}/code-helper.sqlite`);
+  if (await pathExists(databasePath)) {
+    withDocumentRepository(projectRoot, (repository) => {
+      for (const databaseTask of repository.listTasks({ trackingMode: "planned" })) {
+        // 仓储筛选条件目前不会在 TypeScript 类型层收窄状态；防御性排除独立完成记录，
+        // 确保 archive 任务列表只接收计划任务生命周期状态。
+        if (databaseTask.status === "recorded") {
+          continue;
+        }
+        const existing = tasks.get(databaseTask.name) ?? {
+          featureName: databaseTask.name,
+          status: "active" as TaskStatus,
+          activeArtifacts: [],
+          archivedArtifacts: []
+        };
+        existing.status = databaseTask.status;
+        tasks.set(databaseTask.name, existing);
+        databaseStatuses.set(databaseTask.name, databaseTask.status);
+      }
+    });
+  }
+
   return [...tasks.values()]
     .map((task) => ({
       ...task,
-      status: resolveTaskStatus(task)
+      // 只有尚未进入 SQLite 的旧任务继续依据目录分布解析 active/archived/mixed。
+      status: databaseStatuses.get(task.featureName) ?? resolveTaskStatus(task)
     }))
     .sort((left, right) => left.featureName.localeCompare(right.featureName));
 }
@@ -328,7 +381,8 @@ async function writeArchiveRecord(
 function isKnownArchivedOperation(operation: OperationResult): boolean {
   return operation.message === "已移动到归档目录"
     || operation.message === "已在归档目录中，识别为已结束任务"
-    || operation.message === "已清理活动副本，保留归档目录中的已结束任务";
+    || operation.message === "已清理活动副本，保留归档目录中的已结束任务"
+    || operation.message === "已将 SQLite 任务状态更新为 archived";
 }
 
 /**

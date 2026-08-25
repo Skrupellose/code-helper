@@ -4,7 +4,7 @@
 
 ## 运行环境
 
-`code-helper` 运行环境需要 Node.js `>=18.18.0`。\
+`code-helper` 运行环境需要 Node.js `>=22.13.0`，文档数据库使用 Node 内置的 `node:sqlite`。\
 code-helper 通过 npm 分发，所以本机需要能运行 Node 和 `npx`；
 
 ## 快速开始
@@ -56,6 +56,7 @@ npx @skrupellose/code-helper npm-scripts install
 npx @skrupellose/code-helper init
 npx @skrupellose/code-helper update
 npx @skrupellose/code-helper version
+npx @skrupellose/code-helper version status
 npx @skrupellose/code-helper npm-scripts install
 npx @skrupellose/code-helper plan docs/订单管理需求.md 订单管理升级
 npx @skrupellose/code-helper manual-test 订单管理升级
@@ -63,6 +64,9 @@ npx @skrupellose/code-helper record 轻量修复复盘
 npx @skrupellose/code-helper finish 订单管理升级
 npx @skrupellose/code-helper archive 订单管理升级
 npx @skrupellose/code-helper tasks
+npx @skrupellose/code-helper documents migrate
+npx @skrupellose/code-helper documents import
+npx @skrupellose/code-helper documents export
 npx @skrupellose/code-helper check
 ```
 
@@ -116,8 +120,9 @@ npx code-helper update
 | `manual-test` | 创建人工验收测试模板，供 agent 根据页面和流程补充步骤 |
 | `record` | 为已完成且具有复盘价值的直接执行任务创建完成记录模板 |
 | `finish` | 检查当前任务是否满足完成条件，并提示后续动作 |
-| `archive` | 将已结束任务的计划、结果和状态文档移动到 archive |
-| `tasks` | 查看 active、archived 和 mixed 状态的任务文档 |
+| `archive` | 将 SQLite 任务状态更新为 archived，并同步兼容 Markdown 视图 |
+| `tasks` | 查看 SQLite 权威任务状态；旧项目继续兼容 Markdown 扫描 |
+| `documents` | 预览/导入旧文档、导出兼容 Markdown、检查 SQLite 完整性 |
 | `check` | 检查协作文档结构是否完整 |
 
 其他常用 CLI：
@@ -125,7 +130,7 @@ npx code-helper update
 | 命令 | 作用 |
 | ---- | ---- |
 | `update` | 按当前项目已启用或已安装的能力刷新 code-helper 本地资产 |
-| `version` | 查看当前运行的 code-helper 版本，并在可用时查询 npm latest |
+| `version` | 查看版本，选择 Stable/Canary 通道并检查 npm 发布状态 |
 | `npm-scripts install` | 写入常用 npm scripts，仅适合已有 `package.json` 的 Node/npm 项目 |
 | `skills` | 查看、注册、取消注册或检查项目级 skills（也可从菜单进入） |
 | `hooks` | 查看、安装或卸载 code-helper 管理的 Git / Agent hooks（也可从菜单进入） |
@@ -136,7 +141,9 @@ npx code-helper update
 
 | 路径                                | 用途                    |
 | --------------------------------- | --------------------- |
-| `.code-helper/`                   | 工具配置、受控模板和可选检查输出      |
+| `.code-helper/code-helper.sqlite` | 任务、文档、修订历史和验证记录的权威数据库 |
+| `.code-helper/version-policy.json` | 项目选择的 Stable/Canary 通道策略 |
+| `.code-helper/`                   | 其他工具配置、受控模板和可选检查输出      |
 | `code-helper-docs/user-rules/`    | 长期协作规则                |
 | `code-helper-docs/plan-doc/`      | 任务计划文档                |
 | `code-helper-docs/result-doc/`    | 执行记录和手工测试文档           |
@@ -154,7 +161,7 @@ npx code-helper update
 
 ## 任务文档
 
-`plan` 默认创建三类模板文档：
+`plan` 默认把三类文档写入 SQLite，并同步生成以下 Markdown 兼容视图：
 
 - `code-helper-docs/plan-doc/<中文功能名>.md`
 - `code-helper-docs/result-doc/<中文功能名>/实施记录.md`
@@ -164,7 +171,22 @@ npx code-helper update
 
 - `code-helper-docs/result-doc/<中文功能名>/手工测试.md`
 
-已完成任务可以用 `archive` 移入对应的 `archive/` 目录。手动移动到 `archive/` 的任务也会被识别为已结束任务。
+SQLite 是初始化后项目的任务与文档权威来源；Markdown 用于人工阅读、Git 审阅和旧工具兼容。默认导出不会覆盖导出后被手工修改的文件，只有显式 `documents export --force` 才允许覆盖。
+
+Agent 或用户编辑 Markdown 兼容视图后，先运行 `documents import` 预览；只有磁盘文件基于上次导出且数据库没有同时变化时，`documents import --apply` 才会创建新的 SQLite revision。双边变化或缺少导出基线会保持冲突，不自动猜测覆盖方向。
+
+旧项目升级时先运行 `documents migrate` 只读预览；确认没有 mixed 生命周期或正文冲突后，再运行 `documents migrate --apply`。已完成任务使用 `archive` 更新数据库状态并同步 `archive/` 兼容视图；未建立数据库的旧项目仍保留原有目录扫描行为。
+
+## 正式版与测试版
+
+- Stable（正式版）：无预发布后缀，发布到 npm `latest` 和 `stable` 标签。
+- Canary（测试版）：版本必须形如 `x.y.z-canary.n`，只发布到 npm `canary` 标签。
+- 发布顺序采用 Canary-first：目标能力必须先有规范 Canary 标签和可校验制品，才能触发 Stable 发布。
+- `version status` 只读展示本地版本与项目通道；`version set stable|canary` 仅保存偏好；`version check` 显式联网校验标签、精确版本和包完整性元数据。
+
+选择测试通道后可使用 `npx @skrupellose/code-helper@canary`；正式使用继续采用 `@latest`。通道切换不会自动安装、发布或移动远端标签。
+
+发布 workflow 的包上传继续使用 Trusted Publishing/OIDC；由于 `npm dist-tag add` 是独立写操作，GitHub `npm-publish` environment 还需要配置仅限当前包、仅含 dist-tag 所需写权限且短有效期的 `NPM_DIST_TAG_TOKEN`，不要复用高权限长期发布 token。
 
 直接执行任务如果已经完成、没有后续阶段，但收尾时发现具有跨模块改动、较长验证链或重要决策等复盘价值，可以让 agent 生成独立完成记录：
 

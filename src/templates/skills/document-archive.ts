@@ -13,7 +13,7 @@ description: 当用户要求归档功能文档、结束一个功能、查看任�
 
 ## 目标
 
-在一个项目存在多个功能时，把已完成或已结束的功能文档移入 archive 目录，让当前工作区只保留仍需推进的任务。
+在一个项目存在多个功能时，把 SQLite 权威任务状态更新为 archived，并同步 archive 目录中的 Markdown 兼容视图，让当前工作区只保留仍需推进的任务。
 
 ## 文档位置
 
@@ -30,20 +30,21 @@ description: 当用户要求归档功能文档、结束一个功能、查看任�
 
 1. 功能完成后，先确认 实施记录.md 和 status-doc 已用中文记录最终结论。
 2. 仅当任务涉及页面、可视化、浏览器真实链路、人工业务验收，或结果目录已经存在 手工测试.md 时，才把手工测试结论作为归档前检查条件；纯逻辑任务以自动化测试和实施记录中的验证结论为准，不要求补建 手工测试.md。
-3. 执行 npx @skrupellose/code-helper archive <中文功能名>，把三类文档移动到对应 archive 目录。
+3. 执行 npx @skrupellose/code-helper archive <中文功能名>，更新 SQLite 状态并同步三类 Markdown 兼容视图。
 4. 执行 npx @skrupellose/code-helper tasks，确认该中文功能名状态为 archived。
 5. 如果用户手动移动了文档到 archive，也把该任务识别为已结束。
 6. 如果同名中文功能同时存在 active 和 archive 文档，标记为 mixed，不要直接判断为已完成。
 
 ## 状态判断
 
-- active：只在 plan-doc、result-doc、status-doc 顶层存在文档。
-- archived：只在 archive 目录存在文档。
-- mixed：顶层和 archive 中同时存在同名任务文档，需要人工整理。
+- active / paused / completed / cancelled / archived：初始化后的项目以 SQLite 任务状态为准。
+- mixed：旧项目在顶层和 archive 中同时存在同名 Markdown，需要人工整理后再迁移。
+- 尚未建立 SQLite 的旧项目继续按 Markdown 目录分布识别 active、archived 和 mixed。
 
 ## 边界规则
 
 - \`code-helper-docs/completion-record/\` 中的完成记录创建即为 recorded 终态，不属于活动任务，也不需要再次归档。
+- SQLite 是任务生命周期权威来源；Markdown 仅作为可重建兼容视图，默认导出不得覆盖手工修改。
 - 只有 plan/status/result 计划任务进入 active、archived、mixed 生命周期；不得因为完成记录缺少计划或状态文档而补齐三件套。
 - 归档不覆盖已有 archive 目标。
 - 空 archive 目录不代表存在归档任务，也不应单独触发本 skill。

@@ -43,6 +43,7 @@ import {
   runUpdate,
   runVersion
 } from "./cli/commands/core.js";
+import { runDocuments } from "./cli/commands/documents.js";
 // plan / manual-test / finish / tasks / archive 仅保留 CLI 子命令路由，不再进入交互主菜单
 import {
   runArchive,
@@ -127,13 +128,14 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
         return runInteractiveMenu(commandProjectRoot, versionUpdateState);
       case "init":
         // init 始终使用调用方传入的目录（通常为 cwd），以便在尚未初始化的新目录创建工作区
-        return runInit(projectRoot, args);
+        // 必须 await，确保数据库完整性等异步失败进入本入口的统一错误处理并返回非零退出码。
+        return await runInit(projectRoot, args);
       case "update":
-        return runUpdate(commandProjectRoot, args);
+        return await runUpdate(commandProjectRoot, args);
       case "version":
       case "--version":
       case "-v":
-        return runVersion(args);
+        return runVersion(commandProjectRoot, args);
       case "npm-scripts":
         return runNpmScripts(projectRoot, args);
       case "sync-local":
@@ -157,6 +159,8 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
         return runFinish(commandProjectRoot, args);
       case "tasks":
         return runTasks(commandProjectRoot, args);
+      case "documents":
+        return runDocuments(commandProjectRoot, args);
       case "skills":
         // 必须等待异步命令完成，才能让统一 catch 接住文件系统等失败并返回稳定退出码。
         return await runSkills(commandProjectRoot, args);
@@ -356,14 +360,16 @@ const COMMANDS_NEEDING_INITIALIZED_ROOT = new Set<string | undefined>([
   "skills",
   "hooks",
   "update",
-  "features"
+  "features",
+  "documents",
+  "version"
 ]);
 
 /**
  * 按命令解析应使用的项目根目录。
  * - 依赖已初始化工作区的命令：向上查找 .code-helper 或 code-helper-docs
  * - init：保持传入路径（cwd），以便在新目录初始化；勿强制上探到其它项目
- * - version / help / npm-scripts / sync-local 等：保持 cwd，无需项目根
+ * - help / npm-scripts / sync-local 等：保持 cwd，无需项目根
  */
 async function resolveProjectRootForCommand(command: string | undefined, projectRoot: string): Promise<string> {
   if (COMMANDS_NEEDING_INITIALIZED_ROOT.has(command)) {

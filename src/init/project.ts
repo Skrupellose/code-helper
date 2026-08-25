@@ -1,4 +1,5 @@
 import { getConfigRelativePath, loadConfig, saveConfig } from "../config.js";
+import { ensureDocumentDatabase } from "../documents/index.js";
 import { projectPath, readTextIfExists } from "../fs-utils.js";
 import { resolveSkillRegistrationTargets } from "../skills.js";
 import type { OperationResult } from "../types.js";
@@ -67,6 +68,12 @@ export async function initializeProject(options: InitializeOptions): Promise<Ini
 
   operations.push(...(await migrateLegacyAgentWorkspace(options.projectRoot, config)));
   await createDirectories(options.projectRoot, config, operations);
+  ensureDocumentDatabase(options.projectRoot);
+  operations.push({
+    path: projectPath(options.projectRoot, `${config.directories.workspace}/code-helper.sqlite`),
+    action: "updated",
+    message: "已初始化并校验 SQLite 文档库"
+  });
   await saveConfig(options.projectRoot, config);
   operations.push({
     path: projectPath(options.projectRoot, `${config.directories.workspace}/config.json`),
@@ -106,6 +113,12 @@ export async function updateProject(
 
   operations.push(...(await migrateLegacyAgentWorkspace(projectRoot, config)));
   await createDirectories(projectRoot, config, operations);
+  ensureDocumentDatabase(projectRoot);
+  operations.push({
+    path: projectPath(projectRoot, `${config.directories.workspace}/code-helper.sqlite`),
+    action: "updated",
+    message: "已迁移并校验 SQLite 文档库"
+  });
   await saveConfig(projectRoot, config);
   operations.push({
     path: projectPath(projectRoot, `${config.directories.workspace}/config.json`),

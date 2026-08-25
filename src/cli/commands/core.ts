@@ -21,6 +21,13 @@ import {
   fetchLatestPackageVersion,
   getCurrentPackageVersion
 } from "../../version-check.js";
+import {
+  createLocalVersionStatus,
+  evaluateChannelCandidate,
+  fetchPublishedReleaseStatus,
+  readStoredVersionPolicy,
+  writeStoredVersionPolicy
+} from "../../versioning/index.js";
 import { printFeatureHelp } from "../help.js";
 import { askQuestionOrDefault } from "../menu-input.js";
 import { printOperations, printSkillRegistrationStatus } from "../output.js";
@@ -93,9 +100,20 @@ export async function runUpdate(projectRoot: string, args: string[] = []): Promi
  * 输出当前 code-helper 版本。
  * npm latest 查询是附加信息，失败或被测试/CI 环境跳过时不影响命令退出码。
  */
-export async function runVersion(args: string[] = []): Promise<number> {
-  if (args.length > 0) {
-    console.error("version 不接受参数。用法：code-helper version");
+export async function runVersion(projectRoot: string, args: string[] = []): Promise<number> {
+  const [action, ...rest] = args;
+
+  if (action === "status") {
+    return runVersionStatus(projectRoot, rest);
+  }
+  if (action === "check") {
+    return runVersionCheck(projectRoot, rest);
+  }
+  if (action === "set") {
+    return runVersionSet(projectRoot, rest);
+  }
+  if (action !== undefined) {
+    console.error("version 参数无效。用法：code-helper version [status|check|set <stable|canary>] [--json]");
     return 1;
   }
 
@@ -117,6 +135,77 @@ export async function runVersion(args: string[] = []): Promise<number> {
     // version 命令的 registry 查询只提供参考信息，离线或代理异常时仍应成功输出当前版本。
   }
 
+  return 0;
+}
+
+/** 本地只读展示当前版本、安装通道和项目选择，不访问 npm registry。 */
+async function runVersionStatus(projectRoot: string, args: string[]): Promise<number> {
+  const json = args.length === 1 && args[0] === "--json";
+  if (args.length > (json ? 1 : 0)) {
+    console.error("用法：code-helper version status [--json]");
+    return 1;
+  }
+
+  const currentVersion = await getCurrentPackageVersion();
+  const stored = await readStoredVersionPolicy(projectRoot);
+  const status = {
+    ...createLocalVersionStatus(currentVersion, stored.policy),
+    policyExplicit: stored.explicit,
+    policyPath: stored.relativePath
+  };
+
+  if (json) {
+    console.log(JSON.stringify(status, null, 2));
+  } else {
+    console.log(`当前版本：${status.currentVersion}（${status.currentChannel === "stable" ? "正式版" : "测试版"}）`);
+    console.log(`项目通道：${status.selectedChannel}（${status.policyExplicit ? "显式选择" : "默认选择"}）`);
+    console.log(`策略文件：${status.policyPath}`);
+  }
+  return 0;
+}
+
+/** 显式联网检查 Stable/Canary 发布快照和当前所选通道的候选动作。 */
+async function runVersionCheck(projectRoot: string, args: string[]): Promise<number> {
+  const json = args.length === 1 && args[0] === "--json";
+  if (args.length > (json ? 1 : 0)) {
+    console.error("用法：code-helper version check [--json]");
+    return 1;
+  }
+
+  const currentVersion = await getCurrentPackageVersion();
+  const stored = await readStoredVersionPolicy(projectRoot);
+  const published = await fetchPublishedReleaseStatus();
+  const selectedVersion = published.snapshot.distTags[stored.policy.channel];
+  const candidate = evaluateChannelCandidate(currentVersion, selectedVersion, stored.policy.channel);
+  const output = {
+    currentVersion,
+    selectedChannel: stored.policy.channel,
+    candidate,
+    distTags: published.snapshot.distTags
+  };
+
+  if (json) {
+    console.log(JSON.stringify(output, null, 2));
+  } else {
+    console.log(`当前版本：${currentVersion}`);
+    console.log(`正式版：${output.distTags.stable}（latest ${output.distTags.latest}）`);
+    console.log(`测试版：${output.distTags.canary}`);
+    console.log(`所选通道：${output.selectedChannel}；候选动作：${candidate.status}`);
+  }
+  return 0;
+}
+
+/** 保存一次性通道偏好；该命令不联网、不升级当前安装，也不执行发布。 */
+async function runVersionSet(projectRoot: string, args: string[]): Promise<number> {
+  const [channel, ...rest] = args;
+  if ((channel !== "stable" && channel !== "canary") || rest.length > 0) {
+    console.error("用法：code-helper version set <stable|canary>");
+    return 1;
+  }
+
+  const stored = await writeStoredVersionPolicy(projectRoot, channel);
+  console.log(`已选择 ${channel} 通道：${stored.relativePath}`);
+  console.log("该操作只保存通道偏好，不会安装版本或修改 npm dist-tag。");
   return 0;
 }
 

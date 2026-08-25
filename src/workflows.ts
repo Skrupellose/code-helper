@@ -1,6 +1,11 @@
 import { basename, isAbsolute, join, win32 } from "node:path";
 
 import { loadConfig } from "./config.js";
+import {
+  registerMarkdownExportBaseline,
+  withDocumentRepository,
+  type DocumentType
+} from "./documents/index.js";
 import { projectPath, readTextIfExists, writeTextIfMissing } from "./fs-utils.js";
 import { containsChinese } from "./text-utils.js";
 import type { OperationResult } from "./types.js";
@@ -50,12 +55,26 @@ export async function createPlanWorkbench(options: PlanWorkbenchOptions): Promis
   const planPath = projectPath(options.projectRoot, join(config.directories.planDoc, `${featureName}.md`));
   const resultPath = projectPath(options.projectRoot, join(config.directories.resultDoc, featureName, RESULT_RECORD_FILE_NAME));
   const statusPath = projectPath(options.projectRoot, join(config.directories.statusDoc, `${featureName}-状态.md`));
+  // 旧项目可能已经存在手工维护正文；首次建立 SQLite 权威记录时优先导入现有正文，
+  // 避免重复执行 plan 用空模板覆盖已经完成的计划和状态。
+  const planBody = await readTextIfExists(planPath)
+    ?? renderPlanDocument(featureName, options.requirementPath, requirement);
+  const resultBody = await readTextIfExists(resultPath) ?? renderResultDocument(featureName);
+  const statusBody = await readTextIfExists(statusPath) ?? renderStatusDocument(featureName);
 
-  return [
-    await writeTextIfMissing(planPath, renderPlanDocument(featureName, options.requirementPath, requirement)),
-    await writeTextIfMissing(resultPath, renderResultDocument(featureName)),
-    await writeTextIfMissing(statusPath, renderStatusDocument(featureName))
+  ensureTaskDocumentsInDatabase(options.projectRoot, featureName, [
+    { type: "plan", body: planBody },
+    { type: "result", body: resultBody },
+    { type: "status", body: statusBody }
+  ]);
+
+  const operations = [
+    await writeTextIfMissing(planPath, planBody),
+    await writeTextIfMissing(resultPath, resultBody),
+    await writeTextIfMissing(statusPath, statusBody)
   ];
+  await registerMarkdownExportBaseline(options.projectRoot, normalizeFeatureName(featureName));
+  return operations;
 }
 
 /**
@@ -66,11 +85,53 @@ export async function createManualTestDocument(options: ManualTestOptions): Prom
   const config = await loadConfig(options.projectRoot);
   const featureName = normalizeDocumentName(options.featureName, "人工验收");
   const targetPath = projectPath(options.projectRoot, join(config.directories.resultDoc, featureName, MANUAL_TEST_FILE_NAME));
+  const body = await readTextIfExists(targetPath)
+    ?? renderManualTestDocument(featureName, options.title ?? `${featureName} 手工测试`);
 
-  return writeTextIfMissing(
+  ensureTaskDocumentsInDatabase(options.projectRoot, featureName, [
+    { type: "manual_test", body }
+  ]);
+
+  const operation = await writeTextIfMissing(
     targetPath,
-    renderManualTestDocument(featureName, options.title ?? `${featureName} 手工测试`)
+    body
   );
+  await registerMarkdownExportBaseline(options.projectRoot, normalizeFeatureName(featureName));
+  return operation;
+}
+
+/**
+ * 幂等建立计划任务与当前文档记录。
+ *
+ * 当前 CLI 仍导出 Markdown 以兼容 Agent 读取；重复执行时只补缺失数据库记录，
+ * 不把模板正文覆盖到已经存在的 SQLite 当前版本。
+ */
+function ensureTaskDocumentsInDatabase(
+  projectRoot: string,
+  featureName: string,
+  documents: Array<{ type: DocumentType; body: string }>
+): void {
+  withDocumentRepository(projectRoot, (repository) => {
+    const slug = normalizeFeatureName(featureName);
+    const task = repository.getTaskBySlug(slug)
+      ?? repository.createTask({ slug, name: featureName, trackingMode: "planned" });
+
+    if (task.trackingMode !== "planned") {
+      throw new Error(`功能“${featureName}”已经作为直接完成记录存在，不能创建计划任务文档。`);
+    }
+
+    const existingTypes = new Set(repository.listDocuments(task.id).map((document) => document.type));
+    for (const document of documents) {
+      if (!existingTypes.has(document.type)) {
+        repository.createDocument({
+          taskId: task.id,
+          type: document.type,
+          body: document.body,
+          source: "markdown-compatible-cli"
+        });
+      }
+    }
+  });
 }
 
 /**

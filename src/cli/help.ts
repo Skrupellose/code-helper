@@ -49,6 +49,9 @@ export function printHelp(): void {
                                       按当前项目已启用能力刷新 code-helper 本地资产；
                                       默认安全刷新未改动的内置规则；--refresh-rules 强制覆盖
   code-helper version                 查看当前 code-helper 版本
+  code-helper version status [--json] 本地查看正式版/测试版通道状态
+  code-helper version check [--json]  联网检查 Stable/Canary 发布状态
+  code-helper version set <stable|canary> 显式选择后续跟随通道
   code-helper npm-scripts install     写入常用 npm scripts（不覆盖同名脚本）
   code-helper sync-local              刷新本仓库本地模板并注册全部项目级 skills
   code-helper check [--write-report]  检查协作文档结构
@@ -61,6 +64,10 @@ export function printHelp(): void {
   code-helper archive <中文功能名> [--resolve-mixed] 将功能文档移动到 archive 并识别为已结束
   code-helper finish [中文功能名]        检查当前功能是否完成并提示后续动作
   code-helper tasks [--json]           查看 active / archived / mixed 任务
+  code-helper documents migrate [--apply] [--json] 预览或显式导入旧版 Markdown 文档
+  code-helper documents import [--apply] [--json]  预览或显式导入 Markdown 单边修改
+  code-helper documents export [--force] [--json]  从 SQLite 导出兼容 Markdown 视图
+  code-helper documents check [--json] 检查 SQLite 文档数据库完整性
   code-helper skills list              查看项目级 skills 注册状态
   code-helper skills register [target] 按项目入口或指定 target 注册项目级 skills
   code-helper skills unregister [target] 按项目入口或指定 target 取消注册项目级 skills

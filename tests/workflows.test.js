@@ -7,6 +7,13 @@ import { test } from "node:test";
 import { initializeProject } from "../dist/init.js";
 import { archiveFeature, listTasks } from "../dist/archive.js";
 import { createManualTestDocument, createPlanWorkbench, normalizeDocumentName, normalizeFeatureName } from "../dist/workflows.js";
+import {
+  applyLegacyDocumentMigration,
+  DocumentRepository,
+  MarkdownExportConflictError,
+  previewLegacyDocumentMigration
+} from "../dist/documents/index.js";
+import { openDocumentDatabase } from "../dist/storage/index.js";
 
 test("normalizeFeatureName 会生成稳定路径片段", () => {
   // 该测试避免用户输入中的空格和符号污染生成路径。
@@ -103,6 +110,44 @@ test("createManualTestDocument 会生成独立页面手工测试文档", async (
   }
 });
 
+test("重复 plan 遇到手工修改的 Markdown 时返回结构化导出冲突", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-plan-conflict-"));
+  try {
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
+    await writeFile(join(root, "requirement.md"), "# 冲突计划\n", "utf8");
+    await createPlanWorkbench({ projectRoot: root, requirementPath: "requirement.md" });
+    const planPath = join(root, "code-helper-docs/plan-doc/冲突计划.md");
+    await writeFile(planPath, "# 用户手工修改\n", "utf8");
+
+    await assert.rejects(
+      () => createPlanWorkbench({ projectRoot: root, requirementPath: "requirement.md" }),
+      (error) => error instanceof MarkdownExportConflictError
+        && error.code === "MARKDOWN_EXPORT_CONFLICT"
+        && error.conflicts.some((conflict) => conflict.relativePath.endsWith("冲突计划.md"))
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("重复 manual-test 遇到手工修改的 Markdown 时返回结构化导出冲突", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-manual-conflict-"));
+  try {
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
+    await createManualTestDocument({ projectRoot: root, featureName: "手工冲突" });
+    const manualPath = join(root, "code-helper-docs/result-doc/手工冲突/手工测试.md");
+    await writeFile(manualPath, "# 用户手工修改\n", "utf8");
+
+    await assert.rejects(
+      () => createManualTestDocument({ projectRoot: root, featureName: "手工冲突" }),
+      (error) => error instanceof MarkdownExportConflictError
+        && error.conflicts.some((conflict) => conflict.relativePath.endsWith("手工测试.md"))
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("archiveFeature 会把功能文档移动到归档目录并标记为 archived", async () => {
   // 该测试覆盖功能完成后的正式归档流程。
   const root = await mkdtemp(join(tmpdir(), "code-helper-archive-"));
@@ -168,8 +213,8 @@ test("archiveFeature 遇到 mixed 冲突时需要显式 resolve", async () => {
   }
 });
 
-test("listTasks 会把用户手动移动到 archive 的任务识别为 archived", async () => {
-  // 该测试覆盖用户手动归档后的状态识别。
+test("SQLite 初始化后手动移动 Markdown 不会绕过权威任务状态", async () => {
+  // Markdown 是兼容视图；仅移动导出文件不能把数据库中的 active 任务静默归档。
   const root = await mkdtemp(join(tmpdir(), "code-helper-manual-archive-"));
 
   try {
@@ -201,7 +246,7 @@ test("listTasks 会把用户手动移动到 archive 的任务识别为 archived"
 
     assert.equal(tasks.length, 1);
     assert.equal(tasks[0].featureName, "手动归档功能");
-    assert.equal(tasks[0].status, "archived");
+    assert.equal(tasks[0].status, "active");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -227,6 +272,32 @@ test("archiveFeature 保留旧英文任务文档归档兼容", async () => {
     assert.equal(tasks.length, 1);
     assert.equal(tasks[0].featureName, "legacy-feature");
     assert.equal(tasks[0].status, "archived");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("archiveFeature 能归档使用小写迁移 slug 的大小写旧任务", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-legacy-slug-archive-"));
+  try {
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
+    await mkdir(join(root, "code-helper-docs/result-doc/Legacy-UPPER"), { recursive: true });
+    await writeFile(join(root, "code-helper-docs/plan-doc/Legacy-UPPER.md"), "# Legacy plan\n", "utf8");
+    await writeFile(join(root, "code-helper-docs/result-doc/Legacy-UPPER/implementation.md"), "# Legacy result\n", "utf8");
+    await writeFile(join(root, "code-helper-docs/status-doc/Legacy-UPPER-status.md"), "# Legacy status\n", "utf8");
+
+    const database = openDocumentDatabase({ projectRoot: root });
+    try {
+      const preview = await previewLegacyDocumentMigration(root);
+      const applied = await applyLegacyDocumentMigration(root, new DocumentRepository(database), preview);
+      assert.equal(applied.conflicts.length, 0);
+    } finally {
+      database.close();
+    }
+
+    await archiveFeature(root, "Legacy-UPPER");
+    const task = (await listTasks(root)).find((item) => item.featureName === "Legacy-UPPER");
+    assert.equal(task?.status, "archived");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

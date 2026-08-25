@@ -52,7 +52,7 @@ export function renderEntryBlock(config: CodeHelperConfig): string {
 
 1. 本区块由 code-helper 自动维护，请不要手工编辑；自定义规则应写在本区块外，长期规则写入 \`${config.directories.userRules}/\`。
 2. 开始新需求、迁移、重构或反馈修复前，先读取本区块索引到的专题规则。
-3. 长期规则写入 \`${config.directories.userRules}/\`；计划任务的短期过程写入 \`${config.directories.resultDoc}/\`，当前状态记录写入 \`${config.directories.statusDoc}/\`；直接执行后形成的终态完成记录写入 \`code-helper-docs/completion-record/\`。
+3. SQLite 是任务状态、过程文档和修订历史的权威来源；\`${config.directories.planDoc}/\`、\`${config.directories.resultDoc}/\`、\`${config.directories.statusDoc}/\` 与 \`code-helper-docs/completion-record/\` 是供阅读、Git 审阅和旧工具使用的 Markdown 兼容视图；长期规则仍写入 \`${config.directories.userRules}/\`。
 4. 不把一次性调试过程、临时失败细节或大段实现流水写进入口文档。
 5. 主会话按 T0-T3 风险与复杂度决定执行方式：T0/T1 可直办，T2 建议分发，T3 必须实现与复核隔离；主会话始终负责范围控制、结果审阅和最终结论。
 6. 主会话始终可以进行只读证据核验、查看 diff、搜索调用方、运行非变更型静态检查和定向测试，不需要为了这些复核动作额外分发。
@@ -69,6 +69,7 @@ ${enabledRules.join("\n")}
 - 入口文档只保留轻量索引和核心约束。
 - 专题规则文档必须包含“功能描述 / 调用时机 / 调用入口文件 / 规则”四个小节。
 - 计划、状态、结果、测试和完成记录必须使用中文命名与中文总结。
+- Agent 修改 Markdown 兼容视图后，必须先运行 \`npx @skrupellose/code-helper documents import\` 预览，再显式使用 \`--apply\` 写入 SQLite revision；双边变化时停止并人工合并。
 - agent 识别到功能变更、项目结构变化、稳定规则变化或可独立验收的逻辑交付点完成时，必须主动判断是否需要更新过程文档、询问更新长期记忆、询问归档或继续当前节点；微型步骤不单独触发。
 - 新功能或重构形成稳定规则后，先询问用户是否更新项目记忆，不自动把短期任务状态写入长期记忆。`;
 }

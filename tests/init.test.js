@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
 import { ENTRY_BLOCK_END, ENTRY_BLOCK_START } from "../dist/constants.js";
@@ -19,6 +20,7 @@ import {
   resolveInitTextTargetPromptAnswer
 } from "../dist/cli/commands/core.js";
 import { promptMultiSelect } from "../dist/terminal-ui.js";
+import { StorageError } from "../dist/storage/index.js";
 
 async function runCliSilently(args, projectRoot) {
   // CLI 测试只关心文件结果和退出码，捕获日志避免测试输出被初始化摘要刷屏。
@@ -1099,6 +1101,44 @@ test("initializeProject 会把早期 .code-helper 文档迁移到 code-helper-do
 
     assert.match(migratedRule, /旧协作规则/);
     assert.match(migratedStatus, /旧状态/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("init 遇到缺失 SQLite 必需表时稳定失败且 CLI 返回非零", async () => {
+  // 已到当前 schema 的损坏数据库不会被迁移器自动补表，init 必须拒绝继续写出成功结果。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-init-integrity-"));
+  try {
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
+    const database = new DatabaseSync(join(root, ".code-helper/code-helper.sqlite"));
+    database.exec("DROP TABLE document_exports");
+    database.close();
+
+    await assert.rejects(
+      () => initializeProject({ projectRoot: root, skillRegistrationTargets: [] }),
+      (error) => error instanceof StorageError && error.code === "INTEGRITY_CHECK_FAILED"
+    );
+    assert.equal(await runCli(["init", "codex"], root), 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("update 遇到缺失 SQLite 必需表时稳定失败且 CLI 返回非零", async () => {
+  // update 与 init 共用完整性门禁，不能把缺表数据库误报为资产刷新完成。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-update-integrity-"));
+  try {
+    await initializeProject({ projectRoot: root, skillRegistrationTargets: [] });
+    const database = new DatabaseSync(join(root, ".code-helper/code-helper.sqlite"));
+    database.exec("DROP TABLE document_exports");
+    database.close();
+
+    await assert.rejects(
+      () => updateProject(root),
+      (error) => error instanceof StorageError && error.code === "INTEGRITY_CHECK_FAILED"
+    );
+    assert.equal(await runCli(["update"], root), 1);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

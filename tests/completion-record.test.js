@@ -14,6 +14,7 @@ import {
   getCompletionRecordRelativePath
 } from "../dist/completion-record.js";
 import { initializeProject } from "../dist/init.js";
+import { MarkdownExportConflictError } from "../dist/documents/index.js";
 
 /**
  * 在独立临时目录初始化项目，避免完成记录测试修改真实工作区。
@@ -40,8 +41,8 @@ test("initializeProject 会创建独立完成记录目录", async () => {
   }
 });
 
-test("createCompletionRecord 生成终态元数据且重复执行不覆盖", async () => {
-  // 首次创建后写入用户补充内容，再次执行必须返回 skipped 并保留原文。
+test("createCompletionRecord 生成终态元数据且未修改时重复执行保持幂等", async () => {
+  // 未发生手工修改时重复执行返回 skipped；手工修改冲突由独立用例验证。
   const root = await createInitializedProject();
   const targetPath = join(root, "code-helper-docs/completion-record/归档优化-完成记录.md");
 
@@ -60,14 +61,31 @@ test("createCompletionRecord 生成终态元数据且重复执行不覆盖", asy
     assert.match(generated, /## 实际改动/);
     assert.match(generated, /## 验证结果/);
 
-    await writeFile(targetPath, `${generated}\n用户补充内容\n`, "utf8");
     const second = await createCompletionRecord({
       projectRoot: root,
       featureName: "归档优化-完成记录.md"
     });
 
     assert.equal(second.action, "skipped");
-    assert.match(await readFile(targetPath, "utf8"), /用户补充内容/);
+    assert.equal(await readFile(targetPath, "utf8"), generated);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("重复 record 遇到手工修改的 Markdown 时返回结构化导出冲突", async () => {
+  const root = await createInitializedProject();
+  const targetPath = join(root, "code-helper-docs/completion-record/记录冲突-完成记录.md");
+  try {
+    await createCompletionRecord({ projectRoot: root, featureName: "记录冲突" });
+    await writeFile(targetPath, "# 用户手工修改\n", "utf8");
+
+    await assert.rejects(
+      () => createCompletionRecord({ projectRoot: root, featureName: "记录冲突" }),
+      (error) => error instanceof MarkdownExportConflictError
+        && error.code === "MARKDOWN_EXPORT_CONFLICT"
+        && error.conflicts[0]?.relativePath.endsWith("记录冲突-完成记录.md")
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
