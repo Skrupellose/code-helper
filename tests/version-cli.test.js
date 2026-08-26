@@ -29,7 +29,10 @@ test("version status 和 set 区分当前版本通道与项目选择", async () 
   try {
     const initial = await runVersionCli(["version", "status", "--json"], root);
     assert.equal(initial.exitCode, 0);
-    const initialStatus = JSON.parse(initial.logs.join("\n"));
+    const initialResponse = JSON.parse(initial.logs.join("\n"));
+    assert.equal(initialResponse.ok, true);
+    assert.equal(initialResponse.action, "version.status");
+    const initialStatus = initialResponse.data.version;
     assert.equal(initialStatus.currentVersion, await getCurrentPackageVersion());
     assert.equal(initialStatus.selectedChannel, "stable");
     assert.equal(initialStatus.policyExplicit, false);
@@ -38,8 +41,8 @@ test("version status 和 set 区分当前版本通道与项目选择", async () 
     assert.equal(selected.exitCode, 0);
     const status = await runVersionCli(["version", "status", "--json"], root);
     const parsed = JSON.parse(status.logs.join("\n"));
-    assert.equal(parsed.selectedChannel, "canary");
-    assert.equal(parsed.policyExplicit, true);
+    assert.equal(parsed.data.version.selectedChannel, "canary");
+    assert.equal(parsed.data.version.policyExplicit, true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

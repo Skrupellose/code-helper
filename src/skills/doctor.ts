@@ -2,8 +2,10 @@ import { join } from "node:path";
 import { parseDocument } from "yaml";
 
 import { projectPath, readTextIfExists } from "../fs-utils.js";
+import { loadConfig } from "../config.js";
 import { getSkillManifest } from "../templates.js";
 import { readDirectoryIfExists, readSkillDocumentIfExists } from "./shared.js";
+import { resolveExpectedSkillManifest } from "./selection.js";
 import {
   ALL_SKILL_REGISTRATION_TARGETS,
   formatSkillRegistrationTargetName,
@@ -47,6 +49,9 @@ async function checkCodeHelperRegistration(
   target: SkillRegistrationTarget
 ): Promise<SkillDoctorIssue[]> {
   const issues: SkillDoctorIssue[] = [];
+  const expectedNames = new Set(
+    resolveExpectedSkillManifest(await loadConfig(projectRoot)).map((skill) => skill.directoryName)
+  );
   const manifest = getSkillManifest();
   const registrations = await Promise.all(
     manifest.map(async (skill) => {
@@ -59,18 +64,33 @@ async function checkCodeHelperRegistration(
       };
     })
   );
-  const hasAnyCodeHelperSkill = registrations.some((item) => item.existing !== undefined);
+  const hasAnyExpectedSkill = registrations.some(
+    (item) => expectedNames.has(item.skill.directoryName) && item.existing !== undefined
+  );
 
   for (const { skill, skillPath, existing } of registrations) {
+    if (!expectedNames.has(skill.directoryName)) {
+      if (existing !== undefined) {
+        issues.push({
+          level: "warning",
+          code: "unselected-code-helper-skill",
+          message: `${formatSkillRegistrationTargetName(target)} 中仍存在当前 profile/modules 未选择的 ${skill.directoryName}。`,
+          path: skillPath,
+          suggestion: `运行 \`code-helper skills register ${target}\`，按所有权记录安全收敛到当前期望集合。`
+        });
+      }
+      continue;
+    }
+
     if (existing === undefined) {
-      // 完全未使用该目标时保持安静；一旦出现任一内置 skill，就必须校验整套注册完整性。
-      if (hasAnyCodeHelperSkill) {
+      // 完全未使用该目标时保持安静；一旦出现任一期望 skill，就必须校验当前选择的完整性。
+      if (hasAnyExpectedSkill) {
         issues.push({
           level: "error",
           code: "missing-code-helper-skill",
           message: `${formatSkillRegistrationTargetName(target)} 的 code-helper skills 注册不完整，缺少 ${skill.directoryName}。`,
           path: skillPath,
-          suggestion: `运行 \`code-helper skills register ${target}\` 补齐全部 code-helper 管理的 skills。`
+          suggestion: `运行 \`code-helper skills register ${target}\` 补齐当前 profile/modules 期望的 skills。`
         });
       }
       continue;

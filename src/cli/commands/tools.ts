@@ -1,4 +1,4 @@
-import { setFeatureEnabled } from "../../config.js";
+import { loadConfig, setFeatureEnabled } from "../../config.js";
 import {
   installHook,
   listHookInstallations,
@@ -8,11 +8,16 @@ import {
 } from "../../hooks.js";
 import {
   listProjectSkillRegistrations,
+  listSkillProfiles,
+  parseSkillModules,
   parseSkillRegistrationTargets,
   registerProjectSkillsForTargets,
   resolveSkillRegistrationTargets,
   runSkillsAudit,
   runSkillsDoctor,
+  selectSkillModules,
+  selectSkillProfile,
+  resolveSelectedSkillModules,
   type SkillRegistrationTarget,
   unregisterProjectSkillsForTargets
 } from "../../skills.js";
@@ -148,9 +153,39 @@ export async function runSkills(projectRoot: string, args: string[]): Promise<nu
   }
 
   if (action === "list") {
+    printSkillSelection(await loadConfig(projectRoot));
     const targets = await resolveTargetsForSkillAction(projectRoot, action, rawTarget);
     const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
     printSkillRegistrationStatus(statuses);
+    return 0;
+  }
+
+  if (action === "profiles") {
+    for (const profile of listSkillProfiles()) {
+      console.log(`${profile.name}: ${profile.modules.join(",")}`);
+    }
+    return 0;
+  }
+
+  if (action === "profile") {
+    if (rawTarget === undefined) {
+      printSkillSelection(await loadConfig(projectRoot));
+      return 0;
+    }
+    await selectSkillProfile(projectRoot, rawTarget as Parameters<typeof selectSkillProfile>[1]);
+    printSkillSelection(await loadConfig(projectRoot));
+    console.log("选择已保存；运行 `code-helper skills register <target>` 使项目级 Skills 收敛到期望集合。");
+    return 0;
+  }
+
+  if (action === "modules") {
+    if (rawTarget === undefined) {
+      printSkillSelection(await loadConfig(projectRoot));
+      return 0;
+    }
+    await selectSkillModules(projectRoot, parseSkillModules(rawTarget));
+    printSkillSelection(await loadConfig(projectRoot));
+    console.log("选择已保存；运行 `code-helper skills register <target>` 使项目级 Skills 收敛到期望集合。");
     return 0;
   }
 
@@ -199,6 +234,15 @@ export async function runSkills(projectRoot: string, args: string[]): Promise<nu
 
   printSkillsHelp();
   return 1;
+}
+
+/** 打印当前 Skills 选择及解析后的模块，便于用户预览 register 的期望集合。 */
+function printSkillSelection(config: Awaited<ReturnType<typeof loadConfig>>): void {
+  const selection = config.skills.mode === "profile"
+    ? `profile:${config.skills.profile}`
+    : `modules:${config.skills.modules.join(",")}`;
+  console.log(`Skills 选择：${selection}`);
+  console.log(`期望模块：${resolveSelectedSkillModules(config.skills).join(",")}`);
 }
 
 /**

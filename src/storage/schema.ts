@@ -5,7 +5,7 @@ import { StorageError } from "./errors.js";
 import type { SchemaMigration } from "./types.js";
 
 /** 当前程序能够读写的最高 schema 版本。 */
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 /** 完整性检查要求存在的首版核心表。 */
 export const REQUIRED_TABLES = [
@@ -106,6 +106,12 @@ CREATE INDEX git_links_task_id_idx ON git_links(task_id);
 CREATE INDEX document_exports_document_id_idx ON document_exports(document_id);
 `;
 
+/** 为验证回执补充跨规格、计划的显式追踪关系；旧记录保持空关联。 */
+const VALIDATION_TRACEABILITY_SQL = `
+ALTER TABLE validations ADD COLUMN acceptance_criterion_ids_json TEXT;
+ALTER TABLE validations ADD COLUMN plan_item_ids_json TEXT;
+`;
+
 /** 计算迁移正文摘要，保证测试注入和未来迁移审计使用同一算法。 */
 export function calculateMigrationChecksum(sql: string): string {
   return createHash("sha256").update(sql, "utf8").digest("hex");
@@ -118,6 +124,12 @@ export const DEFAULT_SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
     name: "initial_document_schema",
     checksum: calculateMigrationChecksum(INITIAL_SCHEMA_SQL),
     sql: INITIAL_SCHEMA_SQL
+  },
+  {
+    version: 2,
+    name: "validation_traceability",
+    checksum: calculateMigrationChecksum(VALIDATION_TRACEABILITY_SQL),
+    sql: VALIDATION_TRACEABILITY_SQL
   }
 ];
 

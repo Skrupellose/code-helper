@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { runCli } from "../dist/cli.js";
 import { loadConfig, setFeatureEnabled } from "../dist/config.js";
-import { getSkillManifest } from "../dist/skills.js";
+import { getSkillManifest, resolveExpectedSkillManifest } from "../dist/skills.js";
 
 const SKILL_NAMES = getSkillManifest().map((skill) => skill.directoryName);
 
@@ -188,6 +188,107 @@ test("runCli skills audit 返回建议且不修改磁盘注册状态", async () 
     assert.equal(result.exitCode, 0);
     assert.match(result.stdout, /missing-inferred-registration/u);
     await assert.rejects(() => stat(join(root, ".agents/skills")), /ENOENT/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("runCli skills profile/modules 会保存选择并让 register 收敛期望集合", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-cli-selection-"));
+
+  try {
+    const profiles = await runCapturedCli(["skills", "profiles"], root);
+    assert.equal(profiles.exitCode, 0);
+    assert.match(profiles.stdout, /full: core,quality,collaboration,memory/u);
+
+    const selectedProfile = await runCapturedCli(["skills", "profile", "delivery"], root);
+    assert.equal(selectedProfile.exitCode, 0);
+    assert.match(selectedProfile.stdout, /profile:delivery/u);
+
+    await runCapturedCli(["skills", "register", "codex"], root);
+    const deliveryConfig = await loadConfig(root);
+    const deliveryNames = new Set(resolveExpectedSkillManifest(deliveryConfig).map((skill) => skill.directoryName));
+    for (const name of SKILL_NAMES) {
+      if (deliveryNames.has(name)) {
+        assert.equal((await stat(join(root, ".agents/skills", name))).isDirectory(), true);
+      } else {
+        await assert.rejects(() => stat(join(root, ".agents/skills", name)), /ENOENT/u);
+      }
+    }
+
+    const selectedModules = await runCapturedCli(["skills", "modules", "memory,core,memory"], root);
+    assert.equal(selectedModules.exitCode, 0);
+    assert.match(selectedModules.stdout, /modules:core,memory/u);
+    await runCapturedCli(["skills", "register", "codex"], root);
+
+    const moduleConfig = await loadConfig(root);
+    assert.deepEqual(moduleConfig.skills, { mode: "modules", modules: ["core", "memory"] });
+    const moduleNames = new Set(resolveExpectedSkillManifest(moduleConfig).map((skill) => skill.directoryName));
+    for (const name of SKILL_NAMES) {
+      if (moduleNames.has(name)) {
+        assert.equal((await stat(join(root, ".agents/skills", name))).isDirectory(), true);
+      } else {
+        await assert.rejects(() => stat(join(root, ".agents/skills", name)), /ENOENT/u);
+      }
+    }
+
+    const doctor = await runCapturedCli(["skills", "doctor"], root);
+    assert.equal(doctor.exitCode, 0);
+    assert.match(doctor.stdout, /skills doctor 通过/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("runCli skills profile/modules 对非法选择返回明确错误且不覆盖旧配置", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-cli-invalid-selection-"));
+
+  try {
+    await runCapturedCli(["skills", "profile", "essential"], root);
+    const invalidProfile = await runCapturedCli(["skills", "profile", "unknown"], root);
+    const invalidModules = await runCapturedCli(["skills", "modules", "core,unknown"], root);
+    const config = await loadConfig(root);
+
+    assert.equal(invalidProfile.exitCode, 1);
+    assert.match(invalidProfile.stderr, /不支持的 Skills profile：unknown/u);
+    assert.equal(invalidModules.exitCode, 1);
+    assert.match(invalidModules.stderr, /不支持的 Skills 模块：unknown/u);
+    assert.deepEqual(config.skills, { mode: "profile", profile: "essential" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("profile 收敛会保留含用户附件的退休受控 Skill 目录", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-cli-profile-attachment-"));
+  try {
+    await runCapturedCli(["skills", "register", "codex"], root);
+    const retiredDirectory = join(root, ".agents/skills/code-helper-manual-test-workbench");
+    const attachmentPath = join(retiredDirectory, "用户附件.md");
+    await writeFile(attachmentPath, "# 用户补充资料\n", "utf8");
+
+    await runCapturedCli(["skills", "profile", "essential"], root);
+    const result = await runCapturedCli(["skills", "register", "codex"], root);
+
+    assert.match(result.stdout, /含用户附件/u);
+    assert.equal(await readFile(attachmentPath, "utf8"), "# 用户补充资料\n");
+    assert.equal((await stat(join(retiredDirectory, "SKILL.md"))).isFile(), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("skills audit 不会把显式排除的模块误报为注册缺失", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-skills-cli-audit-selection-"));
+
+  try {
+    await mkdir(join(root, "code-helper-docs/user-rules"), { recursive: true });
+    await runCapturedCli(["skills", "profile", "delivery"], root);
+    await runCapturedCli(["skills", "register", "codex"], root);
+    const result = await runCapturedCli(["skills", "audit"], root);
+
+    assert.equal(result.exitCode, 0);
+    assert.doesNotMatch(result.stdout, /missing-memory-skill/u);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

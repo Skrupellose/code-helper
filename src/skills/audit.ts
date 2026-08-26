@@ -54,7 +54,11 @@ export async function runSkillsAudit(projectRoot: string): Promise<SkillAuditRec
     }
   }
 
-  if (hasUserRules && !isSkillRegisteredInCompleteTarget(allStatuses, "code-helper-memory-tuning")) {
+  if (
+    hasUserRules
+    && isSkillExpected(allStatuses, "code-helper-memory-tuning")
+    && !isSkillRegisteredInCompleteTarget(allStatuses, "code-helper-memory-tuning")
+  ) {
     recommendations.push({
       priority: "high",
       code: "missing-memory-skill",
@@ -63,7 +67,11 @@ export async function runSkillsAudit(projectRoot: string): Promise<SkillAuditRec
     });
   }
 
-  if (hasPlanDocs && !isSkillRegisteredInCompleteTarget(allStatuses, "code-helper-plan-workbench")) {
+  if (
+    hasPlanDocs
+    && isSkillExpected(allStatuses, "code-helper-plan-workbench")
+    && !isSkillRegisteredInCompleteTarget(allStatuses, "code-helper-plan-workbench")
+  ) {
     recommendations.push({
       priority: "medium",
       code: "missing-plan-skill",
@@ -72,7 +80,11 @@ export async function runSkillsAudit(projectRoot: string): Promise<SkillAuditRec
     });
   }
 
-  if (hasManualTestDocs && !isSkillRegisteredInCompleteTarget(allStatuses, "code-helper-manual-test-workbench")) {
+  if (
+    hasManualTestDocs
+    && isSkillExpected(allStatuses, "code-helper-manual-test-workbench")
+    && !isSkillRegisteredInCompleteTarget(allStatuses, "code-helper-manual-test-workbench")
+  ) {
     recommendations.push({
       priority: "medium",
       code: "missing-manual-test-skill",
@@ -81,7 +93,11 @@ export async function runSkillsAudit(projectRoot: string): Promise<SkillAuditRec
     });
   }
 
-  if (hasArchivedTasks && !isSkillRegisteredInCompleteTarget(allStatuses, "code-helper-document-archive")) {
+  if (
+    hasArchivedTasks
+    && isSkillExpected(allStatuses, "code-helper-document-archive")
+    && !isSkillRegisteredInCompleteTarget(allStatuses, "code-helper-document-archive")
+  ) {
     recommendations.push({
       priority: "medium",
       code: "missing-archive-skill",
@@ -115,6 +131,11 @@ export async function runSkillsAudit(projectRoot: string): Promise<SkillAuditRec
   return recommendations;
 }
 
+/** 判断某个 Skill 是否属于当前 profile/modules 的期望集合。 */
+function isSkillExpected(statuses: SkillRegistrationStatus[], name: string): boolean {
+  return statuses.some((status) => status.name === name && status.expected);
+}
+
 /**
  * 找出已经完整注册全部内置 Skills 的 agent 目标。
  * 不能用“任一文件存在”代表目标已注册，否则 1/6 和跨目标错位都会被误判为健康。
@@ -128,7 +149,10 @@ function getFullyRegisteredTargets(statuses: SkillRegistrationStatus[]): Set<Ski
 
   return new Set(
     [...grouped.entries()]
-      .filter(([, targetStatuses]) => targetStatuses.length > 0 && targetStatuses.every((status) => status.registered))
+      .filter(([, targetStatuses]) => {
+        const expectedStatuses = targetStatuses.filter((status) => status.expected);
+        return expectedStatuses.length > 0 && expectedStatuses.every((status) => status.registered);
+      })
       .map(([target]) => target)
   );
 }
@@ -139,7 +163,7 @@ function getFullyRegisteredTargets(statuses: SkillRegistrationStatus[]): Set<Ski
 function isSkillRegisteredInCompleteTarget(statuses: SkillRegistrationStatus[], name: string): boolean {
   const fullyRegisteredTargets = getFullyRegisteredTargets(statuses);
   return statuses.some(
-    (status) => fullyRegisteredTargets.has(status.target) && status.name === name && status.registered
+    (status) => fullyRegisteredTargets.has(status.target) && status.name === name && status.expected && status.registered
   );
 }
 

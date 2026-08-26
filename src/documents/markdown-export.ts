@@ -1,4 +1,5 @@
-import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { lstat, link, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { DocumentDatabase } from "../storage/database.js";
@@ -25,6 +26,39 @@ export interface MarkdownExportOptions {
   force?: boolean;
   /** 为 true 时导出到可由项目选择提交的旧版稳定目录。 */
   tracked?: boolean;
+  /** 仅供定向测试稳定注入文件竞态；生产调用不得传入。 */
+  testHooks?: MarkdownExportTestHooks;
+}
+
+/** 投影替换协议的最小测试注入点，不改变生产默认行为。 */
+export interface MarkdownExportTestHooks {
+  /** 临时文件准备完成、移动现有目标之前触发，用于稳定模拟 read→move 窗口中的人工修改。 */
+  beforeExistingMove?: (context: MarkdownExportHookContext) => Promise<void> | void;
+  /** 旧目标校验完成、排他安装新投影之前触发，用于模拟目标在空档中被并发创建。 */
+  beforeExclusiveInstall?: (context: MarkdownExportHookContext) => Promise<void> | void;
+}
+
+export interface MarkdownExportHookContext {
+  targetPath: string;
+  temporaryPath: string;
+  recoveryPath?: string;
+}
+
+export type MarkdownProjectionCheckStatus = "missing" | "unchanged" | "database-newer" | "conflict";
+
+export interface MarkdownProjectionCheckItem {
+  documentId: string;
+  taskId: string;
+  relativePath: string;
+  status: MarkdownProjectionCheckStatus;
+  /** 当前磁盘正文摘要；文件不存在时省略。 */
+  diskContentHash?: string;
+  message?: string;
+}
+
+export interface MarkdownProjectionCheckResult {
+  checked: MarkdownProjectionCheckItem[];
+  conflicts: MarkdownProjectionCheckItem[];
 }
 
 interface ExportRow {
@@ -58,13 +92,106 @@ export async function exportMarkdownDocuments(
         task,
         document,
         relativePath,
-        options.force === true
+        options.force === true,
+        options.testHooks
       );
       (item.status === "conflict" ? conflicts : exported).push(item);
     }
   }
 
   return { exported, conflicts };
+}
+
+/**
+ * 在 SQLite mutation 前检查一个任务的 Markdown 兼容投影。
+ *
+ * 文件不存在、等于当前数据库正文，或仍等于最近一次导出摘要时均可安全刷新；
+ * 文件偏离最近导出摘要，或已有文件但无法证明来源时视为人工修改并阻断写入。
+ * 本函数只读，不登记新基线，确保冲突路径不会产生数据库副作用。
+ */
+export async function checkMarkdownProjectionForTask(
+  projectRoot: string,
+  database: DocumentDatabase,
+  repository: DocumentRepository,
+  taskId: string
+): Promise<MarkdownProjectionCheckResult> {
+  const safeRoot = await realpath(resolve(projectRoot));
+  const task = repository.getTask(taskId);
+  if (task === undefined) {
+    throw new Error(`无法检查 Markdown 投影，任务不存在：${taskId}`);
+  }
+
+  const checked: MarkdownProjectionCheckItem[] = [];
+  const conflicts: MarkdownProjectionCheckItem[] = [];
+  for (const document of repository.listDocuments(task.id)) {
+    const relativePath = getStableMarkdownExportPath(task, document);
+    const absolutePath = resolveInsideProject(safeRoot, relativePath);
+    await assertSafeExistingPath(safeRoot, absolutePath);
+    const diskBody = await readOptionalFile(absolutePath);
+    if (diskBody === undefined) {
+      checked.push(makeProjectionCheckItem(task, document, relativePath, "missing"));
+      continue;
+    }
+
+    const diskContentHash = calculateDocumentHash(diskBody);
+    const previous = readExportBaseline(database, document.id, relativePath);
+    if (diskContentHash === document.contentHash) {
+      checked.push(makeProjectionCheckItem(
+        task,
+        document,
+        relativePath,
+        "unchanged",
+        diskContentHash
+      ));
+      continue;
+    }
+    if (previous !== undefined && diskContentHash === previous.content_hash) {
+      checked.push(makeProjectionCheckItem(
+        task,
+        document,
+        relativePath,
+        "database-newer",
+        diskContentHash,
+        "Markdown 仍等于最近导出基线，可由 SQLite 安全刷新"
+      ));
+      continue;
+    }
+
+    const conflict = makeProjectionCheckItem(
+      task,
+      document,
+      relativePath,
+      "conflict",
+      diskContentHash,
+      previous === undefined
+        ? "Markdown 已存在但缺少导出基线，无法证明可安全覆盖"
+        : "Markdown 在最近导出后被人工修改"
+    );
+    checked.push(conflict);
+    conflicts.push(conflict);
+  }
+  return { checked, conflicts };
+}
+
+/**
+ * 为预检时与当前 SQLite 正文完全一致、但尚无摘要的旧投影补登记基线。
+ * 调用方必须先完成 checkMarkdownProjectionForTask 且确认没有冲突；登记后导出器仍会
+ * 对写入前出现的并发文件修改做摘要比较，不会使用 force 静默覆盖。
+ */
+export function registerCompatibleProjectionBaselines(
+  repository: DocumentRepository,
+  result: MarkdownProjectionCheckResult
+): void {
+  for (const item of result.checked) {
+    if (item.status !== "unchanged" || item.diskContentHash === undefined) {
+      continue;
+    }
+    repository.recordDocumentExport({
+      documentId: item.documentId,
+      exportPath: item.relativePath,
+      contentHash: item.diskContentHash
+    });
+  }
 }
 
 /** 计算稳定导出路径所需的最小任务字段；结构化声明避免调用方为凑类型伪造完整 TaskRecord。 */
@@ -111,15 +238,12 @@ async function exportSingleDocument(
   task: TaskRecord,
   document: DocumentRecord,
   relativePath: string,
-  force: boolean
+  force: boolean,
+  testHooks?: MarkdownExportTestHooks
 ): Promise<MarkdownExportItem> {
   const absolutePath = resolveInsideProject(projectRoot, relativePath);
   await assertSafeExistingPath(projectRoot, absolutePath);
-  const previous = database.database.prepare(`
-    SELECT content_hash
-    FROM document_exports
-    WHERE document_id = ? AND export_path = ?
-  `).get(document.id, relativePath) as ExportRow | undefined;
+  const previous = readExportBaseline(database, document.id, relativePath);
   const existingBody = await readOptionalFile(absolutePath);
 
   if (existingBody !== undefined) {
@@ -147,13 +271,51 @@ async function exportSingleDocument(
 
   await mkdir(dirname(absolutePath), { recursive: true });
   await assertSafeExistingPath(projectRoot, dirname(absolutePath));
-  await atomicWriteFile(absolutePath, document.body);
+  const replacement = await safelyReplaceProjectionFile(
+    absolutePath,
+    document.body,
+    existingBody === undefined ? undefined : calculateDocumentHash(existingBody),
+    testHooks
+  );
+  if (!replacement.ok) {
+    return makeItem(task, document, relativePath, "conflict", replacement.message);
+  }
   repository.recordDocumentExport({
     documentId: document.id,
     exportPath: relativePath,
     contentHash: document.contentHash
   });
   return makeItem(task, document, relativePath, existingBody === undefined ? "created" : "updated");
+}
+
+function readExportBaseline(
+  database: DocumentDatabase,
+  documentId: string,
+  relativePath: string
+): ExportRow | undefined {
+  return database.database.prepare(`
+    SELECT content_hash
+    FROM document_exports
+    WHERE document_id = ? AND export_path = ?
+  `).get(documentId, relativePath) as ExportRow | undefined;
+}
+
+function makeProjectionCheckItem(
+  task: TaskRecord,
+  document: DocumentRecord,
+  relativePath: string,
+  status: MarkdownProjectionCheckStatus,
+  diskContentHash?: string,
+  message?: string
+): MarkdownProjectionCheckItem {
+  return {
+    documentId: document.id,
+    taskId: task.id,
+    relativePath,
+    status,
+    ...(diskContentHash === undefined ? {} : { diskContentHash }),
+    ...(message === undefined ? {} : { message })
+  };
 }
 
 function makeItem(
@@ -172,15 +334,115 @@ function makeItem(
   };
 }
 
-/** 同目录临时文件加 rename，避免进程中断留下半份 Markdown 正文。 */
-async function atomicWriteFile(targetPath: string, body: string): Promise<void> {
-  const temporaryPath = `${targetPath}.code-helper-${process.pid}-${Date.now()}.tmp`;
+interface ProjectionReplacementResult {
+  ok: boolean;
+  message?: string;
+}
+
+/**
+ * 使用可恢复、排他安装的协议替换投影文件。
+ *
+ * 不能直接 rename 临时文件覆盖目标：POSIX rename 会静默覆盖在读取摘要后新写入的用户内容。
+ * 本协议先把现有目标原子移动到唯一 recovery，再校验被移动正文是否仍是调用方读取的摘要，
+ * 最后用 hard link 以 EEXIST 为门禁排他安装新投影。任何竞态都恢复原文件，或在目标已被
+ * 并发占用时保留 recovery 并明确路径；因此不会为了刷新兼容投影丢失用户内容。
+ */
+async function safelyReplaceProjectionFile(
+  targetPath: string,
+  body: string,
+  expectedExistingHash: string | undefined,
+  testHooks?: MarkdownExportTestHooks
+): Promise<ProjectionReplacementResult> {
+  const nonce = `${process.pid}-${Date.now()}-${randomUUID()}`;
+  const temporaryPath = `${targetPath}.code-helper-${nonce}.tmp`;
+  const recoveryPath = `${targetPath}.code-helper-${nonce}.recovery`;
+  let recoveryCreated = false;
+  let installed = false;
   try {
     await writeFile(temporaryPath, body, { encoding: "utf8", flag: "wx" });
-    await rename(temporaryPath, targetPath);
+
+    if (expectedExistingHash !== undefined) {
+      await testHooks?.beforeExistingMove?.({ targetPath, temporaryPath });
+      try {
+        await rename(targetPath, recoveryPath);
+        recoveryCreated = true;
+      } catch (error) {
+        if (isFileSystemError(error, "ENOENT")) {
+          return { ok: false, message: "Markdown 在投影替换窗口中被删除，已保留用户操作" };
+        }
+        throw error;
+      }
+
+      const recoveredHash = calculateDocumentHash(await readFile(recoveryPath, "utf8"));
+      if (recoveredHash !== expectedExistingHash) {
+        const restored = await restoreRecoveryFile(recoveryPath, targetPath);
+        recoveryCreated = !restored;
+        return {
+          ok: false,
+          message: restored
+            ? "Markdown 在投影替换窗口中被人工修改，用户正文已恢复"
+            : `Markdown 在投影替换窗口中被人工修改；目标又被占用，用户正文保留于 ${recoveryPath}`
+        };
+      }
+    }
+
+    await testHooks?.beforeExclusiveInstall?.({
+      targetPath,
+      temporaryPath,
+      ...(recoveryCreated ? { recoveryPath } : {})
+    });
+    try {
+      // hard link 的目标必须不存在，跨 macOS/Windows 都以 EEXIST 拒绝并发创建，
+      // 不会像 rename 那样在 POSIX 上覆盖刚写入的用户文件。
+      await link(temporaryPath, targetPath);
+      installed = true;
+    } catch (error) {
+      if (isFileSystemError(error, "EEXIST")) {
+        const restored = recoveryCreated ? await restoreRecoveryFile(recoveryPath, targetPath) : false;
+        recoveryCreated = recoveryCreated && !restored;
+        return {
+          ok: false,
+          message: recoveryCreated
+            ? `Markdown 在排他安装窗口中被并发创建；原正文保留于 ${recoveryPath}`
+            : "Markdown 在排他安装窗口中被并发创建，未覆盖并发正文"
+        };
+      }
+      throw error;
+    }
+
+    await rm(temporaryPath);
+    if (recoveryCreated) {
+      await rm(recoveryPath);
+      recoveryCreated = false;
+    }
+    return { ok: true };
   } finally {
+    // 安装成功后 target 与临时文件指向同一 inode；删除临时名称不会影响目标内容。
     await rm(temporaryPath, { force: true });
+    if (!installed && recoveryCreated) {
+      // 异常路径优先尝试无覆盖恢复；目标已被并发占用时保留 recovery 供人工处理。
+      const restored = await restoreRecoveryFile(recoveryPath, targetPath);
+      recoveryCreated = !restored;
+    }
   }
+}
+
+/** 使用排他 hard link 恢复 recovery，绝不覆盖并发创建的目标。 */
+async function restoreRecoveryFile(recoveryPath: string, targetPath: string): Promise<boolean> {
+  try {
+    await link(recoveryPath, targetPath);
+    await rm(recoveryPath);
+    return true;
+  } catch (error) {
+    if (isFileSystemError(error, "EEXIST") || isFileSystemError(error, "ENOENT")) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function isFileSystemError(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
 
 async function readOptionalFile(path: string): Promise<string | undefined> {

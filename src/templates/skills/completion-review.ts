@@ -20,12 +20,12 @@ description: 当 agent 完成可独立验收的逻辑交付点并准备最终回
 1. 先判断本轮工作模式：已有 active/mixed 文档的是计划跟踪任务；没有对应任务文档的是直接执行；已经存在 completion-record 的是 recorded 终态。
 2. 计划跟踪任务继续查看任务列表并区分 active、archived、mixed；目录生命周期优先于归档正文中的历史“下一步”。
 3. mixed 任务必须优先请求人工确认 active/archive 哪一侧为终态，不得因为没有纯 active 任务而只报告“没有活动任务”，也不得直接归档或切换任务。
-4. 有 active 任务时，读取 .code-helper/local/docs/status-doc/<中文功能名>-状态.md，再读取对应 plan-doc 和 result-doc。
+4. 有 active 任务且 SQLite 已初始化时，先执行 \`document show <任务> status --json\`，再读取 plan 和 result 的权威正文及 revision；Markdown 路径仅用于尚未迁移的旧项目或用户显式人工编辑兼容。
 5. 直接执行任务没有 active 或 mixed 文档时，不虚构任务名，也不创建 plan/status/result；先检查实际 diff、验证、风险和未完成项。
 6. 直接执行任务仍有后续阶段、阻塞或跨会话恢复需求时，使用 \`code-helper-plan-workbench\` 升级为计划跟踪；已经完成且具有复盘价值时，使用 \`code-helper-completion-record\` 生成独立完成记录；普通轻量任务直接总结。
 7. 已经存在 completion-record 时，只确认其为 recorded 终态，不要求补齐过程文档、归档或选择下一任务。
 8. 当前计划逻辑交付点未完成时，继续当前功能；不要询问归档，不要引导新任务。
-9. 当前计划逻辑交付点完成但功能整体未完成时，更新实施记录、计划文档状态和 status-doc 的下一个执行节点。
+9. 当前计划逻辑交付点完成但功能整体未完成时，分别按 \`document show → document update --body-stdin --expected-revision <N>\` 更新 result、plan 和 status；成功后由 CLI 自动刷新 Markdown 投影，不直接编辑投影视图。
 10. 识别到功能变更、项目结构变化、测试策略变化、发布流程变化或稳定协作规则时，先检查任务文档或完成记录是否已记录“长期记忆已更新/已沉淀/无需更新”；已有明确结论时不重复询问。
 11. 只有 active 功能整体完成且尚未归档时，才询问是否归档文档。
 12. 归档后再查看活动任务，并引导用户选择下一步。
@@ -39,6 +39,7 @@ description: 当 agent 完成可独立验收的逻辑交付点并准备最终回
 - 直接执行任务没有活动任务名时，不强行运行精确 finish；按直接执行分支检查实际改动即可。
 - \`finish <中文功能名>\` 命中完成记录时应返回 recorded，不得返回 missing-docs。
 - 命令输出中的“必须确认事项”是最终回复前必须处理的强制清单，不能被普通总结覆盖。
+- \`record <中文功能名>\` 创建完成记录模板后，必须 \`document show <任务> completion_record --json\` 读取 revision，再用 \`document update <任务> completion_record --body-stdin --expected-revision <N> --json\` 补全；\`documents import\` 仅用于显式人工编辑或旧项目兼容。
 
 ## 进度摘要
 
@@ -50,8 +51,8 @@ description: 当 agent 完成可独立验收的逻辑交付点并准备最终回
 
 ## 用户确认边界
 
-- 可以自动更新 result-doc、plan-doc 和 status-doc 中属于当前任务过程的内容。
-- 可以为已经完成且具有复盘价值的直接执行任务生成 completion-record；该动作不得创建或补齐计划任务三件套。
+- 可以通过 SQLite CAS 自动更新 result、plan 和 status 中属于当前任务过程的内容，Markdown 只作为自动投影。
+- 可以为已经完成且具有复盘价值的直接执行任务生成 completion_record；CLI 创建模板后仍必须 show→CAS update，该动作不得创建或补齐计划任务三件套。
 - 更新长期记忆前必须询问用户。
 - 文档归档前必须询问用户。
 - 需要选择下一任务时，必须先列出活动任务并询问用户。

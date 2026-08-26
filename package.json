@@ -13,12 +13,14 @@
   "files": [
     "dist",
     "README.md",
-    "docs/最佳实践指南.md"
+    "docs/最佳实践指南.md",
+    "docs/工作流评测指南.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test tests/*.test.js",
     "check": "npm run build && node dist/index.js check",
+    "evaluate": "npm run build && node dist/index.js evaluate --samples 3 --json",
     "sync:local": "npm run build && node dist/index.js sync-local && npm run check",
     "prepack": "npm run build"
   },
@@ -36,7 +38,7 @@
     "typescript": "^5.8.3"
   },
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.5.0"
   },
   "dependencies": {
     "yaml": "^2.9.0"

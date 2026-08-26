@@ -104,6 +104,16 @@ export interface ValidationRecordInput {
   exitCode: number;
   summary: string;
   baseline?: string;
+  /** 此验证回执直接覆盖的稳定验收条件 ID。 */
+  acceptanceCriterionIds?: readonly string[];
+  /** 此验证回执覆盖的稳定计划项 ID。 */
+  planItemIds?: readonly string[];
+}
+
+/** SQLite 中可复用验证回执的完整读取模型。 */
+export interface ValidationRecord extends ValidationRecordInput {
+  id: number;
+  createdAt: string;
 }
 
 export interface GitLinkInput {
@@ -111,6 +121,12 @@ export interface GitLinkInput {
   commitSha: string;
   subject?: string;
   scope?: string;
+}
+
+/** 任务与 Git commit 关联的完整读取模型；仅记录关联，不执行任何 Git 操作。 */
+export interface GitLinkRecord extends GitLinkInput {
+  id: number;
+  createdAt: string;
 }
 
 export interface DocumentExportInput {

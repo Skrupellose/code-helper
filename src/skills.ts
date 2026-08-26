@@ -10,6 +10,16 @@ export {
   unregisterProjectSkills,
   unregisterProjectSkillsForTargets
 } from "./skills/registry.js";
+export {
+  listSkillModules,
+  listSkillProfiles,
+  parseSkillModules,
+  resolveExpectedSkillManifest,
+  resolveSelectedSkillModules,
+  selectSkillModules,
+  selectSkillProfile
+} from "./skills/selection.js";
+export type { SkillModule, SkillProfile, SkillSelection } from "./types.js";
 export { getSkillManifest } from "./templates.js";
 export type { SkillRegistrationTarget } from "./skills/targets.js";
 export {

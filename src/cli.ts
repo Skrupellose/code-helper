@@ -45,6 +45,9 @@ import {
   runVersion
 } from "./cli/commands/core.js";
 import { runDocuments } from "./cli/commands/documents.js";
+import { runEvaluation } from "./cli/commands/evaluation.js";
+import { runRequirementTools } from "./cli/commands/requirements.js";
+import { runTaskEngine } from "./cli/commands/task-engine.js";
 // plan / manual-test / finish / tasks / archive 仅保留 CLI 子命令路由，不再进入交互主菜单
 import {
   runArchive,
@@ -67,6 +70,10 @@ import {
 } from "./cli/commands/tools.js";
 import { printHelp } from "./cli/help.js";
 import { isFatalInteractiveMenuError } from "./cli/menu-errors.js";
+import {
+  createErrorResponse,
+  printAgentResponse
+} from "./cli/agent-response.js";
 import { pathExists, projectPath } from "./fs-utils.js";
 import { resolveInitializedProjectRoot } from "./project-root.js";
 
@@ -127,7 +134,7 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
       case undefined:
       case "menu":
         // 交互主菜单仅项目准备与工具设置；plan 等任务能力走子命令/skills，不再依赖菜单拖拽路径
-        return runInteractiveMenu(commandProjectRoot, versionUpdateState);
+        return await runInteractiveMenu(commandProjectRoot, versionUpdateState);
       case "init":
         // init 始终使用调用方传入的目录（通常为 cwd），以便在尚未初始化的新目录创建工作区
         // 必须 await，确保数据库完整性等异步失败进入本入口的统一错误处理并返回非零退出码。
@@ -137,51 +144,112 @@ export async function runCli(argv: string[], projectRoot = process.cwd()): Promi
       case "version":
       case "--version":
       case "-v":
-        return runVersion(commandProjectRoot, args);
+        return await runVersion(commandProjectRoot, args);
       case "npm-scripts":
-        return runNpmScripts(projectRoot, args);
+        return await runNpmScripts(projectRoot, args);
       case "sync-local":
         // 本仓开发刷新：在当前目录执行，不向上解析其它已初始化项目
         // 必须等待异步刷新完成，路径冲突等异常才能由统一 catch 转为稳定退出码。
         return await runSyncLocal(projectRoot, args);
       case "check":
-        return runCheck(commandProjectRoot, args);
+        return await runCheck(commandProjectRoot, args);
       case "features":
-        return runFeatures(commandProjectRoot, args);
+        return await runFeatures(commandProjectRoot, args);
       case "plan":
-        return runPlan(commandProjectRoot, args, { inputBasePath: projectRoot });
+        return await runPlan(commandProjectRoot, args, { inputBasePath: projectRoot });
       case "record":
         // record 仅提供精确的非交互入口，不加入交互主菜单。
-        return runRecord(commandProjectRoot, args);
+        return await runRecord(commandProjectRoot, args);
       case "manual-test":
-        return runManualTest(commandProjectRoot, args);
+        return await runManualTest(commandProjectRoot, args);
       case "archive":
-        return runArchive(commandProjectRoot, args);
+        return await runArchive(commandProjectRoot, args);
       case "finish":
-        return runFinish(commandProjectRoot, args);
+        return await runFinish(commandProjectRoot, args);
       case "tasks":
-        return runTasks(commandProjectRoot, args);
+        return await runTasks(commandProjectRoot, args);
       case "documents":
-        return runDocuments(commandProjectRoot, args);
+        return await runDocuments(commandProjectRoot, args);
+      case "requirement":
+      case "analyze":
+        // 需求工具从调用目录读取显式 JSON 输入，但只读分析不会修改项目状态。
+        return await runRequirementTools(command, args, projectRoot, commandProjectRoot);
+      case "evaluate":
+        // 评测只读取调用目录中的声明式输入，所有被测工作流均在独立临时项目执行。
+        return await runEvaluation(args, projectRoot);
+      case "task":
+      case "document":
+      case "validation":
+      case "git":
+        // 结构化任务引擎命令保留调用目录，供 document update --body-file 解析相对路径。
+        return await runTaskEngine(commandProjectRoot, command, args, projectRoot);
       case "skills":
         // 必须等待异步命令完成，才能让统一 catch 接住文件系统等失败并返回稳定退出码。
         return await runSkills(commandProjectRoot, args);
       case "hooks":
-        return runHooks(commandProjectRoot, args);
+        return await runHooks(commandProjectRoot, args);
       case "help":
       case "--help":
       case "-h":
         printHelp();
         return 0;
       default:
-        console.error(`未知命令：${command}`);
-        printHelp();
+        if (args.includes("--json")) {
+          printAgentResponse(createErrorResponse(resolveJsonAction(argv), "invalid_command", {
+            severity: "error",
+            code: "invalid_command",
+            message: `未知命令：${command}`,
+            fix: "运行 code-helper help 查看可用命令"
+          }, ["show_help"]));
+        } else {
+          console.error(`未知命令：${command}`);
+          printHelp();
+        }
         return 1;
     }
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    if (argv.includes("--json")) {
+      printAgentResponse(createErrorResponse(resolveJsonAction(argv), "error", {
+        severity: "error",
+        code: "unexpected_error",
+        message: error instanceof Error ? error.message : String(error),
+        fix: "检查项目状态和命令参数后重试"
+      }));
+    } else {
+      console.error(error instanceof Error ? error.message : String(error));
+    }
     return 1;
   }
+}
+
+/**
+ * 从 CLI 参数生成稳定 action 名称，供顶层异常路径复用统一 Agent Contract。
+ * 这里只解析命令层级，不尝试复制各领域命令的完整参数校验逻辑。
+ */
+function resolveJsonAction(argv: string[]): string {
+  const [command = "unknown", subcommand] = argv;
+  if (command === "tasks") {
+    return "tasks.list";
+  }
+  if (command === "finish") {
+    return "finish.review";
+  }
+  if (command === "documents") {
+    return `documents.${subcommand?.startsWith("--") === false ? subcommand : "unknown"}`;
+  }
+  if (command === "version" || command === "--version" || command === "-v") {
+    return `version.${subcommand?.startsWith("--") === false ? subcommand : "info"}`;
+  }
+  if (command === "requirement") {
+    return `requirement.${subcommand?.startsWith("--") === false ? subcommand : "unknown"}`;
+  }
+  if (command === "analyze") {
+    return "requirement.analyze";
+  }
+  if (command === "evaluate") {
+    return "evaluation.run";
+  }
+  return subcommand?.startsWith("--") === false ? `${command}.${subcommand}` : command;
 }
 
 /**

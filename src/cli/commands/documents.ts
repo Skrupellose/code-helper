@@ -7,6 +7,13 @@ import {
   previewMigrationBaselineConflicts
 } from "../../documents/index.js";
 import { openDocumentDatabase } from "../../storage/index.js";
+import {
+  createErrorResponse,
+  createOutcomeResponse,
+  createSuccessResponse,
+  printAgentResponse,
+  type AgentDiagnostic
+} from "../agent-response.js";
 
 /**
  * 文档数据库维护命令入口。
@@ -25,7 +32,11 @@ export async function runDocuments(projectRoot: string, args: string[] = []): Pr
     case "check":
       return runIntegrityCheck(projectRoot, rest);
     default:
-      console.error("用法：code-helper documents <migrate [--apply] [--json]|import [--apply] [--json]|export [--tracked] [--force] [--json]|check [--json]>");
+      if (args.includes("--json")) {
+        printInvalidArguments("documents.unknown", "用法：code-helper documents <migrate [--apply] [--json]|import [--apply] [--json]|export [--tracked] [--force] [--json]|check [--json]>");
+      } else {
+        console.error("用法：code-helper documents <migrate [--apply] [--json]|import [--apply] [--json]|export [--tracked] [--force] [--json]|check [--json]>");
+      }
       return 1;
   }
 }
@@ -35,8 +46,12 @@ async function runImport(projectRoot: string, args: string[]): Promise<number> {
   const apply = args.includes("--apply");
   const json = args.includes("--json");
   const unknown = args.filter((arg) => arg !== "--apply" && arg !== "--json");
-  if (unknown.length > 0) {
-    console.error("用法：code-helper documents import [--apply] [--json]");
+  if (unknown.length > 0 || hasDuplicateArgument(args, "--apply") || hasDuplicateArgument(args, "--json")) {
+    if (json) {
+      printInvalidArguments("documents.import", "用法：code-helper documents import [--apply] [--json]");
+    } else {
+      console.error("用法：code-helper documents import [--apply] [--json]");
+    }
     return 1;
   }
 
@@ -49,7 +64,7 @@ async function runImport(projectRoot: string, args: string[]): Promise<number> {
       { apply }
     );
     if (json) {
-      console.log(JSON.stringify(result, null, 2));
+      printDocumentResult("documents.import", result, result.conflicts, result.conflicts.length === 0 ? [apply ? "continue_workflow" : "review_import_preview"] : ["resolve_conflicts"]);
     } else {
       const candidates = result.skipped.filter((item) => item.status === "candidate").length;
       console.log(`已导入：${result.imported.length}；待应用：${candidates}；冲突：${result.conflicts.length}`);
@@ -68,8 +83,12 @@ async function runMigration(projectRoot: string, args: string[]): Promise<number
   const apply = args.includes("--apply");
   const json = args.includes("--json");
   const unknown = args.filter((arg) => arg !== "--apply" && arg !== "--json");
-  if (unknown.length > 0) {
-    console.error("用法：code-helper documents migrate [--apply] [--json]");
+  if (unknown.length > 0 || hasDuplicateArgument(args, "--apply") || hasDuplicateArgument(args, "--json")) {
+    if (json) {
+      printInvalidArguments("documents.migrate", "用法：code-helper documents migrate [--apply] [--json]");
+    } else {
+      console.error("用法：code-helper documents migrate [--apply] [--json]");
+    }
     return 1;
   }
 
@@ -84,7 +103,7 @@ async function runMigration(projectRoot: string, args: string[]): Promise<number
   const baselinePreviewConflicts = await previewMigrationBaselineConflicts(projectRoot, preview);
   if (baselinePreviewConflicts.length > 0) {
     if (json) {
-      console.log(JSON.stringify({ conflicts: baselinePreviewConflicts }, null, 2));
+      printDocumentResult("documents.migrate", { conflicts: baselinePreviewConflicts }, baselinePreviewConflicts, ["resolve_conflicts"]);
     } else {
       console.log("检测到目标兼容视图冲突，已中止迁移（未写入数据库）：");
       for (const conflict of baselinePreviewConflicts) {
@@ -114,7 +133,12 @@ async function runMigration(projectRoot: string, args: string[]): Promise<number
       baselineConflicts.push(...exported.conflicts);
     }
     if (json) {
-      console.log(JSON.stringify({ ...result, baselineConflicts }, null, 2));
+      printDocumentResult(
+        "documents.migrate",
+        { ...result, baselineConflicts },
+        [...result.conflicts, ...baselineConflicts],
+        result.conflicts.length === 0 && baselineConflicts.length === 0 ? ["continue_workflow"] : ["resolve_conflicts"]
+      );
     } else {
       const conflictCount = result.conflicts.length + baselineConflicts.length;
       console.log(`已导入：${result.imported.length}；已跳过：${result.skipped.length}；冲突：${conflictCount}`);
@@ -137,8 +161,15 @@ async function runExport(projectRoot: string, args: string[]): Promise<number> {
   const tracked = args.includes("--tracked");
   const json = args.includes("--json");
   const unknown = args.filter((arg) => arg !== "--force" && arg !== "--tracked" && arg !== "--json");
-  if (unknown.length > 0) {
-    console.error("用法：code-helper documents export [--tracked] [--force] [--json]");
+  if (unknown.length > 0
+    || hasDuplicateArgument(args, "--force")
+    || hasDuplicateArgument(args, "--tracked")
+    || hasDuplicateArgument(args, "--json")) {
+    if (json) {
+      printInvalidArguments("documents.export", "用法：code-helper documents export [--tracked] [--force] [--json]");
+    } else {
+      console.error("用法：code-helper documents export [--tracked] [--force] [--json]");
+    }
     return 1;
   }
 
@@ -151,7 +182,7 @@ async function runExport(projectRoot: string, args: string[]): Promise<number> {
       { force, tracked }
     );
     if (json) {
-      console.log(JSON.stringify(result, null, 2));
+      printDocumentResult("documents.export", result, result.conflicts, result.conflicts.length === 0 ? ["continue_workflow"] : ["resolve_conflicts"]);
     } else {
       console.log(`导出完成：${result.exported.length}；冲突：${result.conflicts.length}`);
       for (const conflict of result.conflicts) {
@@ -166,9 +197,13 @@ async function runExport(projectRoot: string, args: string[]): Promise<number> {
 
 /** 显式执行 SQLite 完整性、外键和必要表检查。 */
 function runIntegrityCheck(projectRoot: string, args: string[]): number {
-  const json = args.length === 1 && args[0] === "--json";
-  if (args.length > (json ? 1 : 0)) {
-    console.error("用法：code-helper documents check [--json]");
+  const json = args.includes("--json");
+  if (args.length > (json ? 1 : 0) || hasDuplicateArgument(args, "--json")) {
+    if (json) {
+      printInvalidArguments("documents.check", "用法：code-helper documents check [--json]");
+    } else {
+      console.error("用法：code-helper documents check [--json]");
+    }
     return 1;
   }
 
@@ -176,7 +211,16 @@ function runIntegrityCheck(projectRoot: string, args: string[]): number {
   try {
     const result = connection.checkIntegrity();
     if (json) {
-      console.log(JSON.stringify(result, null, 2));
+      if (result.ok) {
+        printAgentResponse(createSuccessResponse("documents.check", { integrity: result }, ["continue_workflow"]));
+      } else {
+        printAgentResponse(createOutcomeResponse("documents.check", "integrity_failed", { integrity: result }, [{
+          severity: "error",
+          code: "integrity_check_failed",
+          message: "SQLite 文档数据库完整性检查失败",
+          fix: "根据 missingTables 和 foreignKeyViolations 修复数据库后重试"
+        }], ["repair_database", "run_integrity_check"]));
+      }
     } else {
       console.log(result.ok ? "SQLite 文档数据库检查通过" : "SQLite 文档数据库检查失败");
       if (result.missingTables.length > 0) {
@@ -198,7 +242,7 @@ function printMigrationPreview(
   json: boolean
 ): void {
   if (json) {
-    console.log(JSON.stringify(preview, null, 2));
+    printDocumentResult("documents.migrate", preview, preview.conflicts, preview.conflicts.length === 0 ? ["review_migration_preview", "apply_migration"] : ["resolve_conflicts"]);
     return;
   }
 
@@ -210,4 +254,46 @@ function printMigrationPreview(
     console.error(`- ${conflict.taskName}：${conflict.message}`);
   }
   console.log("确认预览无误后，使用 --apply 显式导入。");
+}
+
+/** JSON 参数错误统一使用稳定状态和诊断码，避免错误路径落回纯文本 stderr。 */
+function printInvalidArguments(action: string, usage: string): void {
+  printAgentResponse(createErrorResponse(action, "invalid_arguments", {
+    severity: "error",
+    code: "invalid_arguments",
+    message: usage,
+    fix: "按命令用法移除未知或重复参数后重试"
+  }));
+}
+
+/** 判断无值 flag 是否重复，避免 Set/contains 解析悄悄吞掉脚本输入错误。 */
+function hasDuplicateArgument(args: string[], target: string): boolean {
+  return args.filter((arg) => arg === target).length > 1;
+}
+
+/**
+ * 输出文档命令结果：无冲突为成功，有冲突则保留业务数据并返回可机读诊断。
+ * 冲突对象来自不同文档流程，因此只依赖共同可选字段，不耦合具体领域类型。
+ */
+function printDocumentResult<T>(
+  action: string,
+  data: T,
+  conflicts: Array<{ message?: string; relativePath?: string; taskName?: string }>,
+  nextActions: string[]
+): void {
+  if (conflicts.length === 0) {
+    printAgentResponse(createSuccessResponse(action, data, nextActions));
+    return;
+  }
+
+  const diagnostics: AgentDiagnostic[] = conflicts.map((conflict) => ({
+    severity: "error",
+    code: "document_conflict",
+    message: conflict.message ?? "检测到文档冲突",
+    ...(conflict.relativePath !== undefined || conflict.taskName !== undefined
+      ? { target: conflict.relativePath ?? conflict.taskName }
+      : {}),
+    fix: "人工合并冲突内容后重试"
+  }));
+  printAgentResponse(createOutcomeResponse(action, "conflict", data, diagnostics, nextActions));
 }

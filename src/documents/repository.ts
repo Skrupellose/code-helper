@@ -10,11 +10,13 @@ import type {
   DocumentRecord,
   DocumentRevisionRecord,
   GitLinkInput,
+  GitLinkRecord,
   TaskEventRecord,
   TaskFilter,
   TaskRecord,
   TaskStatus,
   UpdateDocumentInput,
+  ValidationRecord,
   ValidationRecordInput
 } from "./types.js";
 
@@ -285,9 +287,24 @@ export class DocumentRepository {
   /** 保存可复用验证回执并返回自增 ID。 */
   recordValidation(input: ValidationRecordInput): number {
     const now = this.#clock();
+    const acceptanceCriterionIds = normalizeTraceabilityIds(
+      input.acceptanceCriterionIds,
+      "验收条件 ID"
+    );
+    const planItemIds = normalizeTraceabilityIds(input.planItemIds, "计划项 ID");
     const result = this.#connection.database.prepare(`
-      INSERT INTO validations(task_id, command, working_directory, exit_code, summary, baseline, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO validations(
+        task_id,
+        command,
+        working_directory,
+        exit_code,
+        summary,
+        baseline,
+        acceptance_criterion_ids_json,
+        plan_item_ids_json,
+        created_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.taskId ?? null,
       requireNonBlank(input.command, "验证命令"),
@@ -295,24 +312,49 @@ export class DocumentRepository {
       input.exitCode,
       input.summary,
       input.baseline ?? null,
+      acceptanceCriterionIds.length === 0 ? null : JSON.stringify(acceptanceCriterionIds),
+      planItemIds.length === 0 ? null : JSON.stringify(planItemIds),
       now
     );
     return Number(result.lastInsertRowid);
   }
 
+  /** 按任务读取验证回执；未指定任务时读取全部，固定按写入顺序返回。 */
+  listValidations(taskId?: string): ValidationRecord[] {
+    const rows = taskId === undefined
+      ? this.#connection.database.prepare("SELECT * FROM validations ORDER BY id").all()
+      : this.#connection.database.prepare("SELECT * FROM validations WHERE task_id = ? ORDER BY id").all(taskId);
+    return (rows as unknown as ValidationRow[]).map(mapValidationRow);
+  }
+
   /** 记录任务与 Git commit 的关联；本 API 不执行提交。 */
   linkGitCommit(input: GitLinkInput): number {
-    const result = this.#connection.database.prepare(`
-      INSERT INTO git_links(task_id, commit_sha, subject, scope, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(
-      input.taskId,
-      requireNonBlank(input.commitSha, "commit SHA"),
-      input.subject ?? null,
-      input.scope ?? null,
-      this.#clock()
-    );
-    return Number(result.lastInsertRowid);
+    try {
+      const result = this.#connection.database.prepare(`
+        INSERT INTO git_links(task_id, commit_sha, subject, scope, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(
+        input.taskId,
+        requireNonBlank(input.commitSha, "commit SHA"),
+        input.subject ?? null,
+        input.scope ?? null,
+        this.#clock()
+      );
+      return Number(result.lastInsertRowid);
+    } catch (error) {
+      if (error instanceof DocumentRepositoryError) {
+        throw error;
+      }
+      throw mapConstraintError(error, `任务 ${input.taskId} 已关联 commit：${input.commitSha}`);
+    }
+  }
+
+  /** 读取指定任务的 Git 关联；本 API 不访问仓库，也不校验 commit 是否存在。 */
+  listGitLinks(taskId: string): GitLinkRecord[] {
+    const rows = this.#connection.database.prepare(
+      "SELECT * FROM git_links WHERE task_id = ? ORDER BY id"
+    ).all(taskId) as unknown as GitLinkRow[];
+    return rows.map(mapGitLinkRow);
   }
 
   /** 记录 Markdown 导出摘要；重复路径更新为最新导出状态。 */
@@ -402,6 +444,28 @@ interface TaskEventRow {
   created_at: string;
 }
 
+interface ValidationRow {
+  id: number;
+  task_id: string | null;
+  command: string;
+  working_directory: string;
+  exit_code: number;
+  summary: string;
+  baseline: string | null;
+  acceptance_criterion_ids_json: string | null;
+  plan_item_ids_json: string | null;
+  created_at: string;
+}
+
+interface GitLinkRow {
+  id: number;
+  task_id: string;
+  commit_sha: string;
+  subject: string | null;
+  scope: string | null;
+  created_at: string;
+}
+
 /** 插入文档修订的共享 SQL，调用方必须已处于事务中。 */
 function insertDocumentRevision(
   database: DatabaseSync,
@@ -466,6 +530,15 @@ function requireNonBlank(value: string, label: string): string {
   return normalized;
 }
 
+/** 清理验证追踪 ID，拒绝空值并保持调用方顺序下的唯一性。 */
+function normalizeTraceabilityIds(values: readonly string[] | undefined, label: string): string[] {
+  if (values === undefined) {
+    return [];
+  }
+  const normalized = values.map((value) => requireNonBlank(value, label));
+  return [...new Set(normalized)];
+}
+
 /** 将 SQLite 唯一键错误收敛为稳定 DUPLICATE；其它原始错误保持不变。 */
 function mapConstraintError(error: unknown, message: string): unknown {
   if (
@@ -527,6 +600,38 @@ function mapTaskEventRow(row: TaskEventRow): TaskEventRecord {
     taskId: row.task_id,
     eventType: row.event_type,
     ...(row.payload_json === null ? {} : { payload: JSON.parse(row.payload_json) as unknown }),
+    createdAt: row.created_at
+  };
+}
+
+/** 把验证回执数据库字段转换为公开领域模型。 */
+function mapValidationRow(row: ValidationRow): ValidationRecord {
+  return {
+    id: row.id,
+    ...(row.task_id === null ? {} : { taskId: row.task_id }),
+    command: row.command,
+    workingDirectory: row.working_directory,
+    exitCode: row.exit_code,
+    summary: row.summary,
+    ...(row.baseline === null ? {} : { baseline: row.baseline }),
+    ...(row.acceptance_criterion_ids_json === null
+      ? {}
+      : { acceptanceCriterionIds: JSON.parse(row.acceptance_criterion_ids_json) as string[] }),
+    ...(row.plan_item_ids_json === null
+      ? {}
+      : { planItemIds: JSON.parse(row.plan_item_ids_json) as string[] }),
+    createdAt: row.created_at
+  };
+}
+
+/** 把 Git 关联数据库字段转换为公开领域模型。 */
+function mapGitLinkRow(row: GitLinkRow): GitLinkRecord {
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    commitSha: row.commit_sha,
+    ...(row.subject === null ? {} : { subject: row.subject }),
+    ...(row.scope === null ? {} : { scope: row.scope }),
     createdAt: row.created_at
   };
 }

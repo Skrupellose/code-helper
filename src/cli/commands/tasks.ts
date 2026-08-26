@@ -13,6 +13,11 @@ import { canUseInteractiveKeys } from "../../terminal-ui.js";
 import { createManualTestDocument, createPlanWorkbench } from "../../workflows.js";
 import { printCompletionReview, printOperations } from "../output.js";
 import {
+  createErrorResponse,
+  createSuccessResponse,
+  printAgentResponse
+} from "../agent-response.js";
+import {
   getSelectableTasks,
   selectTaskFeatureNameForCommand
 } from "../task-selection.js";
@@ -208,11 +213,48 @@ export async function runArchive(projectRoot: string, args: string[]): Promise<n
  */
 export async function runFinish(projectRoot: string, args: string[]): Promise<number> {
   const flags = new Set(args.filter((arg) => arg.startsWith("--")));
-  const rawFeatureName = args.find((arg) => !arg.startsWith("--"));
+  const positionalArgs = args.filter((arg) => !arg.startsWith("--"));
+  const rawFeatureName = positionalArgs[0];
+  const json = flags.has("--json");
+  const unknownFlags = [...flags].filter((flag) => flag !== "--check-only" && flag !== "--json");
 
-  if (rawFeatureName === undefined && flags.has("--check-only") && !canUseInteractiveKeys(input, output)) {
-    printFinishCheckOnlyCandidates(await getSelectableTasks(projectRoot, ["active", "mixed"]));
+  const hasDuplicateFlags = args.filter((arg) => arg === "--json").length > 1
+    || args.filter((arg) => arg === "--check-only").length > 1;
+  if (unknownFlags.length > 0 || hasDuplicateFlags || positionalArgs.length > 1) {
+    if (json) {
+      printAgentResponse(createErrorResponse("finish.review", "invalid_arguments", {
+        severity: "error",
+        code: "invalid_arguments",
+        message: "用法：code-helper finish [中文功能名] [--check-only] [--json]",
+        fix: "移除未知参数后重试"
+      }));
+    } else {
+      console.error("用法：code-helper finish [中文功能名] [--check-only] [--json]");
+    }
+    return 1;
+  }
+
+  if (rawFeatureName === undefined
+    && flags.has("--check-only")
+    && (json || !canUseInteractiveKeys(input, output))) {
+    const tasks = await getSelectableTasks(projectRoot, ["active", "mixed"]);
+    if (json) {
+      printAgentResponse(createSuccessResponse("finish.candidates", { tasks }, ["select_task", "run_finish_review"]));
+    } else {
+      printFinishCheckOnlyCandidates(tasks);
+    }
     return 0;
+  }
+
+  // JSON 模式必须保持非交互且 stdout 只有一个 JSON 文档，缺少任务名时直接返回稳定诊断。
+  if (rawFeatureName === undefined && json) {
+    printAgentResponse(createErrorResponse("finish.review", "selection_required", {
+      severity: "error",
+      code: "selection_required",
+      message: "JSON 模式需要显式提供中文功能名",
+      fix: "运行 code-helper tasks --json 获取候选任务后重试"
+    }, ["list_tasks", "provide_feature_name"]));
+    return 1;
   }
 
   const resolved = await resolveFeatureNameForTaskCommand(
@@ -227,8 +269,8 @@ export async function runFinish(projectRoot: string, args: string[]): Promise<nu
 
   const review = await createCompletionReview(projectRoot, resolved.featureName);
 
-  if (flags.has("--json")) {
-    console.log(JSON.stringify(review, null, 2));
+  if (json) {
+    printAgentResponse(createSuccessResponse("finish.review", { review }, review.recommendations));
     return 0;
   }
 
@@ -241,10 +283,26 @@ export async function runFinish(projectRoot: string, args: string[]): Promise<nu
  * 参数：tasks [--json]。
  */
 export async function runTasks(projectRoot: string, args: string[]): Promise<number> {
+  const json = args.includes("--json");
+  const unknown = args.filter((arg) => arg !== "--json");
+  if (unknown.length > 0 || args.filter((arg) => arg === "--json").length > 1) {
+    if (json) {
+      printAgentResponse(createErrorResponse("tasks.list", "invalid_arguments", {
+        severity: "error",
+        code: "invalid_arguments",
+        message: "用法：code-helper tasks [--json]",
+        fix: "移除未知或重复参数后重试"
+      }));
+    } else {
+      console.error("用法：code-helper tasks [--json]");
+    }
+    return 1;
+  }
+
   const tasks = await listTasks(projectRoot);
 
-  if (args.includes("--json")) {
-    console.log(JSON.stringify(tasks, null, 2));
+  if (json) {
+    printAgentResponse(createSuccessResponse("tasks.list", { tasks }, tasks.length > 0 ? ["select_task"] : []));
     return 0;
   }
 

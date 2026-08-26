@@ -86,14 +86,14 @@ ${entryFiles.map((file) => `- ${file}`).join("\n")}
 
 ## 规则
 
-1. 所有计划、结果、状态和测试文档必须使用中文命名与中文总结。
+1. 所有计划、结果、状态和测试文档必须使用中文命名与中文总结；SQLite 是正文和修订历史的权威来源。
 2. 计划文档写入 \`${config.directories.planDoc}/<中文功能名>.md\`。
 3. 执行记录写入 \`${config.directories.resultDoc}/<中文功能名>/实施记录.md\`。
 4. 当前状态写入 \`${config.directories.statusDoc}/<中文功能名>-状态.md\`。
 5. 需要人工验收时，手工测试或验收文档写入 \`${config.directories.resultDoc}/<中文功能名>/手工测试.md\`。
 6. status-doc 必须包含“当前执行节点”，写清当前子计划、状态、执行目标、进入条件、完成定义和验证方式。
 7. status-doc 必须包含“子计划队列”，按顺序列出基础能力、核心实现、集成验收和完成整理等后续节点。
-8. agent 每次继续任务时先读 status-doc，只推进当前执行节点；完成后同步更新 result-doc、plan-doc 和 status-doc 的下一个执行节点。
+8. agent 每次继续任务时，默认用 \`document show\` 从 SQLite 读取 status、plan 和 result，只推进当前执行节点；更新时携带读取所得 revision 调用 \`document update --body-stdin --expected-revision <N>\`，由 CLI 自动刷新 Markdown 投影。
 9. 最终计划必须同时具备总纲、分层顺序、模块或能力拆分、依赖与集成计划、验收标准、状态记录、阻塞点、后续检查点和下一步建议。
 10. 生成顺序必须是：目标与约束、P0/P1 总纲、依赖顺序、目录或模块策略、基础阶段计划、核心实现计划、集成验收计划、执行计划。
 11. 不要一开始直接写细表；先给总纲和阶段边界，再逐步细化。
@@ -110,7 +110,8 @@ ${entryFiles.map((file) => `- ${file}`).join("\n")}
 22. 文档只有满足可直接推进、可记录阻塞、可恢复上下文、便于后续复查时，才算完整。
 23. status-doc 必须在当前执行节点后包含“进度摘要”，固定记录当前节点、完成定义进度、已经完成、当前工作、剩余门禁、后续优化、下一步和 Agent 使用；存在独立复审时同时记录复审轮次。
 24. 进度摘要只在节点开始、完成定义变化、关键实现完成、复审结束和最终回复前更新；后续优化不得混入剩余门禁。
-25. 已经通过直接执行完成且只有事后复盘价值的任务，不倒写计划文档；使用 \`code-helper-completion-record\` 生成独立完成记录。直接执行任务仍有后续阶段、阻塞或跨会话恢复需求时，才升级为 plan/status/result 计划任务。`
+25. 已经通过直接执行完成且只有事后复盘价值的任务，不倒写计划文档；使用 \`code-helper-completion-record\` 生成独立完成记录。直接执行任务仍有后续阶段、阻塞或跨会话恢复需求时，才升级为 plan/status/result 计划任务。
+26. \`documents import\` 仅用于用户显式人工编辑 Markdown 或旧项目迁移兼容；Agent 日常维护不得把“先改 Markdown 再 import”作为默认路径。若 \`document update\` 报告投影人工修改，必须先预览并合并该修改，不得使用 force 静默覆盖。`
     },
     {
       fileName: "执行结果总结规范.md",
@@ -239,7 +240,8 @@ ${entryFiles.map((file) => `- ${file}`).join("\n")}
 10. 归档前必须检查实施记录和状态记录。只有页面、可视化、浏览器真实链路、人工业务验收任务，或结果目录已经存在 \`手工测试.md\` 时，才把手工测试结论作为归档条件；纯逻辑任务以自动化验证为准。
 11. \`.code-helper/local/docs/completion-record/\` 中的完成记录创建即为 recorded 终态，不属于计划任务，也不需要再次归档；不得因为完成记录缺少计划或状态文档而补齐三件套。
 12. Markdown 导出默认保护手工修改；需要覆盖时必须显式使用 \`documents export --force\`。
-13. Agent 修改 Markdown 兼容视图后必须先运行 \`documents import\` 预览，再显式使用 \`--apply\` 写入 SQLite revision；双边变化时不得自动覆盖。`
+13. Agent 默认执行 \`document show → CAS document update\` 直接维护 SQLite，更新成功后自动刷新 Markdown 投影；写入前发现投影被人工修改时必须阻断且不得增加 revision。
+14. \`documents import\` 只用于用户显式人工编辑或旧项目兼容；先预览，再显式使用 \`--apply\`。数据库与 Markdown 双边变化时不得自动覆盖。`
     },
     {
       fileName: "功能完成检查规范.md",

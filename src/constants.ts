@@ -1,10 +1,23 @@
-import type { CodeHelperConfig, FeatureKey } from "./types.js";
+import type { CodeHelperConfig, FeatureKey, SkillModule, SkillProfile } from "./types.js";
 
 /**
  * code-helper 自身配置版本。
  * 后续如果配置结构变更，可以用这个数字做迁移判断。
  */
-export const CONFIG_VERSION = 1;
+export const CONFIG_VERSION = 2;
+
+/** Skills 模块使用稳定顺序，配置序列化和 CLI 展示均复用该顺序。 */
+export const SKILL_MODULES: readonly SkillModule[] = ["core", "quality", "collaboration", "memory"];
+
+/** 内置 profile 使用稳定顺序，避免帮助和配置输出随对象遍历变化。 */
+export const SKILL_PROFILES: readonly SkillProfile[] = ["full", "delivery", "essential"];
+
+/** 内置 profile 到模块集合的确定性映射。 */
+export const SKILL_PROFILE_MODULES: Readonly<Record<SkillProfile, readonly SkillModule[]>> = {
+  full: SKILL_MODULES,
+  delivery: ["core", "quality", "collaboration"],
+  essential: ["core", "collaboration"]
+};
 
 /**
  * 直接执行任务的终态完成记录目录。
@@ -81,7 +94,9 @@ export const DEFAULT_CONFIG: CodeHelperConfig = {
     gitHooks: { enabled: false },
     agentHooks: { enabled: false },
     skillRegistration: { enabled: true }
-  }
+  },
+  // 缺少 Skills 配置的旧项目会迁移到 full，保持历史上的全量注册行为。
+  skills: { mode: "profile", profile: "full" }
 };
 
 /**

@@ -22,6 +22,20 @@ export interface FeatureToggle {
   enabled: boolean;
 }
 
+/** 内置 Skill 的稳定功能模块。 */
+export type SkillModule = "core" | "quality" | "collaboration" | "memory";
+
+/** 内置 Skills profile 的稳定名称。 */
+export type SkillProfile = "full" | "delivery" | "essential";
+
+/**
+ * 项目期望注册的 Skills 集合。
+ * profile 适合常见组合，modules 允许高级用户显式选择模块。
+ */
+export type SkillSelection =
+  | { mode: "profile"; profile: SkillProfile }
+  | { mode: "modules"; modules: SkillModule[] };
+
 /**
  * code-helper 的项目级配置文件结构。
  * 该配置只描述 code-helper 自己的行为，不承载业务项目配置。
@@ -41,6 +55,7 @@ export interface CodeHelperConfig {
     statusDoc: string;
   };
   features: Record<FeatureKey, FeatureToggle>;
+  skills: SkillSelection;
 }
 
 /**

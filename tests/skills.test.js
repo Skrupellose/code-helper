@@ -95,9 +95,11 @@ async function recordManagedSkillFingerprints(root, target, records) {
 test("内置 Skill 单一 manifest 的名称、目录、模板文件和正文保持一致", () => {
   const manifest = getSkillManifest();
 
-  assert.equal(manifest.length, 8);
+  assert.equal(manifest.length, 10);
   assert.ok(manifest.some((skill) => skill.name === "code-helper-review-fix"));
   assert.ok(manifest.some((skill) => skill.name === "code-helper-completion-record"));
+  assert.ok(manifest.some((skill) => skill.name === "code-helper-requirement-clarification"));
+  assert.ok(manifest.some((skill) => skill.name === "code-helper-semantic-analysis"));
   assert.equal(new Set(manifest.map((skill) => skill.fileName)).size, manifest.length);
   assert.equal(new Set(manifest.map((skill) => skill.directoryName)).size, manifest.length);
   assert.equal(new Set(manifest.map((skill) => skill.name)).size, manifest.length);
@@ -161,6 +163,18 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
       join(root, ".agents/skills/code-helper-review-fix/SKILL.md"),
       "utf8"
     );
+    const documentArchiveSkill = await readFile(
+      join(root, ".agents/skills/code-helper-document-archive/SKILL.md"),
+      "utf8"
+    );
+    const requirementClarificationSkill = await readFile(
+      join(root, ".agents/skills/code-helper-requirement-clarification/SKILL.md"),
+      "utf8"
+    );
+    const semanticAnalysisSkill = await readFile(
+      join(root, ".agents/skills/code-helper-semantic-analysis/SKILL.md"),
+      "utf8"
+    );
 
     assert.equal(firstOperations.length, CODE_HELPER_SKILL_COUNT);
     assert.ok(firstOperations.every((operation) => operation.action === "created"));
@@ -172,10 +186,16 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
     assert.match(completionSkill, /真实功能变更在最终回复前仍必须触发/);
     assert.match(completionSkill, /计划跟踪、直接执行和 recorded 完成记录/);
     assert.match(completionSkill, /不得返回 missing-docs/);
+    assert.match(completionSkill, /document show <任务> status --json/);
+    assert.match(completionSkill, /document update --body-stdin --expected-revision/);
+    assert.match(completionSkill, /document show <任务> completion_record --json/);
     assert.match(completionRecordSkill, /name: code-helper-completion-record/);
     assert.match(completionRecordSkill, /code-helper-kind: completion-record/);
     assert.match(completionRecordSkill, /不创建 plan-doc、status-doc、result-doc 或手工测试文档/);
     assert.match(completionRecordSkill, /不为倒写文档派子代理/);
+    assert.match(completionRecordSkill, /document show <任务> completion_record --json/);
+    assert.match(completionRecordSkill, /document update <任务> completion_record --body-stdin --expected-revision/);
+    assert.match(completionRecordSkill, /Markdown 投影作为默认写入路径/);
     // 新增协作 skill 必须能被注册，并包含对子代理协作边界的明确说明。
     assert.match(collaborationSkill, /name: code-helper-agent-collaboration/);
     assert.match(collaborationSkill, /T0\/T1 允许主会话直办，T2 建议分发，T3 强制实现与复核隔离/);
@@ -191,6 +211,9 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
     assert.match(manualTestSkill, /name: code-helper-manual-test-workbench/);
     assert.match(manualTestSkill, /manual-test.*只负责生成结构化模板/s);
     assert.match(manualTestSkill, /测试环境、前置数据、操作步骤、预期结果、回归范围和阻塞记录/);
+    assert.match(manualTestSkill, /document show <任务> manual_test --json/);
+    assert.match(manualTestSkill, /document update <任务> manual_test --body-stdin --expected-revision/);
+    assert.doesNotMatch(manualTestSkill, /创建 \.code-helper\/local\/docs\/result-doc.*写入完整结构/s);
     assert.match(reviewFixSkill, /name: code-helper-review-fix/);
     assert.match(reviewFixSkill, /主问题已解决/);
     assert.match(reviewFixSkill, /RF-P1-001/);
@@ -201,6 +224,23 @@ test("registerProjectSkills 会注册 Codex 项目级 skills 并保持幂等", a
     assert.match(reviewFixSkill, /Codex、Claude、Grok、GitHub Copilot/);
     assert.match(reviewFixSkill, /按项目 Agent 协作规范的 T0-T3 风险等级决定直办、建议分发或强制实现与复核隔离/);
     assert.match(reviewFixSkill, /同一基线下已经有有效回执的相同命令不机械重复/);
+    assert.match(reviewFixSkill, /document show <任务> plan\|status\|result --json/);
+    assert.match(reviewFixSkill, /document update <任务> result --body-stdin --expected-revision/);
+    assert.match(reviewFixSkill, /不得默认直接编辑这些 Markdown 路径/);
+    assert.match(documentArchiveSkill, /task status <任务> --json/);
+    assert.match(documentArchiveSkill, /document show <任务> result --json/);
+    assert.match(documentArchiveSkill, /document show <任务> status --json/);
+    assert.match(documentArchiveSkill, /document show <任务> plan\|manual_test --json/);
+    assert.match(documentArchiveSkill, /Markdown 路径作为默认读取或写入入口/);
+    assert.doesNotMatch(documentArchiveSkill, /先确认 实施记录\.md 和 status-doc/u);
+    assert.match(requirementClarificationSkill, /name: code-helper-requirement-clarification/);
+    assert.match(requirementClarificationSkill, /Q-001、Q-002/);
+    assert.match(requirementClarificationSkill, /AC-001、AC-002/);
+    assert.match(requirementClarificationSkill, /澄清完成不代表授权修改代码/);
+    assert.match(semanticAnalysisSkill, /name: code-helper-semantic-analysis/);
+    assert.match(semanticAnalysisSkill, /需求规格 → 计划项 → 状态记录 → 验证证据/);
+    assert.match(semanticAnalysisSkill, /spec\.acceptance\.not-planned/);
+    assert.match(semanticAnalysisSkill, /不自动修改规格、计划、状态、验证记录、代码或过程文档/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -20,6 +20,7 @@ import {
   getSkillFilePath,
   type SkillRegistrationTarget
 } from "./targets.js";
+import { resolveExpectedSkillManifest } from "./selection.js";
 
 /**
  * 单个项目级 skill 的注册状态。
@@ -30,6 +31,8 @@ export interface SkillRegistrationStatus {
   name: string;
   path: string;
   registered: boolean;
+  /** 是否属于当前配置解析出的期望集合。 */
+  expected: boolean;
 }
 
 /**
@@ -87,7 +90,9 @@ export async function registerProjectSkillsForTargets(
     throw new Error("管理项目 Skills 功能已关闭，请先执行 `code-helper features enable skillRegistration`。");
   }
 
-  const manifest = getValidatedSkillManifest();
+  // 先校验完整 manifest，再按配置选择期望集合；遗漏模块映射会在任何写入前失败。
+  getValidatedSkillManifest();
+  const manifest = resolveExpectedSkillManifest(config);
   const managedRecords = await readManagedSkillRecords(projectRoot);
   const snapshots: SkillRegistrationSnapshot[] = [];
 
@@ -305,6 +310,8 @@ export async function listProjectSkillRegistrations(
   assertSupportedTarget(target);
 
   const statuses: SkillRegistrationStatus[] = [];
+  const config = await loadConfig(projectRoot);
+  const expectedNames = new Set(resolveExpectedSkillManifest(config).map((skill) => skill.directoryName));
 
   for (const skill of getValidatedSkillManifest()) {
     const targetPath = getSkillFilePath(projectRoot, target, skill.directoryName);
@@ -312,7 +319,8 @@ export async function listProjectSkillRegistrations(
       target,
       name: skill.directoryName,
       path: targetPath,
-      registered: (await readTextIfExists(targetPath)) !== undefined
+      registered: (await readTextIfExists(targetPath)) !== undefined,
+      expected: expectedNames.has(skill.directoryName)
     });
   }
 
@@ -481,6 +489,8 @@ async function removeRetiredManagedSkillDirectories(
         const existingSkill = await readTextIfExists(skillPath);
 
         if (
+          entries.length !== 1 ||
+          entries[0] !== "SKILL.md" ||
           existingSkill === undefined ||
           createContentFingerprint(existingSkill) !== record.contentFingerprint
         ) {
@@ -488,7 +498,7 @@ async function removeRetiredManagedSkillDirectories(
           operations.push({
             path: targetDirectory,
             action: "skipped",
-            message: "退休项目级 skill 内容已变化或缺少受控 SKILL.md，已保留目录和所有权记录"
+            message: "退休项目级 skill 含用户附件、内容已变化或缺少受控 SKILL.md，已保留目录和所有权记录"
           });
           continue;
         }

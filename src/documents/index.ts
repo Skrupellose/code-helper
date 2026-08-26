@@ -6,8 +6,10 @@ export {
   previewMigrationBaselineConflicts
 } from "./legacy-migration.js";
 export {
+  checkMarkdownProjectionForTask,
   exportMarkdownDocuments,
-  getStableMarkdownExportPath
+  getStableMarkdownExportPath,
+  registerCompatibleProjectionBaselines
 } from "./markdown-export.js";
 export { importMarkdownDocuments } from "./markdown-import.js";
 export {
@@ -29,12 +31,14 @@ export type {
   DocumentRevisionRecord,
   DocumentType,
   GitLinkInput,
+  GitLinkRecord,
   TaskEventRecord,
   TaskFilter,
   TaskRecord,
   TaskStatus,
   TrackingMode,
   UpdateDocumentInput,
+  ValidationRecord,
   ValidationRecordInput
 } from "./types.js";
 export type {
@@ -50,9 +54,16 @@ export type {
 } from "./legacy-migration.js";
 export type {
   MarkdownExportItem,
+  MarkdownExportHookContext,
   MarkdownExportOptions,
   MarkdownExportResult,
-  MarkdownExportStatus
+  MarkdownExportStatus,
+  MarkdownExportTestHooks
+} from "./markdown-export.js";
+export type {
+  MarkdownProjectionCheckItem,
+  MarkdownProjectionCheckResult,
+  MarkdownProjectionCheckStatus
 } from "./markdown-export.js";
 export type {
   MarkdownImportItem,

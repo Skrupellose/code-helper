@@ -5,7 +5,9 @@ import { documentArchiveSkillTemplate } from "./skills/document-archive.js";
 import { manualTestWorkbenchSkillTemplate } from "./skills/manual-test-workbench.js";
 import { memoryTuningSkillTemplate } from "./skills/memory-tuning.js";
 import { planWorkbenchSkillTemplate } from "./skills/plan-workbench.js";
+import { requirementClarificationSkillTemplate } from "./skills/requirement-clarification.js";
 import { reviewFixSkillTemplate } from "./skills/review-fix.js";
+import { semanticAnalysisSkillTemplate } from "./skills/semantic-analysis.js";
 import type { SkillTemplate } from "./skills/types.js";
 
 /**
@@ -19,9 +21,11 @@ const CODE_HELPER_SKILL_MANIFEST: readonly Readonly<SkillTemplate>[] = Object.fr
     // Agent 协作 Skill 保持首位，确保新会话优先读取协作分工边界。
     agentCollaborationSkillTemplate,
     memoryTuningSkillTemplate,
+    requirementClarificationSkillTemplate,
     planWorkbenchSkillTemplate,
     manualTestWorkbenchSkillTemplate,
     reviewFixSkillTemplate,
+    semanticAnalysisSkillTemplate,
     documentArchiveSkillTemplate,
     completionRecordSkillTemplate,
     completionReviewSkillTemplate

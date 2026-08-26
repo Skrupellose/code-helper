@@ -41,7 +41,7 @@ description: 当用户要求代码审查、review 最近改动、检查提交或
 
 1. 用户本轮指定的审查目标、基线提交、diff、文件范围和禁止事项。
 2. 项目入口文档及其索引到的专题规则。
-3. 活动任务对应的 plan-doc、status-doc 和 result-doc；没有活动任务时不要虚构过程文档。
+3. SQLite 已初始化时，通过 \`document show <任务> plan|status|result --json\` 读取活动任务的权威正文与 revision；只有旧项目尚未迁移，或用户明确要求检查人工 Markdown 时，才读取 plan-doc、status-doc 和 result-doc 兼容路径。没有活动任务时不要虚构过程文档。
 4. 与主问题直接相关的源码、测试、配置、类型、调用链路和已有实现。
 5. 必要的历史变更或提交差异；只读取能够支撑结论的范围，不扩张成无边界全仓扫描。
 
@@ -140,7 +140,7 @@ ID 格式固定为 \`RF-P0-001\`、\`RF-P1-001\`、\`RF-P2-001\`，同一轮复�
 - 用户明确授权修复：可在现有活动任务中记录审查基线、授权范围、修复和复审结果。
 - 用户另行明确授权记录本次 review：只记录审查结论和 findings，不因此获得任何代码修改权限。
 
-满足记录授权且存在活动任务时，写入：
+满足记录授权且存在活动任务时，先执行 \`document show <任务> result --json\` 读取实施记录正文与 revision，在内存中合并“代码审查与修复”小节，再通过 \`document update <任务> result --body-stdin --expected-revision <N> --summary <中文摘要> --json\` 写回 SQLite。成功响应会自动刷新以下 Markdown 兼容投影：
 
 \`.code-helper/local/docs/result-doc/<中文功能名>/实施记录.md\`
 
@@ -154,7 +154,7 @@ ID 格式固定为 \`RF-P0-001\`、\`RF-P1-001\`、\`RF-P2-001\`，同一轮复�
 - 复审状态
 - 风险与未完成项
 
-仍影响下一步决策的 finding 或阻塞同步到 \`.code-helper/local/docs/status-doc/<中文功能名>-状态.md\`。写入范围不得超过用户授权；不要创建 \`代码审查.md\`、\`review.md\` 等未被 code-helper 支持的新结果文档类型。
+仍影响下一步决策的 finding 或阻塞使用同样的 \`document show → document update --body-stdin --expected-revision\` 链路同步到 status 文档；\`.code-helper/local/docs/status-doc/<中文功能名>-状态.md\` 只是自动刷新的兼容投影。写入范围不得超过用户授权；不要创建 \`代码审查.md\`、\`review.md\` 等未被 code-helper 支持的新结果文档类型。SQLite 已初始化时不得默认直接编辑这些 Markdown 路径；\`documents import\` 仅用于用户显式人工编辑和旧项目兼容。
 
 没有记录授权时，findings 只保留在当前对话，不写入任何过程文档。如果当前没有活动任务，即使用户授权记录 review，也不要自行虚构 plan-doc、status-doc 或 result-doc；应先在对话中汇报，并在确实需要建立任务文档时另行取得授权。用户随后授权修复且整组修复已经完成、没有后续阶段并具有复盘价值时，可以由主会话使用 \`code-helper-completion-record\` 生成独立完成记录；纯只读 review 仍不得生成完成记录。
 

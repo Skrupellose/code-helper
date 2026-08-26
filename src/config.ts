@@ -1,6 +1,6 @@
-import { DEFAULT_CONFIG, FEATURE_KEYS } from "./constants.js";
+import { DEFAULT_CONFIG, FEATURE_KEYS, SKILL_MODULES, SKILL_PROFILES } from "./constants.js";
 import { ensureTrailingNewline, projectPath, readTextIfExists, writeText } from "./fs-utils.js";
-import type { CodeHelperConfig, FeatureKey } from "./types.js";
+import type { CodeHelperConfig, FeatureKey, SkillModule, SkillProfile, SkillSelection } from "./types.js";
 
 /**
  * 旧版工具工作区配置路径。
@@ -39,7 +39,10 @@ export async function loadConfig(projectRoot: string): Promise<CodeHelperConfig>
  */
 export async function saveConfig(projectRoot: string, config: CodeHelperConfig): Promise<void> {
   const configPath = projectPath(projectRoot, getConfigRelativePath());
-  await writeText(configPath, ensureTrailingNewline(JSON.stringify(mergeConfig(config), null, 2)));
+  const merged = mergeConfig(config);
+  // 保存属于显式写操作，必须拒绝非法选择，避免把无法解析的状态持久化到项目。
+  merged.skills = normalizeSkillSelection(config.skills, true);
+  await writeText(configPath, ensureTrailingNewline(JSON.stringify(merged, null, 2)));
 }
 
 /**
@@ -64,7 +67,8 @@ export async function setFeatureEnabled(
 export function mergeConfig(input: Partial<CodeHelperConfig>): CodeHelperConfig {
   const merged = cloneDefaultConfig();
 
-  merged.version = typeof input.version === "number" ? input.version : merged.version;
+  // 读取旧版本后始终提升到当前结构版本；真正写盘仍只发生在 init/update/显式配置操作。
+  merged.version = DEFAULT_CONFIG.version;
   merged.entryFiles = {
     ...merged.entryFiles,
     ...input.entryFiles
@@ -88,7 +92,49 @@ export function mergeConfig(input: Partial<CodeHelperConfig>): CodeHelperConfig 
     };
   }
 
+  // 老配置没有 skills 字段时保留历史全量注册语义；损坏的旧值也采用保守全量回退。
+  merged.skills = normalizeSkillSelection(input.skills, false);
+
   return merged;
+}
+
+/**
+ * 校验并按稳定顺序规范化 Skills 选择。
+ * strict 用于显式保存；兼容读取时非法旧值回退到 full，避免静默卸载已注册 Skills。
+ */
+export function normalizeSkillSelection(input: unknown, strict: boolean): SkillSelection {
+  const fail = (message: string): SkillSelection => {
+    if (strict) throw new Error(message);
+    return { mode: "profile", profile: "full" };
+  };
+
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return input === undefined
+      ? { mode: "profile", profile: "full" }
+      : fail("Skills 选择必须是 profile 或 modules 对象。");
+  }
+
+  const record = input as Record<string, unknown>;
+  if (record.mode === "profile") {
+    if (typeof record.profile !== "string" || !SKILL_PROFILES.includes(record.profile as SkillProfile)) {
+      return fail(`不支持的 Skills profile：${String(record.profile)}`);
+    }
+    return { mode: "profile", profile: record.profile as SkillProfile };
+  }
+
+  if (record.mode === "modules") {
+    if (!Array.isArray(record.modules) || record.modules.length === 0) {
+      return fail("Skills modules 至少需要选择一个模块。");
+    }
+    const invalid = record.modules.find(
+      (item) => typeof item !== "string" || !SKILL_MODULES.includes(item as SkillModule)
+    );
+    if (invalid !== undefined) return fail(`不支持的 Skills 模块：${String(invalid)}`);
+    const selected = new Set(record.modules as SkillModule[]);
+    return { mode: "modules", modules: SKILL_MODULES.filter((module) => selected.has(module)) };
+  }
+
+  return fail(`不支持的 Skills 选择模式：${String(record.mode)}`);
 }
 
 /**

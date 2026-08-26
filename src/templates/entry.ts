@@ -14,6 +14,9 @@ export function renderEntryBlock(config: CodeHelperConfig): string {
     config.features.planWorkbench.enabled
       ? `- 项目计划优化：开始大型需求、迁移、重构或多阶段任务时，读取 \`${config.directories.userRules}/项目计划管理规范.md\`。`
       : undefined,
+    config.features.skillRegistration.enabled
+      ? "- 需求探索与澄清：需求仍然模糊、缺少目标/用户场景/验收条件或需要先比较方向时，使用 `code-helper-requirement-clarification`；澄清完成不代表授权实施。"
+      : undefined,
     config.features.resultSummary.enabled
       ? `- 执行结果总结：可独立验收的逻辑交付点完成后，读取 \`${config.directories.userRules}/执行结果总结规范.md\` 并写入 result-doc；微型步骤不单独生成或更新实施记录。`
       : undefined,
@@ -28,6 +31,9 @@ export function renderEntryBlock(config: CodeHelperConfig): string {
       : undefined,
     config.features.skillRegistration.enabled
       ? "- 代码审查与修复：要求 review、代码审查、检查最近改动、按 findings 修复或复审时，使用 `code-helper-review-fix`；默认只读审查，只有用户明确授权后才修改。"
+      : undefined,
+    config.features.skillRegistration.enabled
+      ? "- 跨产物语义分析：检查需求规格、计划、状态和验证证据的追踪关系时，使用 `code-helper-semantic-analysis`；分析只读报告稳定诊断，不自动修改产物。"
       : undefined,
     config.features.documentArchive.enabled
       ? `- 文档归档：功能完成或手动移动到 archive 后，任务视为已结束，读取 \`${config.directories.userRules}/文档归档规范.md\`。`
@@ -52,7 +58,7 @@ export function renderEntryBlock(config: CodeHelperConfig): string {
 
 1. 本区块由 code-helper 自动维护，请不要手工编辑；自定义规则应写在本区块外，长期规则写入 \`${config.directories.userRules}/\`。
 2. 开始新需求、迁移、重构或反馈修复前，先读取本区块索引到的专题规则。
-3. SQLite 是任务状态、过程文档和修订历史的权威来源；\`${config.directories.planDoc}/\`、\`${config.directories.resultDoc}/\`、\`${config.directories.statusDoc}/\` 与 \`.code-helper/local/docs/completion-record/\` 是默认 Git 忽略的本地 Markdown 兼容视图；需要 Git 交接或审计时显式执行 \`documents export --tracked\`，长期规则仍写入 \`${config.directories.userRules}/\`。
+3. SQLite 是任务状态、过程文档和修订历史的权威来源；Agent 默认通过 \`document show\` 读取 revision，再以 \`document update --body-stdin --expected-revision <N>\` 直接 CAS 更新 SQLite，成功后由 CLI 自动刷新 Markdown 兼容投影；\`${config.directories.planDoc}/\`、\`${config.directories.resultDoc}/\`、\`${config.directories.statusDoc}/\` 与 \`.code-helper/local/docs/completion-record/\` 仅是默认 Git 忽略的本地兼容视图。需要 Git 交接或审计时显式执行 \`documents export --tracked\`，长期规则仍写入 \`${config.directories.userRules}/\`。
 4. 不把一次性调试过程、临时失败细节或大段实现流水写进入口文档。
 5. 主会话按 T0-T3 风险与复杂度决定执行方式：T0/T1 可直办，T2 建议分发，T3 必须实现与复核隔离；主会话始终负责范围控制、结果审阅和最终结论。
 6. 主会话始终可以进行只读证据核验、查看 diff、搜索调用方、运行非变更型静态检查和定向测试，不需要为了这些复核动作额外分发。
@@ -69,7 +75,7 @@ ${enabledRules.join("\n")}
 - 入口文档只保留轻量索引和核心约束。
 - 专题规则文档必须包含“功能描述 / 调用时机 / 调用入口文件 / 规则”四个小节。
 - 计划、状态、结果、测试和完成记录必须使用中文命名与中文总结。
-- Agent 修改 Markdown 兼容视图后，必须先运行 \`npx @skrupellose/code-helper documents import\` 预览，再显式使用 \`--apply\` 写入 SQLite revision；双边变化时停止并人工合并。
+- Agent 默认不得先编辑 Markdown 兼容视图；应执行 \`document show → CAS document update\`，由更新命令自动刷新投影。\`documents import\` 只保留给用户显式人工编辑和旧项目兼容：先预览，再显式使用 \`--apply\` 写入 SQLite revision；双边变化时停止并人工合并。
 - agent 识别到功能变更、项目结构变化、稳定规则变化或可独立验收的逻辑交付点完成时，必须主动判断是否需要更新过程文档、询问更新长期记忆、询问归档或继续当前节点；微型步骤不单独触发。
 - 新功能或重构形成稳定规则后，先询问用户是否更新项目记忆，不自动把短期任务状态写入长期记忆。`;
 }

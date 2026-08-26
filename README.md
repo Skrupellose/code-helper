@@ -1,10 +1,10 @@
 # code-helper
 
-`code-helper` 是一个面向 agent 协作项目的 CLI，用于初始化协作规则、生成计划和验收模板、记录执行状态，并在任务结束前检查是否还有未处理事项。工具适用于绝大部分编程语言项目，可把 8 个内置 Skills 注册给 Codex、Claude Code、GitHub Copilot 和 Grok Build，并为项目生成 Git 提交信息规范。
+`code-helper` 是一个面向 agent 协作项目的 CLI，用于初始化协作规则、探索和澄清需求、生成计划和验收模板、记录执行状态，并在任务结束前检查是否还有未处理事项。工具适用于绝大部分编程语言项目，可把 10 个内置 Skills 注册给 Codex、Claude Code、GitHub Copilot 和 Grok Build，并为项目生成 Git 提交信息规范。
 
 ## 运行环境
 
-`code-helper` 运行环境需要 Node.js `>=22.13.0`，文档数据库使用 Node 内置的 `node:sqlite`。\
+`code-helper` 运行环境需要 Node.js `>=22.5.0`，文档数据库使用 Node 内置的 `node:sqlite`。Node 22.5–22.12 会由 CLI 自动带上 SQLite 实验参数重启，22.13 及更新版本直接运行；不会降级为丢失任务状态的无数据库模式。\
 code-helper 通过 npm 分发，所以本机需要能运行 Node 和 `npx`；
 
 ## 快速开始
@@ -56,7 +56,7 @@ npx @skrupellose/code-helper npm-scripts install
 npx @skrupellose/code-helper init
 npx @skrupellose/code-helper update
 npx @skrupellose/code-helper version
-npx @skrupellose/code-helper version status
+npx @skrupellose/code-helper version status --json
 npx @skrupellose/code-helper npm-scripts install
 npx @skrupellose/code-helper plan docs/订单管理需求.md 订单管理升级
 npx @skrupellose/code-helper manual-test 订单管理升级
@@ -64,11 +64,24 @@ npx @skrupellose/code-helper record 轻量修复复盘
 npx @skrupellose/code-helper finish 订单管理升级
 npx @skrupellose/code-helper archive 订单管理升级
 npx @skrupellose/code-helper tasks
+npx @skrupellose/code-helper requirement explore --input requirement-exploration.json --json
+npx @skrupellose/code-helper requirement clarify --input requirement-answers.json --json
+npx @skrupellose/code-helper requirement specify --input requirement-specification.json --json
+npx @skrupellose/code-helper analyze --input requirement-analysis.json --task 订单管理升级 --json
+npx @skrupellose/code-helper task status 订单管理升级 --json
+npx @skrupellose/code-helper document show 订单管理升级 status --json
+npx @skrupellose/code-helper document update 订单管理升级 status --body "# 当前状态" --expected-revision 1 --summary "更新当前节点" --json
+npx @skrupellose/code-helper validation record 订单管理升级 --command "npm test" --working-directory . --exit-code 0 --summary "全量测试通过" --acceptance-criteria AC-001 --plan-items PLAN-001 --json
 npx @skrupellose/code-helper documents migrate
 npx @skrupellose/code-helper documents import
 npx @skrupellose/code-helper documents export
 npx @skrupellose/code-helper check
 ```
+
+带 `--json` 的主要脚本命令统一返回 Agent envelope：
+`{ ok, action, status, data, diagnostics, nextActions }`。stdout 每次只包含一个 JSON 文档；
+成功退出码为 `0`，可处理的文档冲突为 `2`，参数或运行失败为 `1`。
+现已覆盖 `tasks`、`finish`、`version`、`documents` 以及结构化任务、需求和分析命令。
 
 无参数运行会打开交互菜单。菜单主要解决**项目准备**与**工具能力管理**，降低心智负担：
 
@@ -122,7 +135,10 @@ npx code-helper update
 | `finish` | 检查当前任务是否满足完成条件，并提示后续动作 |
 | `archive` | 将 SQLite 任务状态更新为 archived，并同步兼容 Markdown 视图 |
 | `tasks` | 查看 SQLite 权威任务状态；旧项目继续兼容 Markdown 扫描 |
-| `documents` | 预览/导入旧文档、导出兼容 Markdown、检查 SQLite 完整性 |
+| `requirement` | 从显式 JSON 输入生成需求探索、合并多轮澄清回答或生成正式规格；默认不修改代码或计划 |
+| `analyze` | 只读检查需求规格、计划项、状态记录与验证证据的追踪缺口 |
+| `task` / `document` / `validation` / `git` | 通过统一 JSON Contract 读写 SQLite 任务、CAS 文档、验证回执与 Git 关联；文档更新后自动刷新本地投影 |
+| `documents` | 兼容人工 Markdown 导入和旧项目迁移、显式导出交接副本、检查 SQLite 完整性 |
 | `check` | 检查协作文档结构是否完整 |
 
 其他常用 CLI：
@@ -132,7 +148,7 @@ npx code-helper update
 | `update` | 按当前项目已启用或已安装的能力刷新 code-helper 本地资产 |
 | `version` | 查看版本，选择 Stable/Canary 通道并检查 npm 发布状态 |
 | `npm-scripts install` | 写入常用 npm scripts，仅适合已有 `package.json` 的 Node/npm 项目 |
-| `skills` | 查看、注册、取消注册或检查项目级 skills（也可从菜单进入） |
+| `skills` | 选择 profile/modules，并查看、注册、取消注册或检查项目级 skills（也可从菜单进入） |
 | `hooks` | 查看、安装或卸载 code-helper 管理的 Git / Agent hooks（也可从菜单进入） |
 
 ## 会创建或更新的文件
@@ -171,9 +187,11 @@ npx code-helper update
 
 - `.code-helper/local/docs/result-doc/<中文功能名>/手工测试.md`
 
-SQLite 是初始化后项目的任务与文档权威来源；默认 Markdown 是 Git 忽略的本地兼容视图。需要 Git 交接或审计时执行 `documents export --tracked` 生成 `code-helper-docs/` 单向副本；该副本不能直接用 `documents import` 回写，需将修改同步回本地视图后再 import。默认导出不会覆盖导出后被手工修改的文件，只有显式 `documents export --force` 才允许覆盖。
+SQLite 是初始化后项目的任务与文档权威来源；默认 Markdown 是 Git 忽略的本地兼容视图。Agent 的默认维护链路是 `document show → CAS document update`：先读取正文、revision 和 contentHash，再通过 `--body-stdin`、`--body` 或 `--body-file` 三种互斥来源之一提交完整新正文。`document update` 成功后自动刷新当前任务的 Markdown 投影，因此日常 Agent 工作不需要先创建或编辑临时 Markdown。
 
-Agent 或用户编辑 Markdown 兼容视图后，先运行 `documents import` 预览；只有磁盘文件基于上次导出且数据库没有同时变化时，`documents import --apply` 才会创建新的 SQLite revision。双边变化或缺少导出基线会保持冲突，不自动猜测覆盖方向。
+每次更新在 SQLite mutation 前都会检查当前任务投影：如果文件在最近导出后被人工修改，命令返回稳定冲突、数据库 revision 保持不变；如果 SQLite 已提交但极端文件系统错误导致投影刷新失败，JSON 会明确区分数据库和投影状态，并提示从 SQLite 修复投影，不能重放旧 CAS。
+
+`documents import` 继续保留，但只用于用户显式人工编辑 Markdown 和旧项目兼容。人工编辑后先运行 `documents import` 预览；只有磁盘文件基于上次导出且数据库没有同时变化时，`documents import --apply` 才会创建新的 SQLite revision。双边变化或缺少导出基线会保持冲突，不自动猜测覆盖方向。需要 Git 交接或审计时执行 `documents export --tracked` 生成 `code-helper-docs/` 单向副本；该副本不能直接用 `documents import` 回写。默认导出不会覆盖手工修改，只有人工确认后才能显式使用 `documents export --force`。
 
 旧项目升级时先运行 `documents migrate` 只读预览；确认没有 mixed 生命周期或正文冲突后，再运行 `documents migrate --apply`。已完成任务使用 `archive` 更新数据库状态并同步 `archive/` 兼容视图；未建立数据库的旧项目仍保留原有目录扫描行为。
 
@@ -219,13 +237,15 @@ npx @skrupellose/code-helper finish 订单管理升级 --check-only
 
 当前规范由用户和 agent 在提交前执行，项目尚未内置 commitlint 或 `commit-msg` hook 自动强制格式。
 
-## 8 个内置 Skills
+## 10 个内置 Skills
 
 初始化并注册 Skills 后，用户优先用自然语言描述目标即可：
 
 - “把需求拆成可执行计划”对应 `code-helper-plan-workbench`。
+- “这个想法还比较模糊，先澄清目标、用户场景和验收条件”对应 `code-helper-requirement-clarification`。
 - “补一份人工验收清单”对应 `code-helper-manual-test-workbench`。
 - “先只读 review 最近改动”对应 `code-helper-review-fix`。
+- “检查需求、计划、状态和验证证据有没有追踪缺口”对应 `code-helper-semantic-analysis`。
 - “完成前检查是否还有遗漏”对应 `code-helper-completion-review`。
 - “这个直接执行任务已经完成，但值得留一份复盘记录”对应 `code-helper-completion-record`。
 - “这个功能完成后先问我是否归档”对应 `code-helper-document-archive`。
@@ -244,11 +264,16 @@ npx @skrupellose/code-helper skills register codex
 npx @skrupellose/code-helper skills register claudecode
 npx @skrupellose/code-helper skills register githubcopilot
 npx @skrupellose/code-helper skills register grok
+npx @skrupellose/code-helper skills profiles
+npx @skrupellose/code-helper skills profile delivery
+npx @skrupellose/code-helper skills modules core,quality,collaboration
 npx @skrupellose/code-helper hooks install codex
 npx @skrupellose/code-helper hooks install claudecode
 ```
 
 `skills register` 会把 code-helper 的项目级 skills 注册到对应 agent 工具目录：Codex 使用 `.agents/skills`，Claude Code 使用 `.claude/skills`，GitHub Copilot 使用 `.github/skills`，Grok Build 使用原生 `.grok/skills`。`grok-build` 也可作为 `grok` 的 CLI 别名。
+
+Skills 默认使用兼容历史行为的 `full` profile，注册全部 10 个内置 Skills。也可以选择 `delivery`（核心交付、质量和协作）、`essential`（核心交付和协作），或用 `skills modules` 显式组合 `core`、`quality`、`collaboration`、`memory`。选择只更新配置；随后执行 `skills register <target>` 才会让受控注册收敛到期望集合。`doctor` 和 `audit` 同样按当前期望集合判断完整性。
 
 不带 target 时，会按当前项目已有资产和受控注册状态推断目标。`AGENTS.md` 同时可被 Codex 与 Grok Build 读取：已有 Grok-only 受控注册时会延续 Grok 且不误增 Codex；仅出现 `.grok/` 资产时会启用 Grok，但若同时有无明确归属的 `AGENTS.md`，仍会保守推断 Codex。传 `all` 时强制注册全部四类目标。Grok Build 兼容读取 Claude Code 资产，但 code-helper 仍以用户显式选择的原生目标和目录为准，不假设同名 Skill 的发现优先级。
 

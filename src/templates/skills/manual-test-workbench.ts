@@ -10,7 +10,7 @@ export const manualTestWorkbenchSkillTemplate: SkillTemplate = {
   fileName: "manual-test-workbench.SKILL.md",
   content: `---
 name: code-helper-manual-test-workbench
-description: 当用户要求生成手工测试文档、验收清单、页面或可视化验收、真实浏览器链路验证、人工业务验收、回归测试步骤或测试补充说明时必须使用。该 skill 要读取需求、plan-doc、status-doc、result-doc 和相关页面或代码上下文，输出或更新 .code-helper/local/docs/result-doc/<中文功能名>/手工测试.md；CLI manual-test 只生成模板，完整测试步骤必须由该 skill 结合上下文补全。
+description: 当用户要求生成手工测试文档、验收清单、页面或可视化验收、真实浏览器链路验证、人工业务验收、回归测试步骤或测试补充说明时必须使用。该 skill 要从 SQLite 读取 plan、status、result、manual_test 权威正文和相关页面或代码上下文，并通过 CAS 更新手工测试正文；CLI manual-test 只生成模板，完整测试步骤必须由该 skill 结合上下文补全。
 ---
 
 # Code Helper 手工测试生成
@@ -33,10 +33,10 @@ description: 当用户要求生成手工测试文档、验收清单、页面或�
 执行前必须读取并综合以下内容：
 
 1. 用户本轮需求、验收口径和补充约束。
-2. \`.code-helper/local/docs/plan-doc/<中文功能名>.md\`，确认计划中的验收标准、依赖关系和回归范围。
-3. \`.code-helper/local/docs/status-doc/<中文功能名>-状态.md\`，确认当前执行节点、已完成范围、阻塞点和下一步。
-4. \`.code-helper/local/docs/result-doc/<中文功能名>/实施记录.md\`，确认实际改动、验证结论、风险和未完成项。
-5. 已存在的 \`.code-helper/local/docs/result-doc/<中文功能名>/手工测试.md\`，保留有效内容并补全缺口。
+2. SQLite 已初始化时，使用 \`document show <任务> plan --json\` 读取计划中的验收标准、依赖关系和回归范围。
+3. 使用 \`document show <任务> status --json\` 读取当前执行节点、已完成范围、阻塞点和下一步。
+4. 使用 \`document show <任务> result --json\` 读取实际改动、验证结论、风险和未完成项。
+5. 运行 manual-test CLI 创建模板后，必须立即使用 \`document show <任务> manual_test --json\` 读取模板正文与 revision；已有 manual_test 时同样从 SQLite 读取并保留有效内容。
 6. 与测试对象相关的页面、组件、路由、命令、接口、配置、数据结构或业务规则代码。
 7. 测试策略规则，尤其是页面、可视化和真实浏览器链路由用户手工执行，工具只执行纯逻辑测试。
 
@@ -46,7 +46,7 @@ description: 当用户要求生成手工测试文档、验收清单、页面或�
 
 ## 最终产物
 
-输出或更新：
+SQLite 权威输出为任务的 \`manual_test\` 文档；成功 CAS 更新后自动刷新兼容投影：
 
 \`.code-helper/local/docs/result-doc/<中文功能名>/手工测试.md\`
 
@@ -54,7 +54,7 @@ description: 当用户要求生成手工测试文档、验收清单、页面或�
 
 ## CLI 边界
 
-\`npx @skrupellose/code-helper manual-test <中文功能名>\` 只负责生成结构化模板，不代表已经完成完整测试分析。
+\`npx @skrupellose/code-helper manual-test <中文功能名>\` 只负责生成结构化模板并写入 SQLite，同时生成兼容投影，不代表已经完成完整测试分析。命令结束后必须执行 \`document show <任务> manual_test --json\`，补全正文后通过 \`document update <任务> manual_test --body-stdin --expected-revision <N> --summary <中文摘要> --json\` 写回；不得默认直接编辑 Markdown 投影。
 
 完整测试步骤、测试数据、预期结果、回归范围和阻塞判断，必须由本 skill 读取需求、计划、状态、实施记录和相关代码后补全。不要把 CLI 生成的空模板当作最终交付。
 
@@ -179,19 +179,19 @@ description: 当用户要求生成手工测试文档、验收清单、页面或�
 
 ## 更新方式
 
-如果 \`手工测试.md\` 已存在：
+如果 SQLite 中 \`manual_test\` 文档已存在：
 
 1. 保留仍然有效的测试环境、数据和历史结论。
-2. 根据最新 plan-doc、status-doc、result-doc 和代码上下文更新步骤。
+2. 根据最新 plan、status、result 权威正文和代码上下文更新步骤。
 3. 标记过期场景，说明删除或替换原因。
 4. 补充新增影响面的回归范围。
 5. 更新阻塞记录和验收结论。
 
-如果 \`手工测试.md\` 不存在：
+如果 SQLite 中 \`manual_test\` 文档不存在：
 
 1. 先确认中文功能名和目标目录。
-2. 创建 \`.code-helper/local/docs/result-doc/<中文功能名>/手工测试.md\`。
-3. 写入完整结构，不只写空标题。
+2. 运行 \`manual-test <中文功能名>\` 创建模板，再用 \`document show\` 读取新 revision。
+3. 在内存中生成完整结构，通过带 revision 的 \`document update --body-stdin\` 写入；Markdown 路径仅作为自动投影。
 
 ## 完成标准
 
@@ -202,5 +202,6 @@ description: 当用户要求生成手工测试文档、验收清单、页面或�
 - 每个核心场景都有可执行步骤和可判定预期结果。
 - 明确区分工具可执行的纯逻辑测试和用户必须手工执行的页面、可视化、真实浏览器链路。
 - 阻塞项、缺失数据和未覆盖风险被单独记录。
+- SQLite 已初始化时通过 \`document show → document update --body-stdin --expected-revision\` 完成读取与写入，Markdown 仅为自动投影。
 - 文档路径为 \`.code-helper/local/docs/result-doc/<中文功能名>/手工测试.md\`。`
 };

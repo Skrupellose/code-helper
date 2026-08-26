@@ -1,5 +1,5 @@
 import { FEATURE_KEYS } from "../constants.js";
-import { getConfigRelativePath } from "../config.js";
+import { getConfigRelativePath, normalizeSkillSelection } from "../config.js";
 import { projectPath, readTextIfExists } from "../fs-utils.js";
 import type { CheckIssue, CodeHelperConfig } from "../types.js";
 
@@ -55,7 +55,7 @@ export async function checkRawConfig(projectRoot: string): Promise<CheckIssue[]>
     ];
   }
 
-  return FEATURE_KEYS
+  const issues = FEATURE_KEYS
     .filter((feature) => !(feature in features))
     .map((feature) => ({
       level: "error" as const,
@@ -64,6 +64,23 @@ export async function checkRawConfig(projectRoot: string): Promise<CheckIssue[]>
       path: configPath,
       suggestion: "运行 `npx @skrupellose/code-helper init`，让工具补齐默认配置。"
     }));
+
+  const rawSkills = (parsed as { skills?: unknown }).skills;
+  if (rawSkills !== undefined) {
+    try {
+      normalizeSkillSelection(rawSkills, true);
+    } catch (error) {
+      issues.push({
+        level: "error",
+        code: "invalid-skill-selection",
+        message: `Skills 选择配置无效：${error instanceof Error ? error.message : String(error)}`,
+        path: configPath,
+        suggestion: "选择内置 profile，或从 core、quality、collaboration、memory 中显式选择至少一个模块。"
+      });
+    }
+  }
+
+  return issues;
 }
 
 /**

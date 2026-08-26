@@ -44,8 +44,13 @@ test("openDocumentDatabase 初始化最小 schema、迁移记录和安全 PRAGMA
       }
       assert.equal(
         connection.database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count,
-        1
+        CURRENT_SCHEMA_VERSION
       );
+      const validationColumns = new Set(
+        connection.database.prepare("PRAGMA table_info(validations)").all().map((row) => row.name)
+      );
+      assert.equal(validationColumns.has("acceptance_criterion_ids_json"), true);
+      assert.equal(validationColumns.has("plan_item_ids_json"), true);
     } finally {
       connection.close();
     }

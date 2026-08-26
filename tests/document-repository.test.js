@@ -166,7 +166,9 @@ test("验证、Git 关联和导出记录 API 写入最小 schema", async () => {
       workingDirectory: "/workspace",
       exitCode: 0,
       summary: "通过",
-      baseline: "abc123"
+      baseline: "abc123",
+      acceptanceCriterionIds: ["AC-001", "AC-002", "AC-001"],
+      planItemIds: ["PLAN-001"]
     });
     const gitLinkId = repository.linkGitCommit({
       taskId: task.id,
@@ -180,6 +182,8 @@ test("验证、Git 关联和导出记录 API 写入最小 schema", async () => {
     });
 
     assert.equal(validationId > 0, true);
+    assert.deepEqual(repository.listValidations(task.id)[0].acceptanceCriterionIds, ["AC-001", "AC-002"]);
+    assert.deepEqual(repository.listValidations(task.id)[0].planItemIds, ["PLAN-001"]);
     assert.equal(gitLinkId > 0, true);
     assert.equal(connection.database.prepare("SELECT COUNT(*) AS count FROM validations").get().count, 1);
     assert.equal(connection.database.prepare("SELECT COUNT(*) AS count FROM git_links").get().count, 1);

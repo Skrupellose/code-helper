@@ -31,6 +31,11 @@ import {
 import { printFeatureHelp } from "../help.js";
 import { askQuestionOrDefault } from "../menu-input.js";
 import { printOperations, printSkillRegistrationStatus } from "../output.js";
+import {
+  createErrorResponse,
+  createSuccessResponse,
+  printAgentResponse
+} from "../agent-response.js";
 
 type InitTargetPromptResolution =
   | { action: "select"; targets: SkillRegistrationTarget[] }
@@ -112,8 +117,19 @@ export async function runVersion(projectRoot: string, args: string[] = []): Prom
   if (action === "set") {
     return runVersionSet(projectRoot, rest);
   }
+  if (action === "--json") {
+    if (rest.length > 0) {
+      printVersionInvalidArguments("version.info", "用法：code-helper version [status|check|set <stable|canary>] [--json]");
+      return 1;
+    }
+    return runVersionInfoJson();
+  }
   if (action !== undefined) {
-    console.error("version 参数无效。用法：code-helper version [status|check|set <stable|canary>] [--json]");
+    if (args.includes("--json")) {
+      printVersionInvalidArguments("version.unknown", "version 参数无效。用法：code-helper version [status|check|set <stable|canary>] [--json]");
+    } else {
+      console.error("version 参数无效。用法：code-helper version [status|check|set <stable|canary>] [--json]");
+    }
     return 1;
   }
 
@@ -138,11 +154,22 @@ export async function runVersion(projectRoot: string, args: string[] = []): Prom
   return 0;
 }
 
+/** 裸 version 的 JSON 模式只输出本地确定信息，避免可选 registry 查询破坏稳定协议。 */
+async function runVersionInfoJson(): Promise<number> {
+  const currentVersion = await getCurrentPackageVersion();
+  printAgentResponse(createSuccessResponse("version.info", { currentVersion }, ["check_release_status"]));
+  return 0;
+}
+
 /** 本地只读展示当前版本、安装通道和项目选择，不访问 npm registry。 */
 async function runVersionStatus(projectRoot: string, args: string[]): Promise<number> {
-  const json = args.length === 1 && args[0] === "--json";
+  const json = args.includes("--json");
   if (args.length > (json ? 1 : 0)) {
-    console.error("用法：code-helper version status [--json]");
+    if (args.includes("--json")) {
+      printVersionInvalidArguments("version.status", "用法：code-helper version status [--json]");
+    } else {
+      console.error("用法：code-helper version status [--json]");
+    }
     return 1;
   }
 
@@ -155,7 +182,7 @@ async function runVersionStatus(projectRoot: string, args: string[]): Promise<nu
   };
 
   if (json) {
-    console.log(JSON.stringify(status, null, 2));
+    printAgentResponse(createSuccessResponse("version.status", { version: status }, ["check_release_status"]));
   } else {
     console.log(`当前版本：${status.currentVersion}（${status.currentChannel === "stable" ? "正式版" : "测试版"}）`);
     console.log(`项目通道：${status.selectedChannel}（${status.policyExplicit ? "显式选择" : "默认选择"}）`);
@@ -167,9 +194,13 @@ async function runVersionStatus(projectRoot: string, args: string[]): Promise<nu
 
 /** 显式联网检查 Stable/Canary 发布快照和当前所选通道的候选动作。 */
 async function runVersionCheck(projectRoot: string, args: string[]): Promise<number> {
-  const json = args.length === 1 && args[0] === "--json";
+  const json = args.includes("--json");
   if (args.length > (json ? 1 : 0)) {
-    console.error("用法：code-helper version check [--json]");
+    if (args.includes("--json")) {
+      printVersionInvalidArguments("version.check", "用法：code-helper version check [--json]");
+    } else {
+      console.error("用法：code-helper version check [--json]");
+    }
     return 1;
   }
 
@@ -186,7 +217,7 @@ async function runVersionCheck(projectRoot: string, args: string[]): Promise<num
   };
 
   if (json) {
-    console.log(JSON.stringify(output, null, 2));
+    printAgentResponse(createSuccessResponse("version.check", { release: output }, [candidate.status]));
   } else {
     console.log(`当前版本：${currentVersion}`);
     console.log(`正式版：${output.distTags.stable}（latest ${output.distTags.latest}）`);
@@ -198,16 +229,40 @@ async function runVersionCheck(projectRoot: string, args: string[]): Promise<num
 
 /** 保存一次性通道偏好；该命令不联网、不升级当前安装，也不执行发布。 */
 async function runVersionSet(projectRoot: string, args: string[]): Promise<number> {
-  const [channel, ...rest] = args;
-  if ((channel !== "stable" && channel !== "canary") || rest.length > 0) {
-    console.error("用法：code-helper version set <stable|canary>");
+  const json = args.includes("--json");
+  const [channel, ...rest] = args.filter((arg) => arg !== "--json");
+  if ((channel !== "stable" && channel !== "canary")
+    || rest.length > 0
+    || args.filter((arg) => arg === "--json").length > 1) {
+    if (json) {
+      printVersionInvalidArguments("version.set", "用法：code-helper version set <stable|canary> [--json]");
+    } else {
+      console.error("用法：code-helper version set <stable|canary>");
+    }
     return 1;
   }
 
   const stored = await writeStoredVersionPolicy(projectRoot, channel);
+  if (json) {
+    printAgentResponse(createSuccessResponse("version.set", {
+      selectedChannel: channel,
+      policyPath: stored.relativePath
+    }, ["check_release_status"]));
+    return 0;
+  }
   console.log(`已选择 ${channel} 通道：${stored.relativePath}`);
   console.log("该操作只保存通道偏好，不会安装版本或修改 npm dist-tag。");
   return 0;
+}
+
+/** 版本子命令的 JSON 参数错误保持与其它 Agent 命令相同的诊断结构。 */
+function printVersionInvalidArguments(action: string, message: string): void {
+  printAgentResponse(createErrorResponse(action, "invalid_arguments", {
+    severity: "error",
+    code: "invalid_arguments",
+    message,
+    fix: "按命令用法移除未知或重复参数后重试"
+  }));
 }
 
 /**

@@ -10,7 +10,7 @@ export const completionRecordSkillTemplate: SkillTemplate = {
   fileName: "completion-record.SKILL.md",
   content: `---
 name: code-helper-completion-record
-description: 当任务通过直接执行完成，但收尾时发现改动跨模块、验证链较长、形成重要决策或具有后续复盘价值时必须使用。该 skill 只生成 .code-helper/local/docs/completion-record/<中文功能名>-完成记录.md，不创建 plan-doc、status-doc、result-doc 或手工测试文档；任务仍有后续阶段、阻塞、跨会话恢复需求或已经属于 active/mixed 计划任务时不得使用。
+description: 当任务通过直接执行完成，但收尾时发现改动跨模块、验证链较长、形成重要决策或具有后续复盘价值时必须使用。该 skill 只创建 SQLite completion_record 权威正文并自动投影到 .code-helper/local/docs/completion-record/<中文功能名>-完成记录.md，不创建 plan-doc、status-doc、result-doc 或手工测试文档；任务仍有后续阶段、阻塞、跨会话恢复需求或已经属于 active/mixed 计划任务时不得使用。
 ---
 
 # Code Helper 完成记录
@@ -40,11 +40,13 @@ description: 当任务通过直接执行完成，但收尾时发现改动跨模�
 1. 先检查任务列表，确认本轮功能没有对应的 active 或 mixed 任务。
 2. 重新核对用户目标、实际 diff、验证结果、未验证范围和剩余风险，确认任务真的已经完成。
 3. 如果任务仍需继续，停止生成完成记录，改用 \`code-helper-plan-workbench\` 建立计划跟踪。
-4. 使用 \`npx @skrupellose/code-helper record <中文功能名>\` 创建基础模板；CLI 只生成模板，不代表记录已经完成。
-5. 由掌握本轮上下文的主会话补全完成记录，不为倒写文档派子代理重新加载上下文。
+4. 使用 \`npx @skrupellose/code-helper record <中文功能名>\` 在 SQLite 创建基础模板；CLI 只生成模板，不代表记录已经完成。
+5. 模板创建后立即执行 \`document show <任务> completion_record --json\` 读取权威正文与 revision；由掌握本轮上下文的主会话在内存中补全，再通过 \`document update <任务> completion_record --body-stdin --expected-revision <N> --summary <中文摘要> --json\` 写回，不为倒写文档派子代理重新加载上下文。
 6. 完成后核对文档元数据、必要章节和实际证据，不虚构事前计划、状态队列或未执行验证。
 
-## 输出位置
+## 权威正文与兼容投影
+
+完成记录正文和 revision 以 SQLite 的 \`completion_record\` 文档为准。下列路径由 CLI 在 CAS 更新成功后自动刷新，仅用于本地阅读、旧工具兼容或用户显式人工编辑：
 
 \`.code-helper/local/docs/completion-record/<中文功能名>-完成记录.md\`
 
@@ -86,5 +88,6 @@ lifecycle: recorded
 - 不倒写虚构的需求计划、阶段状态或执行时间线。
 - 不把测试未执行写成测试通过。
 - 不覆盖已有完成记录；同名后续工作使用可区分的中文功能名。
+- SQLite 已初始化时不得直接编辑 Markdown 投影作为默认写入路径；\`documents import\` 仅用于用户显式人工编辑和旧项目兼容。
 - 不自动更新长期记忆、提交、推送或发布。`
 };

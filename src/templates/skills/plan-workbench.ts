@@ -36,7 +36,13 @@ description: 当用户提供完整需求文档，并要求拆分开发计划、�
 
 SQLite 是任务状态与正文的权威来源；默认 Markdown 视图只供本地阅读和旧工具兼容，并由 Git 忽略。需要 Git 审阅、交接或审计时，显式执行 \`documents export --tracked\`；不得绕过数据库静默改变生命周期。所有最终产物必须使用中文命名，并在文档内使用中文总结当前目标、完成情况、验证结论、风险和下一步。
 
-Agent 补全文档后必须先运行 \`npx @skrupellose/code-helper documents import\` 预览，再使用 \`documents import --apply\` 写入 SQLite revision；如果报告数据库与 Markdown 双边变化，停止自动同步并人工合并。
+Agent 默认按以下 SQLite-first 链路维护每份过程文档：
+
+1. 运行 \`npx @skrupellose/code-helper document show <任务> <类型> --json\` 读取当前正文、revision 和 contentHash。
+2. 在内存中生成完整新正文，不创建临时 Markdown；通过 stdin 调用 \`document update <任务> <类型> --body-stdin --expected-revision <N> --summary <中文摘要> --json\`。
+3. 检查单一 JSON envelope：成功时 SQLite revision 已提交并自动刷新当前任务 Markdown 投影；CAS 冲突时重新读取后重做，投影人工修改冲突时先保留并合并人工改动。
+
+\`documents import\` 只用于用户明确要求直接编辑 Markdown 或旧项目兼容。此时必须先预览，再使用 \`documents import --apply\`；如果报告数据库与 Markdown 双边变化，停止自动同步并人工合并，禁止使用 force 静默覆盖。
 
 最终计划必须同时具备：
 

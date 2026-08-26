@@ -80,7 +80,7 @@ export function printCompletionReview(review: CompletionReview, checkOnly: boole
  */
 export function printSkillRegistrationStatus(statuses: SkillRegistrationStatus[]): void {
   for (const status of statuses) {
-    console.log(`${status.target}/${status.name}: ${status.registered ? "已注册" : "未注册"}`);
+    console.log(`${status.target}/${status.name}: ${status.registered ? "已注册" : "未注册"}${status.expected ? "（期望）" : "（未选择）"}`);
     console.log(`  path: ${status.path}`);
   }
 }
