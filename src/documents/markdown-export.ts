@@ -67,10 +67,16 @@ export async function exportMarkdownDocuments(
   return { exported, conflicts };
 }
 
+/** 计算稳定导出路径所需的最小任务字段；结构化声明避免调用方为凑类型伪造完整 TaskRecord。 */
+export type StableExportTaskView = Pick<TaskRecord, "name" | "status">;
+
+/** 计算稳定导出路径所需的最小文档字段。 */
+export type StableExportDocumentView = Pick<DocumentRecord, "type">;
+
 /** 根据任务生命周期和文档类型计算稳定的兼容导出路径。 */
 export function getStableMarkdownExportPath(
-  task: TaskRecord,
-  document: DocumentRecord,
+  task: StableExportTaskView,
+  document: StableExportDocumentView,
   options: Pick<MarkdownExportOptions, "tracked"> = {}
 ): string {
   const name = validatePathSegment(task.name, "任务名称");

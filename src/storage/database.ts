@@ -101,11 +101,59 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   ) && "then" in value && typeof value.then === "function";
 }
 
+let sqliteExperimentalWarningSuppressed = false;
+
+/**
+ * 定向抑制 node:sqlite 首次加载时打印的 ExperimentalWarning。
+ * node:sqlite 在 Node 22 仍是实验特性，require 时会向 stderr 打印一条与业务无关的警告，
+ * 污染 tasks / check / documents / plan / finish 等涉库命令的输出。
+ * 这里只吞掉 name=ExperimentalWarning 且 message 含 SQLite 的那一条，其余 warning 按 Node 默认格式回写 stderr。
+ *
+ * 进程级副作用：Node 自带的默认打印也是一个 warning 监听器，无法只对 SQLite 这一条单独静音，
+ * 因此必须先移除进程内全部 warning 监听器再挂载过滤器。这意味着：
+ * - 若本模块被嵌入宿主程序（而非作为 CLI 独立进程），宿主在打开数据库前注册的 warning
+ *   监听器会被一并移除，需要保留监听的宿主应在打开数据库后重新挂载；
+ * - 替代处理器尽量贴近 Node 默认输出（code 前缀、detail、--trace-warnings 堆栈），
+ *   但与默认实现并非逐字节一致。
+ */
+function suppressSqliteExperimentalWarningOnce(): void {
+  if (sqliteExperimentalWarningSuppressed) {
+    return;
+  }
+  sqliteExperimentalWarningSuppressed = true;
+
+  process.removeAllListeners("warning");
+  process.on("warning", (warning) => {
+    const err = warning as Error & { code?: string; detail?: string };
+
+    if (
+      err.name === "ExperimentalWarning" &&
+      typeof err.message === "string" &&
+      err.message.includes("SQLite")
+    ) {
+      return;
+    }
+
+    // 按 Node 默认格式回写其余 warning；detail（如弃用警告的来源说明）
+    // 与 --trace-warnings 堆栈一并保留，避免过滤后丢失诊断信息。
+    const code = err.code ? `[${err.code}] ` : "";
+    const name = err.name ? `${err.name}: ` : "";
+    const detail = typeof err.detail === "string" && err.detail !== "" ? `\n${err.detail}` : "";
+    // --trace-warnings 对应的运行时开关不在 Node 类型声明中，这里做局部收窄读取。
+    const traceEnabled = (process as NodeJS.Process & { traceProcessWarnings?: boolean }).traceProcessWarnings === true;
+    const trace = traceEnabled && typeof err.stack === "string" ? `\n${err.stack}` : "";
+    process.stderr.write(`(node:${process.pid}) ${code}${name}${err.message}${detail}${trace}\n`);
+  });
+}
+
 /**
  * 安全打开并初始化 SQLite 文档数据库。
  *
  * 默认数据库位于项目根 `.code-helper/code-helper.sqlite`；自定义路径仍必须落在项目根内，
  * 且从项目根到数据库文件的任何已存在路径段都不得是符号链接。
+ *
+ * 注意：首次调用会安装进程级 warning 过滤器以静音 node:sqlite 的实验特性警告，
+ * 该操作会移除进程内已有的全部 warning 监听器，详见 suppressSqliteExperimentalWarningOnce 的说明。
  */
 export function openDocumentDatabase(options: OpenDatabaseOptions = {}): DocumentDatabase {
   const busyTimeoutMs = options.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS;
@@ -115,6 +163,8 @@ export function openDocumentDatabase(options: OpenDatabaseOptions = {}): Documen
 
   const databasePath = resolveSafeDatabasePath(options.projectRoot ?? process.cwd(), options.databasePath);
   // 延迟加载 node:sqlite，避免 help/version 等不使用文档库的命令在进程启动时产生实验特性警告。
+  // 首次 require 仍会向 stderr 打印 ExperimentalWarning，先安装定向过滤，避免污染涉库命令输出。
+  suppressSqliteExperimentalWarningOnce();
   const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
   const database = new DatabaseSync(databasePath);
 

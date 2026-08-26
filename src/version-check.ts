@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { pathExists, projectPath, readTextIfExists, writeText } from "./fs-utils.js";
+import { compareSemVer } from "./versioning/semver.js";
 
 const PACKAGE_NAME = "@skrupellose/code-helper";
 const VERSION_CACHE_RELATIVE_PATH = ".code-helper/checks/version-cache.json";
@@ -113,22 +114,11 @@ export function shouldSkipVersionCheck(command: string | undefined, env: NodeJS.
 
 /**
  * 比较两个 npm 版本号。
- * 只需要处理当前项目使用的数字版本；预发布后缀按数字部分之后的字符串轻量比较。
+ * 复用 versioning 的严格 SemVer 比较，避免菜单升级提示与 `version check` 对同一对版本给出相反结论；
+ * 调用方均已在 try/catch 中处理，非法版本号会向上抛错并静默跳过提示。
  */
 export function compareVersions(left: string, right: string): number {
-  const leftParts = parseVersion(left);
-  const rightParts = parseVersion(right);
-  const length = Math.max(leftParts.length, rightParts.length);
-
-  for (let index = 0; index < length; index += 1) {
-    const diff = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
-
-    if (diff !== 0) {
-      return diff;
-    }
-  }
-
-  return 0;
+  return compareSemVer(left, right);
 }
 
 /**
@@ -325,11 +315,4 @@ export function isLocalDevelopmentRepository(cwd: string = process.cwd()): boole
   } catch {
     return false;
   }
-}
-
-/**
- * 提取版本号中的数字段。
- */
-function parseVersion(version: string): number[] {
-  return version.split(/[.-]/u).map((part) => Number.parseInt(part, 10)).map((part) => Number.isNaN(part) ? 0 : part);
 }

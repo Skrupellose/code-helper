@@ -209,7 +209,7 @@ test("record CLI 创建记录、finish 清晰输出 recorded 且不进入主菜�
     assert.equal(await runCli(["finish", "CLI收尾", "--check-only"], root), 0);
 
     const output = logs.join("\n");
-    assert.match(output, /recorded/);
+    assert.match(output, /直接执行任务终态/);
     assert.match(output, /无需补齐 plan\/status\/result/);
     assert.match(output, /无需归档/);
     assert.equal(await findCompletionRecord(root, "CLI收尾") !== undefined, true);

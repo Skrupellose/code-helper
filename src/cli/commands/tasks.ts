@@ -47,11 +47,52 @@ export async function runPlan(projectRoot: string, args: string[], options: RunP
 }
 
 /**
+ * 任务类命令的 flag 解析结果。
+ * exitCode 为 undefined 表示没有 flag（或 flag 均合法且无需短路），命令继续正常流程。
+ */
+interface TaskCommandFlagResolution {
+  exitCode?: number;
+  positionalArgs: string[];
+}
+
+/**
+ * 统一处理「单个位置参数 + 少量 flag」类任务命令的参数分离与校验。
+ * -h/--help 打印用法并返回 exitCode 0；未知 flag 报错并返回 exitCode 1；
+ * 位置参数（不以 - 开头的参数）原样保留给命令主体使用。
+ */
+function resolveTaskCommandFlags(args: string[], usage: string, summary: string): TaskCommandFlagResolution {
+  const flags = args.filter((arg) => arg.startsWith("-"));
+  const positionalArgs = args.filter((arg) => !arg.startsWith("-"));
+
+  if (flags.length === 0) {
+    return { positionalArgs };
+  }
+
+  if (flags.includes("-h") || flags.includes("--help")) {
+    console.log(`用法：${usage}`);
+    console.log(summary);
+    return { exitCode: 0, positionalArgs };
+  }
+
+  console.error(`未知参数：${flags.join(" ")}。用法：${usage}`);
+  return { exitCode: 1, positionalArgs };
+}
+
+/**
  * 创建直接执行任务的终态完成记录。
  * 参数：record <中文功能名>。
  */
 export async function runRecord(projectRoot: string, args: string[]): Promise<number> {
-  const [featureName] = args;
+  const { exitCode, positionalArgs } = resolveTaskCommandFlags(
+    args,
+    "code-helper record <中文功能名>",
+    "为已完成的直接执行任务创建终态完成记录。"
+  );
+  if (exitCode !== undefined) {
+    return exitCode;
+  }
+
+  const [featureName] = positionalArgs;
 
   if (!featureName) {
     console.error("缺少中文功能名称。用法：code-helper record <中文功能名>");
@@ -113,7 +154,16 @@ async function resolveFeatureNameForTaskCommand(
  * 参数：manual-test <功能名称> [标题]。
  */
 export async function runManualTest(projectRoot: string, args: string[]): Promise<number> {
-  const [rawFeatureName, title] = args;
+  const { exitCode, positionalArgs } = resolveTaskCommandFlags(
+    args,
+    "code-helper manual-test <功能名称> [标题]",
+    "生成手工测试模板。"
+  );
+  if (exitCode !== undefined) {
+    return exitCode;
+  }
+
+  const [rawFeatureName, title] = positionalArgs;
   const resolved = await resolveFeatureNameForTaskCommand(
     projectRoot,
     rawFeatureName,

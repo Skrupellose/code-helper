@@ -13,6 +13,7 @@ import {
   formatVersionUpgradeTextItemLines,
   getMainMenuItemName,
   MAIN_MENU_GROUPS,
+  MAIN_MENU_MORE_COMMANDS_HINT,
   normalizeMainMenuAnswer,
   QUICK_UPGRADE_MENU_VALUE
 } from "./cli/main-menu.js";
@@ -78,6 +79,7 @@ export {
   formatVersionUpgradeTextItemLines,
   getMainMenuGroups,
   MAIN_MENU_GROUPS,
+  MAIN_MENU_MORE_COMMANDS_HINT,
   MAIN_MENU_NAME_COLUMN_WIDTH,
   QUICK_UPGRADE_MENU_VALUE,
   type MainMenuGroup,
@@ -553,7 +555,7 @@ async function runApplyMenu(
     case "2": {
       const selection = await selectSkillTargetsForMenu(projectRoot, rl, "选择要取消 Skills 的 agent 工具");
       if (selection === undefined) {
-        console.log("已取消项目级 Skills 取消操作，返回功能管理。");
+        console.log("已取消「取消项目级 Skills」操作，返回功能管理。");
         return false;
       }
 
@@ -577,7 +579,7 @@ async function runApplyMenu(
     case "4": {
       const selection = await selectAgentHookTargetsForMenu(projectRoot, rl, "选择要取消 Agent hooks 的 agent 工具");
       if (selection === undefined) {
-        console.log("已取消 Agent hooks 取消操作，返回功能管理。");
+        console.log("已取消「取消 Agent hooks」操作，返回功能管理。");
         return false;
       }
 
@@ -657,6 +659,8 @@ async function askTextMenu(rl: ReturnType<typeof createInterface>, versionUpdate
       }
     }
   }
+
+  console.log(`\n  ${MAIN_MENU_MORE_COMMANDS_HINT}`);
 
   console.log("\n  0. 退出");
   console.log("      关闭 code-helper 菜单");

@@ -53,7 +53,7 @@ export function printHelp(): void {
   code-helper version check [--json]  联网检查 Stable/Canary 发布状态
   code-helper version set <stable|canary> 显式选择后续跟随通道
   code-helper npm-scripts install     写入常用 npm scripts（不覆盖同名脚本）
-  code-helper sync-local              刷新本仓库本地模板并注册全部项目级 skills
+  code-helper sync-local              (开发) 刷新本仓库本地模板并注册全部项目级 skills（普通用户不需要）
   code-helper check [--write-report]  检查协作文档结构
   code-helper features list           查看高级功能配置
   code-helper features enable <key>   启用高级功能配置
@@ -62,7 +62,7 @@ export function printHelp(): void {
   code-helper record <中文功能名>       创建直接执行任务的终态完成记录
   code-helper manual-test <中文功能名> [标题] 生成手工测试模板
   code-helper archive <中文功能名> [--resolve-mixed] 将功能文档移动到 archive 并识别为已结束
-  code-helper finish [中文功能名]        检查当前功能是否完成并提示后续动作
+  code-helper finish [中文功能名] [--check-only] [--json] 检查当前功能是否完成并提示后续动作
   code-helper tasks [--json]           查看 active / archived / mixed 任务
   code-helper documents migrate [--apply] [--json] 预览或显式导入旧版 Markdown 文档
   code-helper documents import [--apply] [--json]  预览或显式导入 Markdown 单边修改

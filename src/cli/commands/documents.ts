@@ -3,7 +3,8 @@ import {
   DocumentRepository,
   exportMarkdownDocuments,
   importMarkdownDocuments,
-  previewLegacyDocumentMigration
+  previewLegacyDocumentMigration,
+  previewMigrationBaselineConflicts
 } from "../../documents/index.js";
 import { openDocumentDatabase } from "../../storage/index.js";
 
@@ -76,6 +77,21 @@ async function runMigration(projectRoot: string, args: string[]): Promise<number
   if (!apply) {
     printMigrationPreview(preview, json);
     return preview.conflicts.length === 0 ? 0 : 2;
+  }
+
+  // 写入前预检默认兼容视图目标路径：若已存在正文不同的文件，先中止并返回 2，
+  // 避免 applyLegacyDocumentMigration 写入数据库后才在建立基线时发现冲突的部分成功语义。
+  const baselinePreviewConflicts = await previewMigrationBaselineConflicts(projectRoot, preview);
+  if (baselinePreviewConflicts.length > 0) {
+    if (json) {
+      console.log(JSON.stringify({ conflicts: baselinePreviewConflicts }, null, 2));
+    } else {
+      console.log("检测到目标兼容视图冲突，已中止迁移（未写入数据库）：");
+      for (const conflict of baselinePreviewConflicts) {
+        console.error(`- ${conflict.relativePath}：${conflict.message}`);
+      }
+    }
+    return 2;
   }
 
   const connection = openDocumentDatabase({ projectRoot });

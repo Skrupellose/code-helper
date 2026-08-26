@@ -2,7 +2,8 @@ export { DocumentRepositoryError, MarkdownExportConflictError } from "./errors.j
 export {
   applyLegacyDocumentMigration,
   createLegacyTaskSlug,
-  previewLegacyDocumentMigration
+  previewLegacyDocumentMigration,
+  previewMigrationBaselineConflicts
 } from "./legacy-migration.js";
 export {
   exportMarkdownDocuments,
@@ -44,7 +45,8 @@ export type {
   LegacyMigrationPreview,
   LegacyMigrationStatus,
   LegacyMigrationTaskPreview,
-  LegacyNamingStyle
+  LegacyNamingStyle,
+  MigrationBaselineConflict
 } from "./legacy-migration.js";
 export type {
   MarkdownExportItem,

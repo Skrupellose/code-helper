@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   CURRENT_SCHEMA_VERSION,
@@ -156,4 +158,39 @@ test("openDocumentDatabase 拒绝项目外路径和中间符号链接", async ()
       await rm(externalRoot, { recursive: true, force: true });
     }
   });
+});
+
+test("openDocumentDatabase 抑制 node:sqlite 的 ExperimentalWarning", (t) => {
+  // node:sqlite 在 Node 22 仍是实验特性，require 时会异步向 stderr 打印 ExperimentalWarning。
+  // 本测试文件顶部已 import node:sqlite，无法在同一进程内复现「首次 require」，因此用子进程隔离验证。
+  const databaseModulePath = fileURLToPath(new URL("../dist/storage/database.js", import.meta.url));
+
+  // 负向对照：直接 require node:sqlite 必须仍能看到该警告，证明本测试确实能捕获它（而非空跑通过）。
+  const bareRequire = spawnSync(
+    process.execPath,
+    ["-e", "require('node:sqlite'); setTimeout(() => {}, 50);"],
+    { encoding: "utf8" }
+  );
+  assert.equal(bareRequire.status, 0);
+  // 版本守卫：未来 Node 将 node:sqlite 转正后，裸 require 不再打印该警告，
+  // 抑制逻辑失去存在意义，此时跳过而不是把「警告消失」误报成回归。
+  if (!/ExperimentalWarning/u.test(bareRequire.stderr)) {
+    t.skip(`当前 Node ${process.version} 的 node:sqlite 已不再是实验特性，无需验证警告抑制`);
+    return;
+  }
+
+  // 正向断言：走 openDocumentDatabase 的进程不应把该警告泄漏到 stderr。
+  const script = [
+    `const { openDocumentDatabase } = require(${JSON.stringify(databaseModulePath)});`,
+    'const { mkdtempSync } = require("node:fs");',
+    'const { tmpdir } = require("node:os");',
+    'const { join } = require("node:path");',
+    'const root = mkdtempSync(join(tmpdir(), "code-helper-warn-suppress-"));',
+    "const db = openDocumentDatabase({ projectRoot: root });",
+    "db.close();",
+    "setTimeout(() => {}, 50);"
+  ].join("\n");
+  const result = spawnSync(process.execPath, ["-e", script], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stderr, /ExperimentalWarning/u, result.stderr);
 });

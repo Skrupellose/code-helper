@@ -9,7 +9,8 @@ const distRoot = process.env.CODE_HELPER_TEST_DIST_ROOT ?? join(import.meta.dirn
 const {
   DocumentRepository,
   applyLegacyDocumentMigration,
-  previewLegacyDocumentMigration
+  previewLegacyDocumentMigration,
+  previewMigrationBaselineConflicts
 } = await import(pathToFileURL(join(distRoot, "documents/index.js")).href);
 const { openDocumentDatabase } = await import(pathToFileURL(join(distRoot, "storage/index.js")).href);
 
@@ -147,5 +148,45 @@ test("批量导入中途失败会补偿删除半成品任务", async () => {
     const result = await applyLegacyDocumentMigration(projectRoot, repository);
     assert.ok(result.conflicts.some((conflict) => conflict.code === "database_conflict"));
     assert.equal(repository.listTasks().length, 0);
+  });
+});
+
+test("migrate 写入前预检识别目标兼容视图冲突", async () => {
+  await withMigrationProject(async ({ projectRoot }) => {
+    await mkdir(join(projectRoot, "code-helper-docs/plan-doc"), { recursive: true });
+    await writeFile(join(projectRoot, "code-helper-docs/plan-doc/预检功能.md"), "# 旧正文\n", "utf8");
+    const preview = await previewLegacyDocumentMigration(projectRoot);
+
+    // 目标稳定视图不存在时不应有冲突，迁移可正常进行。
+    const clean = await previewMigrationBaselineConflicts(projectRoot, preview);
+    assert.equal(clean.length, 0);
+
+    // 目标稳定视图已存在且正文不同时，应提前识别冲突，避免 --apply 先写库再冲突。
+    await mkdir(join(projectRoot, ".code-helper/local/docs/plan-doc"), { recursive: true });
+    await writeFile(join(projectRoot, ".code-helper/local/docs/plan-doc/预检功能.md"), "# 不同正文\n", "utf8");
+    const dirty = await previewMigrationBaselineConflicts(projectRoot, preview);
+    assert.equal(dirty.length, 1);
+    assert.equal(dirty[0].relativePath, ".code-helper/local/docs/plan-doc/预检功能.md");
+  });
+});
+
+test("migrate 写入前预检拦截目标路径上的符号链接", async () => {
+  await withMigrationProject(async ({ projectRoot }) => {
+    await mkdir(join(projectRoot, "code-helper-docs/plan-doc"), { recursive: true });
+    await writeFile(join(projectRoot, "code-helper-docs/plan-doc/链接功能.md"), "# 计划\n", "utf8");
+    const preview = await previewLegacyDocumentMigration(projectRoot);
+
+    // 符号链接即使内容与待迁移正文完全相同，也必须在预检阶段按冲突拦截：
+    // 真实导出会拒绝符号链接路径，若放行，--apply 只能在写库后以未捕获异常失败。
+    const linkTarget = join(projectRoot, ".code-helper/local/outside/链接功能.md");
+    await mkdir(join(projectRoot, ".code-helper/local/outside"), { recursive: true });
+    await writeFile(linkTarget, "# 计划\n", "utf8");
+    await mkdir(join(projectRoot, ".code-helper/local/docs/plan-doc"), { recursive: true });
+    await symlink(linkTarget, join(projectRoot, ".code-helper/local/docs/plan-doc/链接功能.md"));
+
+    const conflicts = await previewMigrationBaselineConflicts(projectRoot, preview);
+    assert.equal(conflicts.length, 1);
+    assert.equal(conflicts[0].relativePath, ".code-helper/local/docs/plan-doc/链接功能.md");
+    assert.match(conflicts[0].message, /符号链接/u);
   });
 });

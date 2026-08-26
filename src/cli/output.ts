@@ -19,7 +19,7 @@ export function printOperations(operations: OperationResult[]): void {
  */
 export function printCompletionReview(review: CompletionReview, checkOnly: boolean): void {
   console.log(`功能完成检查：${review.featureName}`);
-  console.log(`任务状态：${review.taskStatus}`);
+  console.log(`任务状态：${formatTaskStatus(review.taskStatus)}`);
   console.log(`检查结论：${formatCompletionReviewStatus(review.reviewStatus)}`);
   console.log(`运行模式：${checkOnly ? "仅检查，不修改文件" : "检查并给出下一步建议"}`);
 
@@ -122,6 +122,24 @@ export function printSkillAuditRecommendations(recommendations: SkillAuditRecomm
     console.log(`[${recommendation.priority}] ${recommendation.code}: ${recommendation.message}`);
     console.log(`  建议：${recommendation.suggestion}`);
   }
+}
+
+/**
+ * 把任务生命周期状态转成中文文案。
+ */
+function formatTaskStatus(status: CompletionReview["taskStatus"]): string {
+  // Record 穷尽所有 TaskStatus，新增状态时 TypeScript 会在此处报错。
+  const labels: Record<CompletionReview["taskStatus"], string> = {
+    active: "进行中",
+    paused: "已暂停",
+    completed: "已完成",
+    cancelled: "已取消",
+    archived: "已归档",
+    mixed: "活动与归档并存（需整理）",
+    recorded: "完成记录（直接执行终态）"
+  };
+
+  return labels[status];
 }
 
 /**

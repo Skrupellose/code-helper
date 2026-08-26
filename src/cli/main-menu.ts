@@ -65,6 +65,9 @@ export const MAIN_MENU_NAME_COLUMN_WIDTH = 24;
 /** 快捷升级在菜单分发中使用的内部稳定值，不作为普通数字菜单项展示。 */
 export const QUICK_UPGRADE_MENU_VALUE = "__quick_upgrade_code_helper__";
 
+/** 主菜单底部提示：任务推进/维护命令已移出菜单，可通过 --help 发现。 */
+export const MAIN_MENU_MORE_COMMANDS_HINT = "更多命令（plan / finish / archive / tasks / check 等）见 code-helper --help";
+
 /**
  * 导出主菜单分组，供测试锁定菜单分组、命名和说明。
  * 返回深拷贝，避免测试或外部调用意外修改 CLI 的菜单定义。
@@ -162,6 +165,11 @@ export function buildMainMenuSelectOptions(versionUpdate?: VersionUpdateState): 
   }
 
   options.push({ value: "__spacer_exit", label: "", disabled: true });
+  options.push({
+    value: "__hint_more_commands",
+    label: `      ${MAIN_MENU_MORE_COMMANDS_HINT}`,
+    disabled: true
+  });
   options.push({ value: "0", label: "   0. 退出                 关闭 code-helper 菜单" });
   return options;
 }

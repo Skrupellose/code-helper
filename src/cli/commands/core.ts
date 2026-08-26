@@ -159,6 +159,7 @@ async function runVersionStatus(projectRoot: string, args: string[]): Promise<nu
   } else {
     console.log(`当前版本：${status.currentVersion}（${status.currentChannel === "stable" ? "正式版" : "测试版"}）`);
     console.log(`项目通道：${status.selectedChannel}（${status.policyExplicit ? "显式选择" : "默认选择"}）`);
+    console.log("说明：项目通道只是偏好记录，不影响当前已安装的版本。");
     console.log(`策略文件：${status.policyPath}`);
   }
   return 0;
@@ -269,6 +270,12 @@ export async function runCheck(projectRoot: string, args: string[] = []): Promis
   const issues = await runChecks(projectRoot, { writeReport: args.includes("--write-report") });
 
   if (issues.length === 0) {
+    // checks 功能关闭时 runChecks 返回空数组，需与「检查通过」区分，避免把禁用误报为通过。
+    const config = await loadConfig(projectRoot);
+    if (!config.features.checks.enabled) {
+      console.log("code-helper check：checks 功能已禁用，本次未执行结构检查。");
+      return 0;
+    }
     console.log("code-helper check 通过：未发现协作文档结构问题。");
     return 0;
   }
@@ -363,7 +370,7 @@ async function resolveInitSkillRegistrationTargets(projectRoot: string): Promise
       const result = await promptMultiSelect(
         input,
         output,
-        "选择 init 要应用的 agent 工具（空格选择，至少选择一个，Esc 取消）",
+        "选择 init 要应用的 agent 工具（选择 Codex/Claude Code 会同时安装 Agent Stop hook；空格选择，至少选择一个，Esc 取消）",
         buildInitTargetMultiSelectOptions()
       );
       const resolution = resolveInitMultiSelectTargetPromptResult(result);
@@ -405,6 +412,7 @@ async function askTextInitTargetMenu(
 ): Promise<SkillRegistrationTarget[]> {
   while (true) {
     console.log("\n选择 init 要应用的 agent 工具");
+    console.log("说明：选择 Codex 或 Claude Code 会同时安装对应 Agent Stop hook。");
     console.log("1. Codex");
     console.log("2. Claude Code");
     console.log("3. GitHub Copilot");

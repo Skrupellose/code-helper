@@ -178,6 +178,7 @@ export async function runSkills(projectRoot: string, args: string[]): Promise<nu
     const operations = await unregisterProjectSkillsForTargets(projectRoot, targets);
     if (rawTarget === undefined || rawTarget === "all") {
       await setFeatureEnabled(projectRoot, "skillRegistration", false);
+      console.log("已关闭后续初始化时的项目级 Skills 自动注册。");
     }
     const statuses = (await Promise.all(targets.map((target) => listProjectSkillRegistrations(projectRoot, target)))).flat();
     printOperations(operations);
@@ -235,6 +236,7 @@ export async function runHooks(projectRoot: string, args: string[]): Promise<num
         operations.push(await uninstallHook(projectRoot, target));
         if (target === "git" || rawTarget === undefined || rawTarget === "all" || rawTarget === "agent" || rawTarget === "agents" || rawTarget === "agentHooks") {
           await setFeatureEnabled(projectRoot, target === "git" ? "gitHooks" : "agentHooks", false);
+          console.log(target === "git" ? "已关闭 Git hook 应用能力。" : "已关闭 Agent hooks 应用能力。");
         }
       }
     }

@@ -2,7 +2,8 @@ import { lstat, readdir, readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { DocumentRepositoryError } from "./errors.js";
-import type { DocumentRepository } from "./repository.js";
+import { getStableMarkdownExportPath } from "./markdown-export.js";
+import { calculateDocumentHash, type DocumentRepository } from "./repository.js";
 import type { DocumentType, TaskStatus, TrackingMode } from "./types.js";
 
 export type LegacyDocumentLocation = "active" | "archived" | "recorded";
@@ -193,6 +194,106 @@ export async function applyLegacyDocumentMigration(
   }
 
   return { imported, skipped, conflicts };
+}
+
+export interface MigrationBaselineConflict {
+  relativePath: string;
+  message: string;
+}
+
+/**
+ * 写入前预检：为每个将被导入的任务计算默认兼容视图目标路径，检查是否已存在正文不同的文件。
+ * 用于避免 migrate --apply 先把文档写入数据库、随后建立兼容视图基线时才发现冲突的部分成功语义。
+ */
+export async function previewMigrationBaselineConflicts(
+  projectRoot: string,
+  preview: LegacyMigrationPreview
+): Promise<MigrationBaselineConflict[]> {
+  const safeRoot = await resolveProjectRoot(projectRoot);
+  const conflicts: MigrationBaselineConflict[] = [];
+
+  for (const task of preview.tasks) {
+    if (task.conflicts.length > 0) {
+      continue;
+    }
+
+    const status = toRepositoryStatus(task.status, task.trackingMode);
+    for (const document of task.documents) {
+      let relativePath: string;
+      try {
+        relativePath = getStableMarkdownExportPath(
+          { name: task.name, status },
+          { type: document.type }
+        );
+      } catch (error) {
+        conflicts.push({
+          relativePath: task.name,
+          message: error instanceof Error ? error.message : String(error)
+        });
+        continue;
+      }
+
+      // 与真实导出的安全约束保持一致：已存在的路径段不得包含符号链接，
+      // 最终目标必须是普通文件，否则 --apply 写库后建立基线时会直接抛异常。
+      const unsafeSegment = await findUnsafeExistingSegment(safeRoot, relativePath);
+      if (unsafeSegment !== undefined) {
+        conflicts.push({
+          relativePath,
+          message: `目标兼容视图路径包含不受支持的符号链接或非普通文件：${unsafeSegment}`
+        });
+        continue;
+      }
+
+      const absolutePath = resolveInsideProject(safeRoot, relativePath);
+      let existingBody: string | undefined;
+      try {
+        existingBody = await readFile(absolutePath, "utf8");
+      } catch (error) {
+        if (isMissingPath(error)) {
+          continue;
+        }
+        throw error;
+      }
+
+      if (calculateDocumentHash(existingBody) !== calculateDocumentHash(document.body)) {
+        conflicts.push({
+          relativePath,
+          message: "目标兼容视图已存在且正文与待迁移内容不同"
+        });
+      }
+    }
+  }
+
+  return conflicts;
+}
+
+/**
+ * 逐段检查已存在的目标路径：任何一段是符号链接即返回该段的根相对路径；
+ * 最后一段还必须是普通文件（目录会让导出的读取/写入直接抛错）。
+ * 某一段不存在时，其后所有段都不存在，导出时会新建目录和文件，视为安全。
+ */
+async function findUnsafeExistingSegment(
+  projectRoot: string,
+  relativePath: string
+): Promise<string | undefined> {
+  const segments = relativePath.split(sep).filter(Boolean);
+  let cursor = projectRoot;
+  for (const [index, segment] of segments.entries()) {
+    cursor = join(cursor, segment);
+    let stats;
+    try {
+      stats = await lstat(cursor);
+    } catch (error) {
+      if (isMissingPath(error)) {
+        return undefined;
+      }
+      throw error;
+    }
+    if (stats.isSymbolicLink() || (index === segments.length - 1 && !stats.isFile())) {
+      return relative(projectRoot, cursor);
+    }
+  }
+  return undefined;
 }
 
 function buildTaskPreview(key: string, entries: DiscoveredCandidate[]): LegacyMigrationTaskPreview {

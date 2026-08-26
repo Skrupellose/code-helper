@@ -796,6 +796,45 @@ test("manual-test 缺少功能名时会提示当前可选任务", async () => {
   }
 });
 
+test("record 拒绝未知 flag 且 --help 不写盘", async () => {
+  // 未知 flag 必须报错而非被当功能名；--help 应显示用法且不创建完成记录。
+  const root = await mkdtemp(join(tmpdir(), "code-helper-cli-record-flags-"));
+  const logs = [];
+  const errors = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+
+  try {
+    console.log = (...args) => {
+      logs.push(args.join(" "));
+    };
+    console.error = (...args) => {
+      errors.push(args.join(" "));
+    };
+
+    await initializeProject({ projectRoot: root });
+
+    const helpExit = await runCli(["record", "--help"], root);
+    assert.equal(helpExit, 0);
+    assert.match(logs.join("\n"), /code-helper record <中文功能名>/);
+
+    logs.length = 0;
+    const bogusExit = await runCli(["record", "--bogus"], root);
+    assert.equal(bogusExit, 1);
+    assert.match(errors.join("\n"), /未知参数：--bogus/);
+
+    // --help / 未知 flag 都不应生成完成记录。
+    await assert.rejects(
+      () => stat(join(root, ".code-helper/local/docs/completion-record/直接执行任务-help-完成记录.md")),
+      /ENOENT/u
+    );
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("archive 缺少功能名时会提示当前可选任务", async () => {
   // 归档命令同样应利用现有任务文档提示候选项，而不是要求用户凭记忆输入。
   const root = await mkdtemp(join(tmpdir(), "code-helper-cli-archive-select-"));
