@@ -33,7 +33,8 @@ export function resolveRuntimeBootstrap(
     compareVersion(parsed, [22, 13, 0]) < 0
     && !currentExecArgv.includes("--experimental-sqlite")
   ) {
-    return { kind: "reexec", execArgv: ["--experimental-sqlite"] };
+    // 必须保留调用方已有的 Node 参数；只追加缺失的 SQLite 参数即可天然避免重复。
+    return { kind: "reexec", execArgv: [...currentExecArgv, "--experimental-sqlite"] };
   }
 
   return { kind: "ready" };

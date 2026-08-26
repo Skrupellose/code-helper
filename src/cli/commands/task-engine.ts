@@ -93,6 +93,10 @@ function runTaskCommand(projectRoot: string, args: string[]): AgentResponse {
     if (!isTaskStatus(nextStatus)) {
       throw invalidInput(`任务状态必须是：${TASK_STATUSES.join("、")}`);
     }
+    if (nextStatus === "archived") {
+      // 归档不仅是状态迁移，还负责冲突检查和 Markdown 投影迁移；通用状态命令不得绕过领域流程。
+      throw invalidInput("task transition 不支持直接进入 archived；请使用 code-helper archive <中文功能名> 完成正式归档");
+    }
     const task = withDocumentRepository(projectRoot, (repository) => {
       const current = requireTask(repository, taskReference);
       return repository.transitionTaskStatus(current.id, nextStatus, options["--current-node"]);

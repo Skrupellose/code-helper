@@ -13,7 +13,7 @@ import {
   type AgentResponse
 } from "../agent-response.js";
 
-const EVALUATE_USAGE = "code-helper evaluate [--scenario <JSON 文件>] [--samples <N>] [--baseline <报告文件>] [--token-observations <N,unknown,...>] [--agent-runner <可执行文件>] [--json]";
+const EVALUATE_USAGE = "code-helper evaluate [--scenario <JSON 文件>] [--samples <N>] [--baseline <报告文件>] [--token-observations <N,unknown,...>] [--agent-runner <可执行文件>] [--process-timeout-ms <N>] [--process-output-limit-bytes <N>] [--json]";
 
 /**
  * 工作流评测 CLI。
@@ -36,6 +36,8 @@ export async function runEvaluation(args: string[], inputBasePath: string): Prom
       sampleCount: options.sampleCount,
       tokenObservations: options.tokenObservations,
       baseline,
+      processTimeoutMs: options.processTimeoutMs,
+      processOutputLimitBytes: options.processOutputLimitBytes,
       agentRunner: options.agentRunnerPath === undefined
         ? undefined
         : { executablePath: resolve(inputBasePath, options.agentRunnerPath) }
@@ -68,6 +70,8 @@ interface EvaluationCliOptions {
   sampleCount: number;
   tokenObservations?: Array<number | undefined>;
   agentRunnerPath?: string;
+  processTimeoutMs?: number;
+  processOutputLimitBytes?: number;
 }
 
 /** 严格解析评测参数，拒绝重复、未知或缺值选项。 */
@@ -76,7 +80,15 @@ function parseEvaluationOptions(args: string[]): EvaluationCliOptions {
     throw new Error(`用法：${EVALUATE_USAGE}`);
   }
   const values: Record<string, string> = {};
-  const allowed = new Set(["--scenario", "--samples", "--baseline", "--token-observations", "--agent-runner"]);
+  const allowed = new Set([
+    "--scenario",
+    "--samples",
+    "--baseline",
+    "--token-observations",
+    "--agent-runner",
+    "--process-timeout-ms",
+    "--process-output-limit-bytes"
+  ]);
   for (let index = 0; index < args.length; index += 2) {
     const key = args[index];
     const value = args[index + 1];
@@ -96,13 +108,33 @@ function parseEvaluationOptions(args: string[]): EvaluationCliOptions {
   const tokenObservations = values["--token-observations"] === undefined
     ? undefined
     : parseTokenObservations(values["--token-observations"], sampleCount);
+  const processTimeoutMs = parseOptionalPositiveInteger(values["--process-timeout-ms"], "--process-timeout-ms");
+  const processOutputLimitBytes = parseOptionalPositiveInteger(
+    values["--process-output-limit-bytes"],
+    "--process-output-limit-bytes"
+  );
   return {
     scenarioPath: values["--scenario"],
     baselinePath: values["--baseline"],
     agentRunnerPath: values["--agent-runner"],
     sampleCount,
-    tokenObservations
+    tokenObservations,
+    processTimeoutMs,
+    processOutputLimitBytes
   };
+}
+
+/** 解析可选正整数资源边界，拒绝零、负数、小数和非数字。 */
+function parseOptionalPositiveInteger(value: string | undefined, option: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  const maximum = option === "--process-timeout-ms" ? 2_147_483_647 : Number.MAX_SAFE_INTEGER;
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > maximum) {
+    throw new Error(`${option} 必须是正整数`);
+  }
+  return parsed;
 }
 
 /** 解析外部 Token 观测；unknown 保留为未观测，禁止用输出字节推算。 */

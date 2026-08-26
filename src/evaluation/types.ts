@@ -60,8 +60,16 @@ export interface EvaluationStepResult {
   stdoutBytes: number;
   stderrBytes: number;
   assertions: EvaluationAssertionResult[];
+  /** 子进程被资源边界终止时提供稳定失败码。 */
+  failureCode?: EvaluationProcessFailureCode;
   passed: boolean;
 }
+
+/** 评测子进程资源边界对应的稳定失败码。 */
+export type EvaluationProcessFailureCode =
+  | "process_timeout"
+  | "stdout_limit_exceeded"
+  | "stderr_limit_exceeded";
 
 /** Token 只能来自外部观测，不能根据输出字节数推算。 */
 export type EvaluationTokenMetric =
@@ -76,6 +84,8 @@ export interface EvaluationAgentResult {
   stderrBytes: number;
   turns?: number;
   tokens: EvaluationTokenMetric;
+  /** Agent runner 被资源边界终止时提供稳定失败码。 */
+  failureCode?: EvaluationProcessFailureCode;
   passed: boolean;
 }
 
@@ -165,5 +175,9 @@ export interface RunEvaluationOptions {
     executablePath: string;
     args?: string[];
   };
+  /** 每个 Agent runner 或 CLI 子进程的超时毫秒数，必须是正整数。 */
+  processTimeoutMs?: number;
+  /** stdout 和 stderr 各自允许收集的最大字节数，必须是正整数。 */
+  processOutputLimitBytes?: number;
   keepTemporaryProjects?: boolean;
 }

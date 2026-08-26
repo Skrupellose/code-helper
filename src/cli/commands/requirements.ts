@@ -40,7 +40,9 @@ export async function runRequirementTools(
   projectRoot = inputBasePath
 ): Promise<number> {
   const json = args.includes("--json");
-  const action = command === "analyze" ? "requirement.analyze" : `requirement.${args[0] ?? "unknown"}`;
+  // answer 是 clarify 的兼容别名；成功与失败都必须使用同一个 canonical action。
+  const requirementAction = args[0] === "answer" ? "clarify" : (args[0] ?? "unknown");
+  const action = command === "analyze" ? "requirement.analyze" : `requirement.${requirementAction}`;
 
   try {
     const response = command === "analyze"

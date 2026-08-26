@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -12,12 +12,28 @@ import type {
   EvaluationAssertionResult,
   EvaluationDiagnostic,
   EvaluationMetricSummary,
+  EvaluationProcessFailureCode,
   EvaluationReport,
   EvaluationSampleResult,
   EvaluationScenario,
   EvaluationStepResult,
   RunEvaluationOptions
 } from "./types.js";
+
+/** 单个评测子进程的默认最长运行时间，避免异常 runner 永久占用评测。 */
+export const DEFAULT_EVALUATION_PROCESS_TIMEOUT_MS = 30_000;
+
+/** stdout 与 stderr 各自的默认收集上限，避免持续输出耗尽内存。 */
+export const DEFAULT_EVALUATION_PROCESS_OUTPUT_LIMIT_BYTES = 1_048_576;
+
+/** Node.js 定时器支持的最大毫秒值；更大值会被运行时缩短为 1ms。 */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/** 进程树终止后等待 stdio 关闭的宽限期；超时后主动释放本进程持有的管道。 */
+const PROCESS_TREE_CLOSE_GRACE_MS = 1_000;
+
+/** Windows taskkill 自身的执行上限，避免终止辅助进程反过来挂住评测。 */
+const WINDOWS_TASKKILL_TIMEOUT_MS = 2_000;
 
 /** 内置最小场景覆盖初始化、任务读取和文档完整性检查三次真实 CLI 往返。 */
 export const BUILTIN_MINIMAL_SCENARIO: EvaluationScenario = {
@@ -97,6 +113,15 @@ export async function runWorkflowEvaluation(
   if (!Number.isInteger(sampleCount) || sampleCount < 3) {
     throw new Error("评测样本数必须是大于或等于 3 的整数");
   }
+  const processTimeoutMs = requirePositiveInteger(
+    options.processTimeoutMs ?? DEFAULT_EVALUATION_PROCESS_TIMEOUT_MS,
+    "processTimeoutMs",
+    MAX_TIMER_DELAY_MS
+  );
+  const processOutputLimitBytes = requirePositiveInteger(
+    options.processOutputLimitBytes ?? DEFAULT_EVALUATION_PROCESS_OUTPUT_LIMIT_BYTES,
+    "processOutputLimitBytes"
+  );
   if (options.baseline !== undefined && options.baseline.scenario.id !== scenario.id) {
     throw new Error(`基线场景 ${options.baseline.scenario.id} 与当前场景 ${scenario.id} 不一致`);
   }
@@ -107,12 +132,14 @@ export async function runWorkflowEvaluation(
     samples.push(await runEvaluationSample(scenario, index + 1, executablePath, {
       observedTokens: options.tokenObservations?.[index],
       agentRunner: options.agentRunner,
+      processTimeoutMs,
+      processOutputLimitBytes,
       keepTemporaryProject: options.keepTemporaryProjects === true
     }));
   }
 
   const aggregate = aggregateSamples(samples);
-  const diagnostics = diagnoseReport(scenario, aggregate, options.baseline);
+  const diagnostics = diagnoseReport(scenario, samples, aggregate, options.baseline);
   if (aggregate.tokens.status !== "observed") {
     diagnostics.push({
       severity: "info",
@@ -157,6 +184,8 @@ export async function runWorkflowEvaluation(
 interface SampleOptions {
   observedTokens?: number;
   agentRunner?: RunEvaluationOptions["agentRunner"];
+  processTimeoutMs: number;
+  processOutputLimitBytes: number;
   keepTemporaryProject: boolean;
 }
 
@@ -175,10 +204,10 @@ async function runEvaluationSample(
     const startedAt = performance.now();
     const agent = scenario.agent === undefined
       ? undefined
-      : await runAgentEvaluation(projectRoot, scenario.agent.prompt, options.agentRunner);
+      : await runAgentEvaluation(projectRoot, scenario.agent.prompt, options.agentRunner, options);
     const steps: EvaluationStepResult[] = [];
     for (const step of scenario.steps) {
-      steps.push(await runEvaluationStep(projectRoot, executablePath, step));
+      steps.push(await runEvaluationStep(projectRoot, executablePath, step, options));
     }
     const durationMs = roundMetric(performance.now() - startedAt);
     const final = await measureDirectory(projectRoot);
@@ -219,13 +248,14 @@ async function runEvaluationSample(
 async function runAgentEvaluation(
   projectRoot: string,
   prompt: string,
-  runner: RunEvaluationOptions["agentRunner"]
+  runner: RunEvaluationOptions["agentRunner"],
+  limits: Pick<SampleOptions, "processTimeoutMs" | "processOutputLimitBytes">
 ): Promise<EvaluationAgentResult> {
   if (runner === undefined) {
     throw new Error("评测场景声明了 agent.prompt，必须显式提供 Agent runner");
   }
   const startedAt = performance.now();
-  const execution = await spawnAgentRunner(runner, projectRoot, prompt);
+  const execution = await spawnAgentRunner(runner, projectRoot, prompt, limits);
   const durationMs = roundMetric(performance.now() - startedAt);
   let payload: { passed?: unknown; tokens?: unknown; turns?: unknown } = {};
   try {
@@ -242,11 +272,12 @@ async function runAgentEvaluation(
   return {
     exitCode: execution.exitCode,
     durationMs,
-    stdoutBytes: Buffer.byteLength(execution.stdout, "utf8"),
-    stderrBytes: Buffer.byteLength(execution.stderr, "utf8"),
+    stdoutBytes: execution.stdoutBytes,
+    stderrBytes: execution.stderrBytes,
     turns,
     tokens,
-    passed: execution.exitCode === 0 && payload.passed === true
+    failureCode: execution.failureCode,
+    passed: execution.failureCode === undefined && execution.exitCode === 0 && payload.passed === true
   };
 }
 
@@ -254,24 +285,14 @@ async function runAgentEvaluation(
 function spawnAgentRunner(
   runner: NonNullable<RunEvaluationOptions["agentRunner"]>,
   cwd: string,
-  prompt: string
+  prompt: string,
+  limits: Pick<SampleOptions, "processTimeoutMs" | "processOutputLimitBytes">
 ): Promise<SpawnResult> {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(runner.executablePath, runner.args ?? [], {
-      cwd,
-      shell: false,
-      env: { ...process.env, CODE_HELPER_EVALUATION: "1" },
-      stdio: ["pipe", "pipe", "pipe"]
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => { stdout += chunk; });
-    child.stderr.on("data", (chunk: string) => { stderr += chunk; });
-    child.once("error", reject);
-    child.once("close", (code) => resolvePromise({ exitCode: code ?? 1, stdout, stderr }));
-    child.stdin.end(prompt, "utf8");
+  return spawnBoundedProcess(runner.executablePath, runner.args ?? [], {
+    cwd,
+    env: { ...process.env, CODE_HELPER_EVALUATION: "1" },
+    stdin: prompt,
+    ...limits
   });
 }
 
@@ -288,10 +309,11 @@ async function writeFixtureFiles(projectRoot: string, scenario: EvaluationScenar
 async function runEvaluationStep(
   projectRoot: string,
   executablePath: string,
-  step: EvaluationScenario["steps"][number]
+  step: EvaluationScenario["steps"][number],
+  limits: Pick<SampleOptions, "processTimeoutMs" | "processOutputLimitBytes">
 ): Promise<EvaluationStepResult> {
   const startedAt = performance.now();
-  const execution = await spawnCodeHelper(executablePath, step.args, projectRoot);
+  const execution = await spawnCodeHelper(executablePath, step.args, projectRoot, limits);
   const durationMs = roundMetric(performance.now() - startedAt);
   const assertions: EvaluationAssertionResult[] = [];
   for (const assertion of step.assertions) {
@@ -301,10 +323,11 @@ async function runEvaluationStep(
     id: step.id,
     exitCode: execution.exitCode,
     durationMs,
-    stdoutBytes: Buffer.byteLength(execution.stdout, "utf8"),
-    stderrBytes: Buffer.byteLength(execution.stderr, "utf8"),
+    stdoutBytes: execution.stdoutBytes,
+    stderrBytes: execution.stderrBytes,
     assertions,
-    passed: assertions.every((assertion) => assertion.passed)
+    failureCode: execution.failureCode,
+    passed: execution.failureCode === undefined && assertions.every((assertion) => assertion.passed)
   };
 }
 
@@ -312,29 +335,210 @@ interface SpawnResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  stdoutBytes: number;
+  stderrBytes: number;
+  failureCode?: EvaluationProcessFailureCode;
+}
+
+interface SpawnLimits {
+  processTimeoutMs: number;
+  processOutputLimitBytes: number;
+}
+
+interface SpawnBoundedOptions extends SpawnLimits {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  stdin?: string;
 }
 
 /** 使用参数数组直接启动 Node，不启用 shell，确保 Windows/macOS 行为一致。 */
-function spawnCodeHelper(executablePath: string, args: string[], cwd: string): Promise<SpawnResult> {
+function spawnCodeHelper(
+  executablePath: string,
+  args: string[],
+  cwd: string,
+  limits: SpawnLimits
+): Promise<SpawnResult> {
+  return spawnBoundedProcess(process.execPath, [executablePath, ...args], {
+    cwd,
+    env: {
+      ...process.env,
+      CI: "1",
+      CODE_HELPER_SKIP_VERSION_CHECK: "1"
+    },
+    ...limits
+  });
+}
+
+/**
+ * 在统一超时和输出边界内运行子进程。
+ * 触发任一边界后终止完整进程树，并以 settled 防止 error/close/timer 多次结算。
+ */
+function spawnBoundedProcess(command: string, args: string[], options: SpawnBoundedOptions): Promise<SpawnResult> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(process.execPath, [executablePath, ...args], {
-      cwd,
+    const child = spawn(command, args, {
+      cwd: options.cwd,
       shell: false,
-      env: {
-        ...process.env,
-        CI: "1",
-        CODE_HELPER_SKIP_VERSION_CHECK: "1"
-      },
-      stdio: ["ignore", "pipe", "pipe"]
+      env: options.env,
+      // POSIX 独立进程组允许按负 PID 一次终止 runner 及其后代；Windows 改由 taskkill /T 管理进程树。
+      detached: process.platform !== "win32",
+      stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"]
     });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => { stdout += chunk; });
-    child.stderr.on("data", (chunk: string) => { stderr += chunk; });
-    child.once("error", reject);
-    child.once("close", (code) => resolvePromise({ exitCode: code ?? 1, stdout, stderr }));
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let failureCode: EvaluationProcessFailureCode | undefined;
+    let settled = false;
+    let closeGraceTimer: NodeJS.Timeout | undefined;
+
+    /** 所有成功、失败和宽限期路径都通过这里完成，确保 Promise 只结算一次。 */
+    const settleResult = (exitCode: number): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      if (closeGraceTimer !== undefined) {
+        clearTimeout(closeGraceTimer);
+      }
+      resolvePromise({
+        exitCode,
+        stdout: Buffer.concat(stdoutChunks).toString("utf8"),
+        stderr: Buffer.concat(stderrChunks).toString("utf8"),
+        stdoutBytes,
+        stderrBytes,
+        failureCode
+      });
+    };
+
+    /** 首次触发资源边界时终止整棵进程树，并设置有界的 stdio 关闭宽限期。 */
+    const requestTermination = (code: EvaluationProcessFailureCode): void => {
+      if (failureCode !== undefined) {
+        return;
+      }
+      failureCode = code;
+      void terminateProcessTree(child).finally(() => {
+        if (settled) {
+          return;
+        }
+        closeGraceTimer = setTimeout(() => {
+          // 极端情况下后代仍持有继承管道；销毁本端句柄并完成失败结果，避免评测永久悬挂。
+          child.stdin?.destroy();
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          child.unref();
+          settleResult(1);
+        }, PROCESS_TREE_CLOSE_GRACE_MS);
+      });
+    };
+
+    /** 只记录上限内的字节；首次越界立即终止进程。 */
+    const collect = (stream: "stdout" | "stderr", chunk: Buffer): void => {
+      const currentBytes = stream === "stdout" ? stdoutBytes : stderrBytes;
+      const remaining = options.processOutputLimitBytes - currentBytes;
+      if (remaining > 0) {
+        const retained = chunk.subarray(0, remaining);
+        (stream === "stdout" ? stdoutChunks : stderrChunks).push(retained);
+        if (stream === "stdout") {
+          stdoutBytes += retained.length;
+        } else {
+          stderrBytes += retained.length;
+        }
+      }
+      if (chunk.length > remaining && failureCode === undefined) {
+        requestTermination(stream === "stdout" ? "stdout_limit_exceeded" : "stderr_limit_exceeded");
+      }
+    };
+
+    // stdout/stderr 在上方固定配置为 pipe，因此这里可以安全断言非空。
+    child.stdout!.on("data", (chunk: Buffer) => { collect("stdout", chunk); });
+    child.stderr!.on("data", (chunk: Buffer) => { collect("stderr", chunk); });
+    const timeout = setTimeout(() => {
+      if (failureCode === undefined) {
+        requestTermination("process_timeout");
+      }
+    }, options.processTimeoutMs);
+
+    child.once("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      if (closeGraceTimer !== undefined) {
+        clearTimeout(closeGraceTimer);
+      }
+      reject(error);
+    });
+    child.once("close", (code) => {
+      if (settled) {
+        return;
+      }
+      settleResult(code ?? 1);
+    });
+    if (options.stdin !== undefined && child.stdin !== null) {
+      // runner 可能在读取 prompt 前退出；吸收 EPIPE，最终结果仍由 close 统一结算。
+      child.stdin.on("error", () => undefined);
+      child.stdin.end(options.stdin, "utf8");
+    }
+  });
+}
+
+/**
+ * 跨平台终止完整进程树。
+ * POSIX 使用独立进程组；Windows 使用系统 taskkill.exe 的 /T /F，失败时至少强杀直接子进程。
+ */
+async function terminateProcessTree(child: ChildProcess): Promise<void> {
+  const pid = child.pid;
+  if (pid === undefined) {
+    return;
+  }
+
+  if (process.platform === "win32") {
+    const treeTerminated = await runWindowsTaskkill(pid);
+    if (treeTerminated) {
+      return;
+    }
+  } else {
+    try {
+      // detached 子进程的 PID 同时是进程组 ID；负 PID 会向组内所有后代发送 SIGKILL。
+      process.kill(-pid, "SIGKILL");
+      return;
+    } catch {
+      // 进程组可能恰好已退出；继续尝试直接子进程作为安全兜底。
+    }
+  }
+
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    // 直接子进程可能已经退出；外层关闭宽限期仍保证评测 Promise 有界完成。
+  }
+}
+
+/** 使用固定可执行文件和参数数组调用 Windows 进程树终止命令，始终保持 shell:false。 */
+function runWindowsTaskkill(pid: number): Promise<boolean> {
+  return new Promise((resolvePromise) => {
+    const killer = spawn("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+      shell: false,
+      stdio: "ignore",
+      windowsHide: true
+    });
+    let settled = false;
+    const finish = (succeeded: boolean): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      resolvePromise(succeeded);
+    };
+    const timeout = setTimeout(() => {
+      killer.kill("SIGKILL");
+      finish(false);
+    }, WINDOWS_TASKKILL_TIMEOUT_MS);
+    killer.once("error", () => { finish(false); });
+    killer.once("close", (code) => { finish(code === 0); });
   });
 }
 
@@ -451,10 +655,29 @@ function summarize(values: number[]): EvaluationMetricSummary {
 /** 根据验收、绝对阈值和基线回归阈值生成稳定诊断。 */
 function diagnoseReport(
   scenario: EvaluationScenario,
+  samples: EvaluationSampleResult[],
   aggregate: EvaluationAggregate,
   baseline?: EvaluationReport
 ): EvaluationDiagnostic[] {
   const diagnostics: EvaluationDiagnostic[] = [];
+  const processFailures = new Map<EvaluationProcessFailureCode, number>();
+  for (const sample of samples) {
+    const failureCodes = [sample.agent?.failureCode, ...sample.steps.map((step) => step.failureCode)];
+    for (const failureCode of failureCodes) {
+      if (failureCode !== undefined) {
+        processFailures.set(failureCode, (processFailures.get(failureCode) ?? 0) + 1);
+      }
+    }
+  }
+  for (const [code, count] of processFailures) {
+    diagnostics.push({
+      severity: "error",
+      code,
+      message: `${count} 个评测子进程触发资源边界：${describeProcessFailure(code)}`,
+      target: scenario.id,
+      fix: "检查 runner/场景是否挂起或持续输出；确需放宽时使用受控的正整数评测参数"
+    });
+  }
   if (aggregate.failedSamples > 0) {
     diagnostics.push({ severity: "error", code: "acceptance_failed", message: `${aggregate.failedSamples} 个样本未通过验收断言`, target: scenario.id });
   }
@@ -473,6 +696,14 @@ function diagnoseReport(
     appendRegressionDiagnostic(diagnostics, "disk_growth", calculateRegression(aggregate.diskGrowthBytes.mean, baseline.aggregate.diskGrowthBytes.mean), thresholds?.maxDiskGrowthRegressionPercent);
   }
   return diagnostics;
+}
+
+/** 将稳定失败码转换为不包含子进程原始输出的诊断文本。 */
+function describeProcessFailure(code: EvaluationProcessFailureCode): string {
+  if (code === "process_timeout") {
+    return "超过执行超时";
+  }
+  return code === "stdout_limit_exceeded" ? "stdout 超过字节上限" : "stderr 超过字节上限";
 }
 
 /** 仅在场景显式声明回归阈值时将基线变化作为门禁。 */
@@ -500,6 +731,14 @@ function calculateRegression(current: number, baseline: number): number | null {
 /** 指标统一保留三位小数，降低平台浮点噪音。 */
 function roundMetric(value: number): number {
   return Math.round(value * 1000) / 1000;
+}
+
+/** 公共 API 的资源边界必须是严格正整数，避免零值或无穷值关闭保护。 */
+function requirePositiveInteger(value: number, name: string, maximum = Number.MAX_SAFE_INTEGER): number {
+  if (!Number.isSafeInteger(value) || value <= 0 || value > maximum) {
+    throw new Error(`${name} 必须是 1 到 ${maximum} 之间的整数`);
+  }
+  return value;
 }
 
 /** 把场景路径限制在临时项目根目录中。 */

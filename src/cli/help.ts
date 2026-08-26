@@ -75,7 +75,7 @@ export function printHelp(): void {
                                       合并开放问题回答并生成新一轮探索或规格；answer 为等价别名
   code-helper analyze --input <JSON 文件> [--task <任务>] [--json]
                                       只读检查规格、计划、状态与验证证据；--task 从 SQLite 读取最新回执
-  code-helper evaluate [--scenario <JSON 文件>] [--samples <N>] [--baseline <报告文件>]
+  code-helper evaluate [--scenario <JSON 文件>] [--samples <N>] [--baseline <报告文件>] [--process-timeout-ms <N>] [--process-output-limit-bytes <N>]
                        [--token-observations <N,unknown,...>] [--agent-runner <可执行文件>] [--json]
                                       在临时项目重复执行声明式工作流并输出验收与效率报告；默认内置场景运行 3 次
   code-helper task status <任务> [--json]  读取 SQLite 权威任务状态

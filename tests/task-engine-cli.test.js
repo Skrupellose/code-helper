@@ -140,6 +140,23 @@ test("task status/transition/next 通过统一 envelope 结构化读写 SQLite �
   }
 });
 
+test("task transition 拒绝绕过正式归档领域流程", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-task-transition-archive-"));
+  try {
+    seedTask(root);
+    const result = await runJson(["task", "transition", "agent-contract", "archived"], root);
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.response.status, "invalid_input");
+    assert.equal(result.response.diagnostics[0].code, "invalid_input");
+    assert.match(result.response.diagnostics[0].message, /code-helper archive/u);
+
+    const status = await runJson(["task", "status", "agent-contract"], root);
+    assert.equal(status.response.data.task.status, "active");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("document show/update/history 使用 revision CAS 且冲突返回稳定诊断", async () => {
   const root = await mkdtemp(join(tmpdir(), "code-helper-document-engine-"));
   try {

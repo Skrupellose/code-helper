@@ -41,3 +41,17 @@ test("evaluate CLI 对不足三个样本返回稳定输入错误", async () => {
   assert.equal(response.status, "invalid_input");
   assert.equal(response.diagnostics[0].code, "invalid_input");
 });
+
+test("evaluate CLI 严格校验子进程资源边界参数", async () => {
+  for (const args of [
+    ["evaluate", "--process-timeout-ms", "0", "--json"],
+    ["evaluate", "--process-output-limit-bytes", "1.5", "--json"]
+  ]) {
+    const result = await runEvaluationCli(args);
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.logs.length, 1);
+    const response = JSON.parse(result.logs[0]);
+    assert.equal(response.status, "invalid_input");
+    assert.equal(response.diagnostics[0].code, "invalid_input");
+  }
+});

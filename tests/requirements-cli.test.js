@@ -88,6 +88,34 @@ test("requirement clarify 以统一 JSON 契约合并多轮回答", async () => 
   }
 });
 
+test("requirement answer 成功与失败都规范化为 clarify action", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-requirement-answer-cli-"));
+  try {
+    const invalid = await runJson(["requirement", "answer"], root);
+    assert.equal(invalid.exitCode, 1);
+    assert.equal(invalid.response.action, "requirement.clarify");
+
+    const explorationPath = join(root, "explore.json");
+    await writeFile(explorationPath, JSON.stringify({ rawRequest: "优化任务恢复" }), "utf8");
+    const explored = await runJson(["requirement", "explore", "--input", explorationPath], root);
+    const answerPath = join(root, "answer.json");
+    await writeFile(answerPath, JSON.stringify({
+      exploration: explored.response.data.exploration,
+      answers: [{
+        questionId: "Q-001",
+        answer: "新会话恢复当前节点。",
+        source: "user",
+        updates: { goal: "新会话恢复当前节点。" }
+      }]
+    }), "utf8");
+    const answered = await runJson(["requirement", "answer", "--input", answerPath], root);
+    assert.equal(answered.exitCode, 0);
+    assert.equal(answered.response.action, "requirement.clarify");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("analyze 只读返回稳定诊断和下一动作", async () => {
   const root = await mkdtemp(join(tmpdir(), "code-helper-analyze-cli-"));
   try {

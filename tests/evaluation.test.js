@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -169,3 +169,179 @@ test("显式 Agent runner 在临时项目执行并提供真实 Token 与轮次�
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("Agent runner 超时后被终止并返回稳定评测失败诊断", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-evaluation-agent-timeout-"));
+  const runnerPath = join(root, "timeout-runner.mjs");
+  try {
+    await writeFile(runnerPath, "setInterval(() => undefined, 1000);\n", "utf8");
+    const scenario = {
+      schemaVersion: 1,
+      id: "agent-runner-timeout",
+      name: "Agent runner 超时",
+      description: "验证挂起 runner 被资源边界终止。",
+      fixtureFiles: [],
+      agent: { prompt: "执行检查。" },
+      steps: [{
+        id: "version",
+        description: "读取版本",
+        args: ["version", "--json"],
+        assertions: [{ type: "exitCode", equals: 0 }]
+      }]
+    };
+
+    const report = await runWorkflowEvaluation(scenario, {
+      sampleCount: 3,
+      processTimeoutMs: 50,
+      agentRunner: { executablePath: process.execPath, args: [runnerPath] }
+    });
+    assert.equal(report.passed, false);
+    assert.equal(report.samples.every((sample) => sample.agent?.failureCode === "process_timeout"), true);
+    assert.equal(report.diagnostics.some((item) => item.code === "process_timeout"), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Agent runner 超时时终止继承 stdio 的完整进程树", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-evaluation-agent-tree-timeout-"));
+  const runnerPath = join(root, "tree-runner.mjs");
+  const pidLogPath = join(root, "descendant-pids.txt");
+  try {
+    await writeFile(runnerPath, `
+      import { spawn } from "node:child_process";
+      import { appendFileSync } from "node:fs";
+      const descendant = spawn(process.execPath, ["-e", "setInterval(() => undefined, 1000)"], {
+        stdio: "inherit"
+      });
+      appendFileSync(process.argv[2], String(descendant.pid) + "\\n", "utf8");
+      setInterval(() => undefined, 1000);
+    `, "utf8");
+    const scenario = {
+      schemaVersion: 1,
+      id: "agent-runner-tree-timeout",
+      name: "Agent runner 进程树超时",
+      description: "验证继承 stdio 的后代不会阻塞评测结束。",
+      fixtureFiles: [],
+      agent: { prompt: "执行检查。" },
+      steps: [{
+        id: "version",
+        description: "读取版本",
+        args: ["version", "--json"],
+        assertions: [{ type: "exitCode", equals: 0 }]
+      }]
+    };
+
+    const startedAt = Date.now();
+    const report = await runWorkflowEvaluation(scenario, {
+      sampleCount: 3,
+      processTimeoutMs: 75,
+      agentRunner: { executablePath: process.execPath, args: [runnerPath, pidLogPath] }
+    });
+    assert.equal(report.samples.every((sample) => sample.agent?.failureCode === "process_timeout"), true);
+    assert.equal(Date.now() - startedAt < 10_000, true, "进程树终止不得超过受控宽限期");
+
+    const descendantPids = (await readFile(pidLogPath, "utf8"))
+      .trim()
+      .split(/\s+/u)
+      .map(Number);
+    assert.equal(descendantPids.length, 3);
+    for (const pid of descendantPids) {
+      assert.equal(await waitForProcessExit(pid, 2_000), true, `后代进程 ${pid} 应被终止`);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("子进程输出超过字节上限后被终止且报告稳定失败码", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-evaluation-output-limit-"));
+  const executablePath = join(root, "noisy-cli.mjs");
+  try {
+    await writeFile(executablePath, "process.stdout.write('x'.repeat(4096)); setInterval(() => undefined, 1000);\n", "utf8");
+    const scenario = {
+      schemaVersion: 1,
+      id: "cli-output-limit",
+      name: "CLI 输出上限",
+      description: "验证持续输出的 CLI 被资源边界终止。",
+      fixtureFiles: [],
+      steps: [{
+        id: "version",
+        description: "读取版本",
+        args: ["version", "--json"],
+        assertions: [{ type: "exitCode", equals: 0 }]
+      }]
+    };
+
+    const report = await runWorkflowEvaluation(scenario, {
+      sampleCount: 3,
+      executablePath,
+      processTimeoutMs: 2_000,
+      processOutputLimitBytes: 128
+    });
+    assert.equal(report.passed, false);
+    assert.equal(report.samples.every((sample) => sample.steps[0].failureCode === "stdout_limit_exceeded"), true);
+    assert.equal(report.samples.every((sample) => sample.steps[0].stdoutBytes === 128), true);
+    assert.equal(report.diagnostics.some((item) => item.code === "stdout_limit_exceeded"), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("子进程 stderr 超过字节上限时使用独立稳定失败码", async () => {
+  const root = await mkdtemp(join(tmpdir(), "code-helper-evaluation-stderr-limit-"));
+  const executablePath = join(root, "noisy-stderr-cli.mjs");
+  try {
+    await writeFile(executablePath, "process.stderr.write('x'.repeat(4096)); setInterval(() => undefined, 1000);\n", "utf8");
+    const report = await runWorkflowEvaluation({
+      schemaVersion: 1,
+      id: "cli-stderr-limit",
+      name: "CLI stderr 上限",
+      description: "验证 stderr 持续输出的 CLI 被资源边界终止。",
+      fixtureFiles: [],
+      steps: [{
+        id: "version",
+        description: "读取版本",
+        args: ["version", "--json"],
+        assertions: [{ type: "exitCode", equals: 0 }]
+      }]
+    }, {
+      sampleCount: 3,
+      executablePath,
+      processTimeoutMs: 2_000,
+      processOutputLimitBytes: 128
+    });
+    assert.equal(report.samples.every((sample) => sample.steps[0].failureCode === "stderr_limit_exceeded"), true);
+    assert.equal(report.samples.every((sample) => sample.steps[0].stderrBytes === 128), true);
+    assert.equal(report.diagnostics.some((item) => item.code === "stderr_limit_exceeded"), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("评测公共 API 拒绝非正整数资源边界", async () => {
+  await assert.rejects(
+    () => runWorkflowEvaluation(BUILTIN_MINIMAL_SCENARIO, { sampleCount: 3, processTimeoutMs: 0 }),
+    /processTimeoutMs 必须是 1 到/u
+  );
+  await assert.rejects(
+    () => runWorkflowEvaluation(BUILTIN_MINIMAL_SCENARIO, { sampleCount: 3, processOutputLimitBytes: 1.5 }),
+    /processOutputLimitBytes 必须是 1 到/u
+  );
+});
+
+/** 在 macOS/Windows 上轮询 PID 是否退出；ESRCH 表示进程已经不存在。 */
+async function waitForProcessExit(pid, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if (error?.code === "ESRCH") {
+        return true;
+      }
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+  return false;
+}
